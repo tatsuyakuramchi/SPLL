@@ -143,10 +143,47 @@ GAS 上では `google.script.run` 経由で実データに切り替わるよう�
 - **個人情報（住所・口座・電話）は Gemini に送らない**（契約条件と作品データのみ）。
 - AI結果やパトロール未実施を理由に、既発生のパートナー配分を当然に消滅させない。
 
+## AI作品審査（runAiReview_）
+
+`enqueueAiReview_` が提出ファイルから `Submissions`/`Submission_Files` と `AI_Review_Jobs`(QUEUED)
+を作成し、`runAiReview_(aiReviewId)` が次を実行します（即時試行→失敗時は `batch_runAiReviews_` が再試行）。
+
+1. 提出ファイルBlobを取得（**作品ファイルのみ。個人情報はGeminiに送らない**）。
+2. `Works_Master` の許諾/禁止要素・クレジット・媒体と `Review_Rules`（有効期間内）を構造化（`buildRules_`）。
+3. `geminiReview_`（responseSchema 構造化出力）→ `AI_Findings` へ記録。
+4. 総合結果で経路別ルーティング（`postReviewRouting_`）:
+   - **A経路**：HIGH_RISK/UNREADABLE → `REJECTED`＋`retention_until`（取得+1年）。PASS候補/要確認 →
+     CloudSign 契約リンク送付＋`LINK_SENT`。
+   - **B経路**：HIGH_RISK → `Compliance_Alerts` 起票（`settlement_block` は空＝**既発生配分は止めない**）。
+5. 失敗時は `retry_count` を加算し `AI_MAX_RETRY`(3) 未満なら QUEUED、以上で ERROR。
+
+レスポンスは HTTP エラー時に例外化し、構造化結果が得られない場合は安全側（`REVIEW_REQUIRED`）へ倒します。
+
+## 半期清算（batch_generateStatements）
+
+確定済（`APPROVED`/`LOCKED`）の `Usage_Reports` を集計し、パートナー別の計算書（仕入明細書方式・DRAFT）
+を生成します。計算チェーン（per 報告）:
+
+```
+net_sales × royalty_rate = license_fee × (1 − handling_fee_rate) = partner_share
+```
+
+- `royalty_rate` は `Works_Master.royalty_rate` 列、無ければ Config `DEFAULT_ROYALTY_RATE`(既定0.10)。
+  事務手数料は Config `HANDLING_FEE_RATE`(既定0.30)。各値は `rate_snapshot` に保存。
+- 作品→パートナーは `partner_id` 列 → 出版社名突合 → 疑似パートナー の順で解決（`resolveWorkPartner_`）。
+- `Settlements`／`Settlement_Details`／`Settlement_Statements`(DRAFT・`reg_number_snapshot`) を生成。
+  当期の有効な計算書が既にある場合は二重生成を避けてスキップ。
+
+ライフサイクル：生成(DRAFT) → `admin_approveStatement`(APPROVED) → `batch_sendApprovedStatements_`
+（CloudSign送信＝SENT・発効日＝本日・**異議期限＝発効日+1ヶ月**） → `batch_confirmDeemed`（みなし確認＝CONFIRMED）。
+管理コンソール「入金・清算」から `admin_generateStatements` / `admin_sendApprovedStatements` /
+`admin_runAiReviews` を手動起動できます（時間主導トリガーとも共用）。
+
 ## 実装時に確認・補完する箇所（設計書 §5・§9 由来の TODO）
 
-- **CloudSign API**：`cloudSignSend_` / `cloudSignAccessToken_` は最新 API 仕様で実装。
-- **Vertex AI Gemini**：モデル・リージョン・データ所在地を確認。`runAiReview_`（Job 実行）の実装。
+- **CloudSign API**：`cloudSignSend_` / `cloudSignAccessToken_` / `cloudSignSendStatement_`
+  は最新 API 仕様で実装（送信・受信者設定・テンプレ差込・みなし合意条項）。
+- **Vertex AI Gemini**：モデル・リージョン・データ所在地を確認（`runAiReview_` の審査ロジックは実装済）。
 - **作品提出ページ**：`?page=upload` の専用UI（現状は report テンプレートを暫定流用）。
-- **半期清算**：`batch_generateStatements` の集計・スナップショット・計算書PDF生成。
+- **計算書PDF**：`batch_sendApprovedStatements_` 内の仕入明細書PDF生成（`pdf_file_id` 格納）。
 - **Q-01/Q-03/Q-05a**：A/B 振り分け運用、B経路解除条項、未成年締結ロジック（条文確定後）。

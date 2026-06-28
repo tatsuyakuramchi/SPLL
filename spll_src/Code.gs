@@ -206,10 +206,25 @@ function sendUploadLink_(contractId, email){
   MailApp.sendEmail(email, 'SPLL 作品提出のご案内', '提出はこちら: '+url);
 }
 function enqueueAiReview_(ctx){
+  ctx = ctx || {};
+  let submissionId = ctx.submissionId || '';
+  // 提出ファイルがあれば Submission / Submission_File を用意（A経路は申込時に作品提出）
+  if(ctx.fileId && !submissionId){
+    submissionId = newId_('SUB');
+    appendRow_(ssOps_(),'Submissions',{ submission_id:submissionId,
+      application_id:ctx.applicationId||'', contract_id:ctx.contractId||'',
+      submission_no:1, status:'SUBMITTED', submitted_at:new Date().toISOString() });
+    const meta = fileMeta_(ctx.fileId);
+    appendRow_(ssOps_(),'Submission_Files',{ submission_file_id:newId_('SBF'),
+      submission_id:submissionId, drive_file_id:ctx.fileId, sha256:meta.sha256, mime:meta.mime, size:meta.size });
+  }
   const aiId = newId_('AIR');
   appendRow_(ssOps_(),'AI_Review_Jobs',{ ai_review_id:aiId, application_id:ctx.applicationId||'',
-    submission_id:ctx.submissionId||'', model:cfg_('GEMINI_MODEL'), status:'QUEUED', retry_count:0 });
-  // 時間主導トリガー or 即時で runAiReview_(aiId)
+    submission_id:submissionId, model:cfg_('GEMINI_MODEL'), prompt_version:AI_PROMPT_VERSION, status:'QUEUED', retry_count:0 });
+  logEvent_('ai_review', aiId, 'system', null, {status:'QUEUED'});
+  // 即時実行を試行（失敗時はQUEUEDのまま batch_runAiReviews_ が再試行）
+  try{ runAiReview_(aiId); }catch(e){ /* バッチ再試行に委ねる */ }
+  return aiId;
 }
 /** Vertex AI Gemini 一次審査（response schema 指定・構造化出力） */
 function geminiReview_(fileBlob, rules){
@@ -225,6 +240,8 @@ function geminiReview_(fileBlob, rules){
   const res = UrlFetchApp.fetch(url, { method:'post', contentType:'application/json',
     headers:{ Authorization:'Bearer '+ScriptApp.getOAuthToken() },
     payload: JSON.stringify(payload), muteHttpExceptions:true });
+  const code = res.getResponseCode();
+  if(code < 200 || code >= 300) throw new Error('Gemini HTTP '+code+': '+res.getContentText());
   return JSON.parse(res.getContentText());
 }
 const REVIEW_SCHEMA = { type:'object', properties:{
@@ -241,6 +258,167 @@ function buildReviewPrompt_(rules){
     '次の作品別ルールと契約条件に対する適合候補・要確認・高リスク候補を抽出してください。',
     JSON.stringify(rules)
   ].join('\n');
+}
+
+// ---- 4.1 AI審査ジョブ実行（runAiReview_） ----
+const AI_PROMPT_VERSION = 'v1';
+const AI_MAX_RETRY = 3;
+
+/** QUEUEDのAI審査ジョブをまとめて実行（時間主導トリガー想定） */
+function batch_runAiReviews_(){
+  const jobs = readRows_(ssOps_(),'AI_Review_Jobs')
+    .filter(j => j.status==='QUEUED' && (parseInt(j.retry_count||'0',10)||0) < AI_MAX_RETRY);
+  let completed = 0;
+  jobs.forEach(j => { try{ runAiReview_(j.ai_review_id); completed++; }catch(e){ /* 失敗はジョブ内で記録 */ } });
+  return { processed: jobs.length, completed: completed };
+}
+
+/** 1件のAI審査を実行：ファイル取得→Gemini→Findings記録→経路別ルーティング */
+function runAiReview_(aiReviewId){
+  const job = readRows_(ssOps_(),'AI_Review_Jobs').find(j => j.ai_review_id===aiReviewId);
+  if(!job) throw new Error('AI review job not found: '+aiReviewId);
+  if(job.status==='COMPLETED') return 'COMPLETED';          // 冪等
+  updateRow_(ssOps_(),'AI_Review_Jobs','ai_review_id',aiReviewId,{status:'SCANNING'});
+  try{
+    const blob = resolveSubmissionBlob_(job);
+    if(!blob) throw new Error('提出ファイルが見つかりません');
+    const work  = resolveJobWork_(job);
+    const rules = buildRules_(work);
+    const parsed = parseGeminiResult_(geminiReview_(blob, rules));   // 個人情報は送らず作品＋条件のみ
+    writeFindings_(aiReviewId, parsed.findings);
+    const overall = parsed.overall_result
+      || (parsed.findings.length ? worstResult_(parsed.findings.map(f => ({severity:f.severity, result:f.result}))) : 'REVIEW_REQUIRED');
+    updateRow_(ssOps_(),'AI_Review_Jobs','ai_review_id',aiReviewId,{status:'COMPLETED'});
+    logEvent_('ai_review', aiReviewId, 'gemini', null, {overall_result:overall, findings:parsed.findings.length});
+    postReviewRouting_(job, overall);
+    return overall;
+  }catch(err){
+    const retry  = (parseInt(job.retry_count||'0',10)||0) + 1;
+    const status = retry >= AI_MAX_RETRY ? 'ERROR' : 'QUEUED';
+    updateRow_(ssOps_(),'AI_Review_Jobs','ai_review_id',aiReviewId,{status:status, retry_count:retry});
+    logEvent_('ai_review', aiReviewId, 'system', null, {error:String(err), retry_count:retry, status:status});
+    throw err;
+  }
+}
+
+/** ジョブの提出ファイル（先頭）をBlobで取得。作品ファイルのみで個人情報は含めない。 */
+function resolveSubmissionBlob_(job){
+  if(!job.submission_id) return null;
+  const f = readRows_(ssOps_(),'Submission_Files').find(x => String(x.submission_id)===String(job.submission_id));
+  if(!f || !f.drive_file_id) return null;
+  return DriveApp.getFileById(f.drive_file_id).getBlob();
+}
+
+/** ジョブ対象の作品（Works_Masterの行）を解決（A=申込, B=提出→契約 経由） */
+function resolveJobWork_(job){
+  let workId = '';
+  if(job.application_id){
+    const a = readRows_(ssOps_(),'Applications').find(x => x.application_id===job.application_id);
+    if(a) workId = a.work_id;
+  }
+  if(!workId && job.submission_id){
+    const s = readRows_(ssOps_(),'Submissions').find(x => x.submission_id===job.submission_id);
+    if(s && s.contract_id){
+      const c = readRows_(ssOps_(),'Contracts').find(x => x.contract_id===s.contract_id);
+      if(c) workId = c.work_id;
+    }
+  }
+  return readRows_(ssMaster_(),'Works_Master').find(w => w.work_id===workId) || { work_id:workId };
+}
+
+/** 作品別ルール＋契約条件を構造化（個人情報は含めない） */
+function buildRules_(work){
+  const rules = readRows_(ssMaster_(),'Review_Rules')
+    .filter(r => r.work_id===work.work_id && ruleActive_(r))
+    .map(r => ({ rule_id:r.rule_id, category:r.category, text:r.rule_text, severity:r.severity }));
+  return {
+    work_id: work.work_id || '',
+    work_name: work.work_name || '',
+    allowed_elements: csv_(work.ok_elements),
+    prohibited_elements: csv_(work.no_elements),
+    required_credit: work.credit_text || '',
+    allowed_media: csv_(work.media),
+    rules: rules
+  };
+}
+function ruleActive_(r){
+  const now = new Date();
+  if(r.effective_from && new Date(r.effective_from) > now) return false;
+  if(r.effective_to   && new Date(r.effective_to)   < now) return false;
+  return true;
+}
+function csv_(v){ return String(v||'').split(',').map(s => s.trim()).filter(Boolean); }
+
+/** Vertex生レスポンスから構造化結果(JSON)を取り出す */
+function parseGeminiResult_(raw){
+  let obj = raw;
+  try{
+    if(raw && raw.candidates && raw.candidates[0]){
+      const parts = raw.candidates[0].content && raw.candidates[0].content.parts;
+      const text  = parts && parts[0] && parts[0].text;
+      if(text) obj = JSON.parse(text);
+    }
+  }catch(e){ /* 解析失敗時は空扱い → REVIEW_REQUIRED に倒す */ }
+  if(!obj || typeof obj !== 'object') obj = {};
+  if(!Array.isArray(obj.findings)) obj.findings = [];
+  return obj;
+}
+
+/** Findings を AI_Findings へ記録 */
+function writeFindings_(aiReviewId, findings){
+  (findings||[]).forEach(f => appendRow_(ssOps_(),'AI_Findings',{
+    finding_id: newId_('FND'), ai_review_id: aiReviewId,
+    rule_id: f.rule_id||'', severity: f.severity||'', result: f.result||'',
+    page: f.page||'', evidence: f.evidence||'', confidence: f.confidence||''
+  }));
+}
+
+/** 総合結果に応じた経路別処理（A=締結リンク制御／B=コンプラ・アラート） */
+function postReviewRouting_(job, overall){
+  const high = (overall==='HIGH_RISK' || overall==='UNREADABLE');
+  if(job.application_id){
+    // A経路：審査後に契約リンク送付可否を決定
+    const appId = job.application_id;
+    updateRow_(ssOps_(),'Applications','application_id',appId,{status:'AI_SCREENED'});
+    if(high){
+      const until = addDaysIso_(CFG.RETENTION_DAYS_REJECTED);   // 落選データは1年保有→自動削除
+      updateRow_(ssOps_(),'Applications','application_id',appId,{status:'REJECTED', retention_until:until});
+      logEvent_('application', appId, 'system', {status:'AI_SCREENED'}, {status:'REJECTED', overall_result:overall});
+    }else{
+      // PASS候補／要確認 → 契約リンク（CloudSign）送付
+      const app = readRows_(ssOps_(),'Applications').find(a => a.application_id===appId);
+      if(app) sendContractForApplication_(app);
+      updateRow_(ssOps_(),'Applications','application_id',appId,{status:'LINK_SENT'});
+      logEvent_('application', appId, 'system', {status:'AI_SCREENED'}, {status:'LINK_SENT', overall_result:overall});
+    }
+  }else{
+    // B経路：締結後審査。高リスクはアラート起票（既発生のパートナー配分は当然には消滅させない）
+    if(high) createComplianceAlert_(job.submission_id, overall);
+  }
+}
+
+/** A経路：審査通過後のCloudSign契約送信 */
+function sendContractForApplication_(app){
+  cloudSignSend_({ applicationId: app.application_id,
+    payload: { email: app.applicant_email, name: app.applicant_name }, work: api_getWork(app.work_id) });
+}
+
+/** コンプライアンス・アラート起票（settlement_block空＝清算は止めない） */
+function createComplianceAlert_(submissionId, overall){
+  const sub = readRows_(ssOps_(),'Submissions').find(s => s.submission_id===submissionId) || {};
+  appendRow_(ssOps_(),'Compliance_Alerts',{ alert_id:newId_('ALR'),
+    contract_id: sub.contract_id||'', submission_id: submissionId||'',
+    severity:'HIGH', status:'OPEN', settlement_block:'' });
+  logEvent_('compliance_alert', submissionId, 'system', null, {severity:'HIGH', overall_result:overall});
+}
+
+/** Drive上のファイルのメタ情報（sha256/mime/size） */
+function fileMeta_(fileId){
+  try{
+    const file = DriveApp.getFileById(fileId);
+    const blob = file.getBlob();
+    return { mime: blob.getContentType(), size: file.getSize(), sha256: sha256Bytes_(blob.getBytes()) };
+  }catch(e){ return { mime:'', size:'', sha256:'' }; }
 }
 
 // ============================================================
@@ -461,28 +639,139 @@ function admin_listSettlements(){
   }));
 }
 
-/** 計算書の承認（DRAFT→APPROVED）。送信は batch_sendStatement_ 側で実施。 */
+/** 計算書の承認（DRAFT→APPROVED）。送信は admin_sendApprovedStatements で実施。 */
 function admin_approveStatement(statementId){
   updateRow_(ssOps_(),'Settlement_Statements','statement_id',statementId,{status:'APPROVED'});
   logEvent_('settlement_statement', statementId, actor_(), null, {status:'APPROVED'});
   return true;
 }
 
+// ---- バッチ手動起動（管理コンソールから・時間主導トリガーと共用） ----
+/** QUEUEDのAI審査ジョブを実行 */
+function admin_runAiReviews(){ const r = batch_runAiReviews_(); logEvent_('batch','ai_reviews',actor_(),null,r); return r; }
+/** 当期（または指定期）の計算書をDRAFT生成 */
+function admin_generateStatements(period){ const r = batch_generateStatements(period||currentPeriod_()); logEvent_('batch','generate_statements',actor_(),null,r); return r; }
+/** 承認済の計算書をCloudSign送信（みなし合意・発効日＋1ヶ月） */
+function admin_sendApprovedStatements(){ const r = batch_sendApprovedStatements_(); logEvent_('batch','send_statements',actor_(),null,r); return r; }
+
 // ============================================================
 // 7. 半期清算・計算書（仕入明細書方式・みなし合意）
 // ============================================================
-/** 半期バッチ：APPROVED/LOCKEDの報告を集計→計算書（DRAFT）生成 */
+/**
+ * 半期バッチ：確定済(APPROVED/LOCKED)の利用報告を集計し、パートナー別の
+ * 計算書（仕入明細書方式・DRAFT）を生成する。
+ * 計算チェーン（per Usage_Report）:
+ *   net_sales → ×royalty_rate = license_fee → ×(1 - handling_fee_rate) = partner_share
+ *   （rate は作品の royalty_rate 列、無ければ Config の既定値。スナップショットを保存）
+ * 既に当期の有効な計算書がある場合は二重生成を避けてスキップする。
+ */
 function batch_generateStatements(period){
-  // TODO: Usage_Reports集計→11.1計算チェーン→スナップショット→Settlement_Statements(DRAFT)
-  // 承認後 batch_sendStatement_() でCloudSign送信（みなし合意付き、発効日＋1ヶ月）
+  period = period || currentPeriod_();
+  const existing = readRows_(ssOps_(),'Settlement_Statements')
+    .filter(s => String(s.period)===String(period) && s.status!=='SUPERSEDED');
+  if(existing.length) return { period:period, skipped:true,
+    reason:'当期の計算書が既に存在します（先に SUPERSEDED へ）', statements:existing.length };
+
+  const reports = readRows_(ssOps_(),'Usage_Reports')
+    .filter(r => String(r.period)===String(period) && (r.status==='APPROVED' || r.status==='LOCKED'));
+  const contracts = readRows_(ssOps_(),'Contracts');
+  const ctrWork = {}; contracts.forEach(c => { ctrWork[c.contract_id] = c.work_id; });
+  const workById = {}; readRows_(ssMaster_(),'Works_Master').forEach(w => { workById[w.work_id] = w; });
+  const partners = readRows_(ssOps_(),'Partners');
+
+  const royaltyDefault = num_(getConfig_('DEFAULT_ROYALTY_RATE', '0.10'));   // 既定ロイヤリティ率
+  const handlingRate   = num_(getConfig_('HANDLING_FEE_RATE',   '0.30'));    // 事務手数料率
+
+  const byPartner = {};  // partner_id -> { partner, details:[], total }
+  reports.forEach(r => {
+    const work = workById[ctrWork[r.contract_id]] || { work_id:ctrWork[r.contract_id]||'', publisher:'' };
+    const partner = resolveWorkPartner_(work, partners);
+    const net = num_(r.net_sales);
+    const royaltyRate = (work.royalty_rate!==undefined && work.royalty_rate!=='') ? num_(work.royalty_rate) : royaltyDefault;
+    const licenseFee   = Math.round(net * royaltyRate);
+    const partnerShare = Math.round(licenseFee * (1 - handlingRate));
+    const key = partner.partner_id;
+    if(!byPartner[key]) byPartner[key] = { partner:partner, details:[], total:0 };
+    byPartner[key].details.push({
+      contract_id: r.contract_id,
+      rate_snapshot: JSON.stringify({ royalty_rate:royaltyRate, handling_fee_rate:handlingRate,
+        net_sales:net, license_fee:licenseFee, report_id:r.report_id }),
+      amount: partnerShare
+    });
+    byPartner[key].total += partnerShare;
+  });
+
+  const out = [];
+  Object.keys(byPartner).forEach(pid => {
+    const grp = byPartner[pid];
+    const settlementId = newId_('STL');
+    appendRow_(ssOps_(),'Settlements',{ settlement_id:settlementId, partner_id:pid,
+      period:period, amount:grp.total, status:'DRAFT', hold_reason:'' });
+    grp.details.forEach(d => appendRow_(ssOps_(),'Settlement_Details',{
+      settlement_detail_id:newId_('STD'), settlement_id:settlementId,
+      contract_id:d.contract_id, rate_snapshot:d.rate_snapshot, amount:d.amount }));
+    const statementId = newId_('STM');
+    appendRow_(ssOps_(),'Settlement_Statements',{ statement_id:statementId,
+      settlement_id:settlementId, partner_id:pid, period:period, type:'PARTNER',
+      reg_number_snapshot: grp.partner.invoice_reg_number || '',   // 登録番号(T番号)スナップショット
+      status:'DRAFT', effective_date:'', objection_due:'', pdf_file_id:'', sheet_id:'',
+      version:1, sent_at:'', confirmed_at:'' });
+    logEvent_('settlement_statement', statementId, 'system', null,
+      {status:'DRAFT', period:period, partner_id:pid, amount:grp.total, details:grp.details.length});
+    out.push({ statement_id:statementId, partner:grp.partner.name, amount:grp.total, details:grp.details.length });
+  });
+  return { period:period, reports:reports.length, generated:out.length, statements:out };
 }
-/** 日次：異議期間（発効日＋1ヶ月）到来かつ無申出を CONFIRMED へ */
+
+/** 作品→パートナーの解決（partner_id列 → 出版社名突合 → 疑似パートナー） */
+function resolveWorkPartner_(work, partners){
+  if(work.partner_id){
+    const p = partners.find(x => x.partner_id===work.partner_id);
+    if(p) return p;
+  }
+  const pub = String(work.publisher||'');
+  if(pub){
+    const p = partners.find(x => x.name && (pub.indexOf(x.name)>=0 || String(x.name).indexOf(pub)>=0));
+    if(p) return p;
+  }
+  return { partner_id: pub ? ('PUB:'+pub) : 'UNKNOWN', name: pub || '(未割当)', invoice_reg_number:'' };
+}
+
+/**
+ * 承認済(APPROVED)の計算書を CloudSign 送信（みなし合意）：
+ * 発効日=本日、異議期限=発効日+1ヶ月（OBJECTION_DAYS_RULE）に設定し SENT へ。
+ */
+function batch_sendApprovedStatements_(){
+  const today = new Date();
+  const eff = today.toISOString().slice(0,10);
+  const due = addMonthsIso_(today, 1).slice(0,10);
+  const list = readRows_(ssOps_(),'Settlement_Statements').filter(s => s.status==='APPROVED');
+  list.forEach(s => {
+    cloudSignSendStatement_(s);   // TODO: 仕入明細書PDF生成→CloudSign送信（みなし合意条項）
+    updateRow_(ssOps_(),'Settlement_Statements','statement_id',s.statement_id,
+      { status:'SENT', effective_date:eff, objection_due:due, sent_at:today.toISOString() });
+    updateRow_(ssOps_(),'Settlements','settlement_id',s.settlement_id,{ status:'SENT' });
+    logEvent_('settlement_statement', s.statement_id, 'system', {status:'APPROVED'},
+      {status:'SENT', effective_date:eff, objection_due:due});
+  });
+  return { sent: list.length };
+}
+/** 計算書のCloudSign送信（実装時に最新API確認） */
+function cloudSignSendStatement_(statement){
+  // TODO: 仕入明細書PDFを生成 → CloudSign documents作成 → 送信（みなし合意付き）→ document_id控え
+}
+
+/** 日次：異議期間（発効日＋1ヶ月）到来かつ無申出を CONFIRMED へ（みなし確認） */
 function batch_confirmDeemed(){
   const now = new Date();
   readRows_(ssOps_(),'Settlement_Statements')
-    .filter(s=>s.status==='SENT' && new Date(s.objection_due) <= now)
-    .forEach(s=> updateRow_(ssOps_(),'Settlement_Statements','statement_id',s.statement_id,
-      {status:'CONFIRMED', confirmed_at: now.toISOString()}));
+    .filter(s=> s.status==='SENT' && s.objection_due && new Date(s.objection_due) <= now)
+    .forEach(s=> {
+      updateRow_(ssOps_(),'Settlement_Statements','statement_id',s.statement_id,
+        {status:'CONFIRMED', confirmed_at: now.toISOString()});
+      if(s.settlement_id) updateRow_(ssOps_(),'Settlements','settlement_id',s.settlement_id,{status:'CONFIRMED'});
+      logEvent_('settlement_statement', s.statement_id, 'system', {status:'SENT'}, {status:'CONFIRMED'});
+    });
 }
 
 // ============================================================
@@ -636,5 +925,8 @@ function admin_saveFormRunConfig(c){
 
 // ---- utils ----
 function hash_(s){ return Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, s)); }
+function sha256Bytes_(bytes){ return Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes)); }
 function addDaysIso_(d){ const t=new Date(); t.setDate(t.getDate()+d); return t.toISOString(); }
+function addMonthsIso_(date, m){ const t=new Date(date.getTime()); t.setMonth(t.getMonth()+m); return t.toISOString(); }
+function num_(v){ const n=parseFloat(String(v).replace(/[^0-9.\-]/g,'')); return isNaN(n)?0:n; }
 function currentPeriod_(){ const d=new Date(); return d.getFullYear()+(d.getMonth()<6?'H1':'H2'); }
