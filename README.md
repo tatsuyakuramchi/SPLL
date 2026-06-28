@@ -51,17 +51,46 @@ SPLL/
 
 ## セットアップ・デプロイ（clasp）
 
-```bash
-npm i -g @google/clasp
-clasp login
+ルートに `package.json`（clasp と npm スクリプト）を用意しています。`clasp` 本体はローカルに
+インストールし、**`clasp login` はブラウザ認証が必要なためローカルで実行**してください
+（リモート/CI環境では不可）。push 対象は `spll_src/.claspignore` で GAS ソースのみに限定しています。
 
-cd spll_src
-cp .clasp.json.template .clasp.json   # scriptId を記入（プロジェクトごとに用意）
-clasp push                            # ローカル → GAS
-clasp deploy                          # Web アプリとして公開（バージョン管理）
+```bash
+npm install              # devDependency の @google/clasp を取得
+npm run login            # ブラウザでGoogle認証（ローカルのみ）
+
+# 新規にWebアプリのGASプロジェクトを作る場合（推奨・ワンショット）
+npm run setup            # clasp create(webapp) → appsscript.json復元 → clasp push -f
+
+#   ↑の内訳を手動でやる場合:
+#   npm run create       # webアプリ型でGASプロジェクト作成（spll_src/.clasp.json生成）
+#   git checkout -- spll_src/appsscript.json   # create が上書きする既定マニフェストを本書の内容へ戻す
+#   npm run push         # ローカル → GAS
+
+# 既存のGASプロジェクトに接続する場合
+cd spll_src && cp .clasp.json.template .clasp.json   # scriptId を記入 → 戻って
+npm run push
+
+# 公開
+npm run deploy           # Webアプリとしてデプロイ（バージョン管理）
+npm run open:web         # 公開URLをブラウザで開く
 ```
 
+主な npm スクリプト：`login` / `setup` / `create` / `clone` / `push` / `push:watch` /
+`deploy` / `deployments` / `open` / `open:web` / `logs` / `status`。
+
 `.clasp.json`（実 scriptId を含む）は `.gitignore` 済み。コミットしないでください。
+
+### Webアプリ公開設定（appsscript.json）
+
+`spll_src/appsscript.json` の `webapp` は `executeAs: USER_DEPLOYING` / `access: ANYONE_ANONYMOUS`
+です。公開範囲は用途に応じてデプロイ時に調整してください（GAS①公開入口=一般公開、
+GAS②契約・審査=限定＋Webhook、GAS③管理コンソール=社内GWS限定）。初回デプロイ時に OAuth スコープ
+（Spreadsheet/Drive/外部リクエスト/メール送信/cloud-platform）の承認が求められます。
+
+> 本リポジトリは3プロジェクト分を1つの `Code.gs` に集約した参照実装です。まずは単一プロジェクトとして
+> デプロイして動作確認し、運用に合わせて GAS①②③へ分割してください（`doGet` の `page` 出し分けにより
+> 単一デプロイでも index/admin/report/upload を切り替え可能）。
 
 ### ScriptProperties（秘密情報・設定）
 

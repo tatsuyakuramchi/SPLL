@@ -1,0 +1,9 @@
+# clasp が GAS へ push する対象を限定する（rootDir = spll_src）。
+# まず全て無視し、必要なソースだけを許可リストで戻す。
+**/**
+
+!appsscript.json
+!Code.gs
+!index.html
+!admin.html
+!report.html
