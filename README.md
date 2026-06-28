@@ -179,11 +179,28 @@ net_sales × royalty_rate = license_fee × (1 − handling_fee_rate) = partner_s
 管理コンソール「入金・清算」から `admin_generateStatements` / `admin_sendApprovedStatements` /
 `admin_runAiReviews` を手動起動できます（時間主導トリガーとも共用）。
 
+## CloudSign 連携（サンドボックス既定）
+
+電子契約・計算書送信を CloudSign Web API で実装。**試験運用のためサンドボックスを既定**とし、
+`CLOUDSIGN_SANDBOX` を `false` に設定したときのみ本番（`api.cloudsign.jp`）へ切り替わります。
+
+- `cloudSignAccessToken_`：`POST /token?client_id=` でトークン取得、`CacheService` で短期キャッシュ。
+- `cs_fetch_`：API共通呼び出し（Bearer認証・multipart対応・HTTPエラーを例外化）。
+- `cloudSignSend_`：契約書作成 → ファイル添付（`CLOUDSIGN_TEMPLATE_ID` があればテンプレ差込、無ければ
+  規約テンプレートから生成した PDF）→ 当事者設定 → 送信 → `cloudsign_document_id` を Applications に控え。
+  **AI審査ジョブとは分離**し、CloudSign障害時はAI審査を失敗させず申込を保留（再送可）にします。
+- `cloudSignSendStatement_`：仕入明細書PDFを生成→Drive保存（`pdf_file_id`）→みなし合意付きで送信。
+- `doPost`（締結Webhook）：`document_id`/`documentID`/`id` と `event_type`/`status` の差異を吸収、
+  重複排除のうえ Contracts へ締結書戻し。**ステータス値は CloudSign 公式仕様で要確認**（`cs_isCompletedEvent_`）。
+- 管理コンソール「設定 › CloudSign API」に **接続テスト**ボタン（`admin_cloudSignTest`）。トークンは先頭のみ表示。
+
+> エンドポイント・ステータス値・Web​hookペイロードは CloudSign 公式 Web API ドキュメントで最新仕様の
+> 確認が必要です（本実装は標準的なフローに基づくサンドボックス向けの実装）。
+
 ## 実装時に確認・補完する箇所（設計書 §5・§9 由来の TODO）
 
-- **CloudSign API**：`cloudSignSend_` / `cloudSignAccessToken_` / `cloudSignSendStatement_`
-  は最新 API 仕様で実装（送信・受信者設定・テンプレ差込・みなし合意条項）。
+- **CloudSign 仕様確認**：`/documents`・`/files`・`/participants`・`/sent` の各エンドポイントと
+  締結ステータス値（`cs_isCompletedEvent_`）、Webhook署名検証を公式仕様で確認・調整。
 - **Vertex AI Gemini**：モデル・リージョン・データ所在地を確認（`runAiReview_` の審査ロジックは実装済）。
 - **作品提出ページ**：`?page=upload` の専用UI（現状は report テンプレートを暫定流用）。
-- **計算書PDF**：`batch_sendApprovedStatements_` 内の仕入明細書PDF生成（`pdf_file_id` 格納）。
 - **Q-01/Q-03/Q-05a**：A/B 振り分け運用、B経路解除条項、未成年締結ロジック（条文確定後）。

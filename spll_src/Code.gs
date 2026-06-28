@@ -143,28 +143,104 @@ function createApplication_(payload){
 // ============================================================
 // 3. CloudSign API 送信・締結Webhook（D-11）
 // ============================================================
-/** CloudSign APIで契約書を作成・送信（実装時に最新のAPI仕様を確認） */
-function cloudSignSend_(ctx){
-  const token = cloudSignAccessToken_();
-  // TODO: documents作成 → 当事者(受信者)設定 → テンプレ差込 → send
-  // const res = UrlFetchApp.fetch('https://api.cloudsign.jp/documents', {...});
-  // CloudSignのdocument_idをApplicationsへ控える
-  // updateRow_(ssOps_(),'Applications','application_id',ctx.applicationId,{cloudsign_document_id: docId});
-}
+// ---- 3.1 CloudSign クライアント（サンドボックス既定） ----
+// ※ エンドポイント/ステータス値は CloudSign 公式 Web API ドキュメントで最新仕様を確認すること。
+//   サンドボックス: https://api-sandbox.cloudsign.jp ／ 本番: https://api.cloudsign.jp
+function cs_isSandbox_(){ return prop_('CLOUDSIGN_SANDBOX') !== 'false'; }   // 既定はサンドボックス
+function cs_baseUrl_(){ return cs_isSandbox_() ? 'https://api-sandbox.cloudsign.jp' : 'https://api.cloudsign.jp'; }
+
+/** アクセストークン取得（短期キャッシュ）。POST /token?client_id= */
 function cloudSignAccessToken_(){
+  const cache = CacheService.getScriptCache();
+  const hit = cache.get('cs_token');
+  if(hit) return hit;
   const clientId = prop_('CLOUDSIGN_CLIENT_ID');
-  const secret   = prop_('CLOUDSIGN_SECRET');
-  if(!clientId || !secret) throw new Error('CloudSign未設定：管理コンソール「設定」から登録してください');
-  // TODO: OAuth client_credentials等でアクセストークン取得
-  return 'TODO';
+  if(!clientId) throw new Error('CloudSign未設定：管理コンソール「設定」でClient IDを登録してください');
+  const res = cs_fetch_('POST', '/token?client_id=' + encodeURIComponent(clientId), null, { auth:false });
+  const token = res.access_token;
+  if(!token) throw new Error('CloudSignトークン取得失敗: ' + JSON.stringify(res));
+  const ttl = Math.max(60, Math.min((parseInt(res.expires_in||'3000',10) - 60), 21600)); // CacheServiceは最大6h
+  cache.put('cs_token', token, ttl);
+  return token;
+}
+
+/** CloudSign API 共通呼び出し。JSONを返す。opt.multipart=true でファイル送信。 */
+function cs_fetch_(method, path, body, opt){
+  opt = opt || {};
+  const headers = {};
+  if(opt.auth !== false) headers['Authorization'] = 'Bearer ' + cloudSignAccessToken_();
+  const params = { method: method, muteHttpExceptions: true, headers: headers };
+  if(body && opt.multipart){ params.payload = body; }                     // {field: Blob} → 自動でmultipart
+  else if(body){ params.contentType = 'application/json'; params.payload = JSON.stringify(body); }
+  const res  = UrlFetchApp.fetch(cs_baseUrl_() + path, params);
+  const code = res.getResponseCode();
+  const text = res.getContentText();
+  if(code < 200 || code >= 300) throw new Error('CloudSign ' + method + ' ' + path + ' → HTTP ' + code + ': ' + text);
+  try{ return text ? JSON.parse(text) : {}; }catch(e){ return { raw: text }; }
+}
+
+// ---- 3.2 書類ライフサイクル ----
+function cs_createDocument_(title, message){ return cs_fetch_('POST', '/documents', { title: title, message: message || '' }); }
+function cs_attachFile_(docId, blob, filename){ return cs_fetch_('POST', '/documents/' + docId + '/files', { uploadfile: blob.setName(filename || 'document.pdf') }, { multipart:true }); }
+function cs_attachFromTemplate_(docId, templateId){ return cs_fetch_('POST', '/documents/' + docId + '/files', { template_id: templateId }); }
+function cs_addParticipant_(docId, email, name){ return cs_fetch_('POST', '/documents/' + docId + '/participants', { email: email, name: name || '', organization: '' }); }
+function cs_sendDocument_(docId){ return cs_fetch_('POST', '/documents/' + docId + '/sent', {}); }
+
+/** 接続テスト（サンドボックス資格情報の確認用）。トークン全体は返さない。 */
+function admin_cloudSignTest(){
+  try{
+    const t = cloudSignAccessToken_();
+    return { ok:true, sandbox:cs_isSandbox_(), base:cs_baseUrl_(), token_prefix:String(t).slice(0,6) + '…' };
+  }catch(e){
+    return { ok:false, sandbox:cs_isSandbox_(), base:cs_baseUrl_(), error:String(e.message || e) };
+  }
+}
+
+/**
+ * 契約書を作成・送信。テンプレート(CLOUDSIGN_TEMPLATE_ID)があれば差込、無ければ規約PDFを生成して添付。
+ * document_id を Applications に控える（status遷移は呼び出し側）。
+ */
+function cloudSignSend_(ctx){
+  const app  = ctx.payload || {};
+  const work = ctx.work || {};
+  const title = 'SPLL利用許諾契約 ' + (work.name || '') + '（' + (ctx.applicationId || '') + '）';
+  const doc   = cs_createDocument_(title, 'SPLL利用許諾の電子契約です。内容をご確認のうえ締結してください。');
+  const docId = doc.id;
+  const templateId = prop_('CLOUDSIGN_TEMPLATE_ID');
+  if(templateId) cs_attachFromTemplate_(docId, templateId);
+  else cs_attachFile_(docId, buildContractPdf_(work), (work.name || 'contract') + '.pdf');
+  if(app.email) cs_addParticipant_(docId, app.email, app.name || '');
+  cs_sendDocument_(docId);
+  if(ctx.applicationId) updateRow_(ssOps_(),'Applications','application_id',ctx.applicationId,{ cloudsign_document_id: docId });
+  logEvent_('application', ctx.applicationId || '', 'cloudsign', null, { cloudsign_document_id: docId, sandbox: cs_isSandbox_() });
+  return docId;
+}
+
+/** 規約テンプレート（Config）に作品条件を差込んでHTML→PDF化（個人情報は含めない） */
+function buildContractPdf_(work){
+  const legal = api_getLegalTexts();
+  const terms = String(legal.termsTemplate || '')
+    .replace(/{{name}}/g, work.name || '').replace(/{{pub}}/g, work.pub || '')
+    .replace(/{{ok}}/g, (work.ok || []).join('、')).replace(/{{no}}/g, (work.no || []).join('、'))
+    .replace(/{{media}}/g, (work.media || []).join('、')).replace(/{{fee}}/g, work.fee || '')
+    .replace(/{{credit}}/g, work.credit || '');
+  const html = '<html><head><meta charset="utf-8"><style>body{font-family:sans-serif;line-height:1.7;}'
+    + 'h1{font-size:18px;}h4{margin:14px 0 4px;}ol{margin:4px 0;padding-left:20px;}</style></head><body>'
+    + '<h1>SPLL利用許諾契約</h1><p>作品：' + (work.name || '') + '（' + (work.pub || '') + '）</p>'
+    + terms + '</body></html>';
+  return Utilities.newBlob(html, 'text/html', 'contract.html').getAs('application/pdf');
 }
 /** 締結完了Webhook（doPost）：締結有無をContractsへ書き戻す（D-11） */
 function doPost(e){
-  const body = JSON.parse(e.postData.contents || '{}');
-  // documentID＋event種別で重複排除
-  const docId = body.document_id, event = body.event_type;
-  if(event !== 'COMPLETED') return ContentService.createTextOutput('ignored');
-  if(isDuplicateWebhook_(docId, event)) return ContentService.createTextOutput('dup');
+  let body = {};
+  try{ body = JSON.parse((e && e.postData && e.postData.contents) || '{}'); }
+  catch(_){ body = (e && e.parameter) || {}; }
+  // CloudSignのペイロード差異を吸収（document_id / documentID / id、event_type / status）
+  const docId = body.document_id || body.documentID || body.id || (e && e.parameter && e.parameter.documentID);
+  const event = body.event_type || body.status || body.event;
+  if(!docId) return ContentService.createTextOutput('no-docid');
+  if(!cs_isCompletedEvent_(event)) return ContentService.createTextOutput('ignored');
+  if(isDuplicateWebhook_(docId, 'COMPLETED')) return ContentService.createTextOutput('dup');
 
   const app = readRows_(ssOps_(),'Applications').find(a=>a.cloudsign_document_id===docId);
   const contractId = newId_('CTR');
@@ -186,6 +262,11 @@ function isDuplicateWebhook_(docId, event){
   const key = 'WH_'+docId+'_'+event;
   if(prop_(key)) return true;
   PropertiesService.getScriptProperties().setProperty(key,'1'); return false;
+}
+/** CloudSignの「締結完了」相当イベントか（※ステータス値は公式仕様で要確認） */
+function cs_isCompletedEvent_(s){
+  s = String(s);
+  return s==='COMPLETED' || s==='completed' || s==='signed' || s==='SIGNED' || s==='3';
 }
 
 // ============================================================
@@ -385,11 +466,17 @@ function postReviewRouting_(job, overall){
       updateRow_(ssOps_(),'Applications','application_id',appId,{status:'REJECTED', retention_until:until});
       logEvent_('application', appId, 'system', {status:'AI_SCREENED'}, {status:'REJECTED', overall_result:overall});
     }else{
-      // PASS候補／要確認 → 契約リンク（CloudSign）送付
+      // PASS候補／要確認 → 契約リンク（CloudSign）送付。
+      // CloudSign障害でAI審査ジョブを失敗扱いにしないよう送信は分離（失敗時はAI_SCREENEDで保留・再送可）。
       const app = readRows_(ssOps_(),'Applications').find(a => a.application_id===appId);
-      if(app) sendContractForApplication_(app);
-      updateRow_(ssOps_(),'Applications','application_id',appId,{status:'LINK_SENT'});
-      logEvent_('application', appId, 'system', {status:'AI_SCREENED'}, {status:'LINK_SENT', overall_result:overall});
+      let sent = false;
+      if(app){
+        try{ sendContractForApplication_(app); sent = true; }
+        catch(err){ logEvent_('application', appId, 'system', null, {contract_send_error:String(err)}); }
+      }
+      const next = sent ? 'LINK_SENT' : 'AI_SCREENED';
+      updateRow_(ssOps_(),'Applications','application_id',appId,{status:next});
+      logEvent_('application', appId, 'system', {status:'AI_SCREENED'}, {status:next, overall_result:overall});
     }
   }else{
     // B経路：締結後審査。高リスクはアラート起票（既発生のパートナー配分は当然には消滅させない）
@@ -756,9 +843,49 @@ function batch_sendApprovedStatements_(){
   });
   return { sent: list.length };
 }
-/** 計算書のCloudSign送信（実装時に最新API確認） */
+/** 計算書（仕入明細書）をPDF化→Drive保存→CloudSign送信（みなし合意付き） */
 function cloudSignSendStatement_(statement){
-  // TODO: 仕入明細書PDFを生成 → CloudSign documents作成 → 送信（みなし合意付き）→ document_id控え
+  const partner = readRows_(ssOps_(),'Partners').find(p => p.partner_id===statement.partner_id) || {};
+  const pdf  = buildStatementPdf_(statement, partner);
+  const file = DriveApp.getFolderById(cfg_('DRIVE_ROOT'))
+    .createFile(pdf.setName('statement_' + statement.period + '_' + statement.partner_id + '.pdf'));
+  updateRow_(ssOps_(),'Settlement_Statements','statement_id',statement.statement_id,{ pdf_file_id: file.getId() });
+
+  const title = 'SPLL 仕入明細書 ' + statement.period + '（' + (partner.name || statement.partner_id) + '）';
+  const note  = 'みなし合意：発効日から1ヶ月以内にご異議のない場合、本仕入明細書の内容にご同意いただいたものとみなします。';
+  const doc   = cs_createDocument_(title, note);
+  cs_attachFile_(doc.id, file.getBlob(), file.getName());
+  if(partner.contact) cs_addParticipant_(doc.id, partner.contact, partner.name || '');
+  cs_sendDocument_(doc.id);
+  logEvent_('settlement_statement', statement.statement_id, 'cloudsign', null,
+    { cloudsign_document_id: doc.id, pdf_file_id: file.getId(), sandbox: cs_isSandbox_() });
+  return doc.id;
+}
+
+/** 仕入明細書PDFを生成（明細＝Settlement_Details、登録番号スナップショット付き） */
+function buildStatementPdf_(statement, partner){
+  const details = readRows_(ssOps_(),'Settlement_Details')
+    .filter(d => d.settlement_id===statement.settlement_id);
+  const rows = details.map(d => {
+    let snap = {}; try{ snap = JSON.parse(d.rate_snapshot || '{}'); }catch(e){}
+    return '<tr><td>' + (d.contract_id||'') + '</td><td style="text-align:right">' + (snap.net_sales!=null?snap.net_sales:'') +
+      '</td><td style="text-align:right">' + (snap.royalty_rate!=null?snap.royalty_rate:'') +
+      '</td><td style="text-align:right">' + (snap.handling_fee_rate!=null?snap.handling_fee_rate:'') +
+      '</td><td style="text-align:right">' + (d.amount||0) + '</td></tr>';
+  }).join('');
+  const total = details.reduce((s,d)=> s + num_(d.amount), 0);
+  const html = '<html><head><meta charset="utf-8"><style>body{font-family:sans-serif;}'
+    + 'table{border-collapse:collapse;width:100%;}th,td{border:1px solid #999;padding:6px;font-size:12px;}'
+    + 'th{background:#eee;}</style></head><body>'
+    + '<h1>仕入明細書</h1>'
+    + '<p>対象期：' + (statement.period||'') + '　／　パートナー：' + (partner.name || statement.partner_id || '') + '</p>'
+    + '<p>登録番号：' + (statement.reg_number_snapshot || partner.invoice_reg_number || '（未登録）') + '</p>'
+    + '<table><thead><tr><th>契約ID</th><th>純売上</th><th>ロイヤリティ率</th><th>事務手数料率</th><th>配分額</th></tr></thead>'
+    + '<tbody>' + rows + '</tbody>'
+    + '<tfoot><tr><th colspan="4" style="text-align:right">合計</th><th style="text-align:right">' + total + '</th></tr></tfoot></table>'
+    + '<p style="font-size:11px;color:#555;margin-top:14px;">本明細は仕入明細書方式により作成しています。発効日から1ヶ月以内にご異議のない場合、内容にご同意いただいたものとみなします。</p>'
+    + '</body></html>';
+  return Utilities.newBlob(html, 'text/html', 'statement.html').getAs('application/pdf');
 }
 
 /** 日次：異議期間（発効日＋1ヶ月）到来かつ無申出を CONFIRMED へ（みなし確認） */
@@ -893,7 +1020,7 @@ function admin_getIntegrationConfig(){
       secret_set:   !!prop_('CLOUDSIGN_SECRET'),
       template_id:  prop_('CLOUDSIGN_TEMPLATE_ID') || '',
       callback_url: prop_('CLOUDSIGN_CALLBACK_URL')|| '',
-      sandbox:      prop_('CLOUDSIGN_SANDBOX') === 'true'
+      sandbox:      prop_('CLOUDSIGN_SANDBOX') !== 'false'   // 既定はサンドボックスON
     },
     formrun: {
       form_url:           prop_('FORMRUN_FORM_URL')   || '',

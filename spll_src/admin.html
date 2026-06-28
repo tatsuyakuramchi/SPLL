@@ -252,11 +252,12 @@
             <div class="fld"><label>テンプレートID <span class="h">CLOUDSIGN_TEMPLATE_ID</span></label><input id="cs-template_id"></div>
             <div class="fld"><label>Webhook(Callback) URL <span class="h">CLOUDSIGN_CALLBACK_URL</span></label><input id="cs-callback_url" placeholder="GAS② の doPost URL"></div>
           </div>
-          <label class="chk"><input type="checkbox" id="cs-sandbox"> サンドボックス環境を使用する</label>
+          <label class="chk"><input type="checkbox" id="cs-sandbox" checked> サンドボックス環境を使用する（試験運用・既定でON）</label>
+          <div id="cs-test-result" class="setnote" style="margin-top:10px;"></div>
         </div>
-        <div class="pfoot"><button class="save" onclick="saveCloudSign()">CloudSign設定を保存</button></div>
+        <div class="pfoot"><button class="btn" onclick="testCloudSign()">接続テスト</button><button class="save" onclick="saveCloudSign()">CloudSign設定を保存</button></div>
       </div>
-      <div class="note">秘密情報はGASの ScriptProperties に保存され、画面には再表示されません（設定済みかどうかのみ表示）。</div>
+      <div class="note">秘密情報はGASの ScriptProperties に保存され、画面には再表示されません（設定済みかどうかのみ表示）。試験運用のためサンドボックス（api-sandbox.cloudsign.jp）を既定で使用します。本番に切替える場合のみチェックを外してください。</div>
     </div>
 
     <!-- FORMRUN -->
@@ -328,7 +329,7 @@ var _mWorks = [
 ];
 var _mDS = {SS_MASTER:"",SS_OPS:"",DRIVE_ROOT:"",GCP_PROJECT:"",GCP_REGION:"",GEMINI_MODEL:"",
   defaults:{SS_MASTER:"PUT_WORKS_MASTER_SPREADSHEET_ID",SS_OPS:"PUT_OPS_SPREADSHEET_ID",DRIVE_ROOT:"PUT_SHARED_DRIVE_FOLDER_ID",GCP_PROJECT:"PUT_GCP_PROJECT_ID",GCP_REGION:"us-central1",GEMINI_MODEL:"gemini-2.5-flash"}};
-var _mInt = {cloudsign:{client_id:"",secret_set:false,template_id:"",callback_url:"",sandbox:false},
+var _mInt = {cloudsign:{client_id:"",secret_set:false,template_id:"",callback_url:"",sandbox:true},
   formrun:{form_url:"",webhook_secret_set:false,field_map:""}};
 var MOCK = {
   admin_getLegalTexts:function(){ return _mLegal; },
@@ -406,6 +407,15 @@ function saveFormRun(){
   var c={form_url:$("fr-form_url").value, field_map:$("fr-field_map").value};
   var s=$("fr-webhook_secret").value; if(s) c.webhook_secret=s;
   call("admin_saveFormRunConfig",[c],function(){ toast("FormRun設定を保存しました"); loadIntegration(); });
+}
+function testCloudSign(){
+  var el=$("cs-test-result"); el.style.color="var(--soft)"; el.textContent="接続テスト中…";
+  call("admin_cloudSignTest",[],function(r){
+    r=r||{};
+    var env=(r.sandbox?"サンドボックス":"本番")+"（"+(r.base||"")+"）";
+    if(r.ok){ el.style.color="var(--pass)"; el.textContent="✓ 接続OK ["+env+"] token "+(r.token_prefix||""); toast("CloudSign接続OK"); }
+    else { el.style.color="var(--fail)"; el.textContent="✗ 接続失敗 ["+env+"]： "+(r.error||""); toast("CloudSign接続失敗", true); }
+  });
 }
 
 // ===== 業務タブの実データ配線 =====
@@ -629,6 +639,7 @@ MOCK.admin_listSettlements=function(){ return [
   {statement_id:"STM-202606-0002",period:"2026H1",partner:"グループSNE",amount:"＊＊＊円",status:"SENT",objection_due:"2026-07-26"}
 ]; };
 MOCK.admin_approveStatement=function(){ return true; };
+MOCK.admin_cloudSignTest=function(){ return {ok:true,sandbox:_mInt.cloudsign.sandbox,base:_mInt.cloudsign.sandbox?"https://api-sandbox.cloudsign.jp":"https://api.cloudsign.jp",token_prefix:"sbx_ab…"}; };
 MOCK.admin_runAiReviews=function(){ return {processed:3,completed:3}; };
 MOCK.admin_generateStatements=function(){ return {period:"2026H1",reports:5,generated:2,statements:[]}; };
 MOCK.admin_sendApprovedStatements=function(){ return {sent:1}; };
