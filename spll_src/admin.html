@@ -113,22 +113,17 @@
     <h2>ダッシュボード</h2>
     <p class="sub">各業務台帳（スプレッドシート）の状態をリアルタイムに集約。数値はサンプル。</p>
     <div class="kpis">
-      <div class="kpi warn"><div class="n">7</div><div class="l">AI審査・要確認</div></div>
-      <div class="kpi alert"><div class="n">2</div><div class="l">高リスク（赤）</div></div>
-      <div class="kpi"><div class="n">15</div><div class="l">未審査（提出済）</div></div>
-      <div class="kpi sign"><div class="n">4</div><div class="l">締結待ち</div></div>
-      <div class="kpi pay"><div class="n">6</div><div class="l">入金待ち</div></div>
-      <div class="kpi"><div class="n">9</div><div class="l">報告待ち</div></div>
+      <div class="kpi warn"><div class="n" id="kpi-review">–</div><div class="l">AI審査・要確認</div></div>
+      <div class="kpi alert"><div class="n" id="kpi-high">–</div><div class="l">高リスク（赤）</div></div>
+      <div class="kpi"><div class="n" id="kpi-unscreened">–</div><div class="l">未審査（提出済）</div></div>
+      <div class="kpi sign"><div class="n" id="kpi-signing">–</div><div class="l">締結待ち</div></div>
+      <div class="kpi pay"><div class="n" id="kpi-unpaid">–</div><div class="l">入金待ち</div></div>
+      <div class="kpi"><div class="n" id="kpi-reporting">–</div><div class="l">報告待ち</div></div>
     </div>
     <div class="note">提出→AI審査→人手確認→締結→入金→報告→清算の各段の滞留を、ここから各タブへドリルダウンします。赤・要確認・締結待ち・入金待ちが主な人手ポイントです。</div>
     <div class="panel">
       <div class="ph"><h3>直近の要対応</h3><span class="hint">Compliance_Alerts / Contracts より</span></div>
-      <table><thead><tr><th>区分</th><th>対象</th><th>作品</th><th>状態</th><th>発生</th></tr></thead><tbody>
-        <tr><td>審査</td><td class="id">SUB-202606-0042</td><td>新クトゥルフ神話TRPG</td><td><span class="pill fail">HIGH_RISK</span></td><td class="id">06-27</td></tr>
-        <tr><td>審査</td><td class="id">SUB-202606-0039</td><td>ソード・ワールド2.5</td><td><span class="pill review">REVIEW</span></td><td class="id">06-27</td></tr>
-        <tr><td>契約</td><td class="id">CTR-202606-0018</td><td>光砕のリヴァルチャー</td><td><span class="pill wait">締結待ち</span></td><td class="id">06-26</td></tr>
-        <tr><td>入金</td><td class="id">CTR-202606-0011</td><td>インセイン</td><td><span class="pill unpaid">入金待ち</span></td><td class="id">06-25</td></tr>
-      </tbody></table>
+      <table><thead><tr><th>区分</th><th>対象</th><th>作品</th><th>状態</th><th>発生</th></tr></thead><tbody id="dash-alerts"></tbody></table>
     </div>
   </section>
 
@@ -137,13 +132,8 @@
     <h2>作品審査管理</h2>
     <p class="sub">Geminiの一次審査結果（PASS/REVIEW/HIGH_RISK）を受けて、人手判断（承認・是正要求・エスカレーション）を行います。A作品は締結前、B作品は締結後の提出。</p>
     <div class="panel">
-      <div class="ph"><h3>審査キュー</h3><span class="hint">Submissions / AI_Findings より</span></div>
-      <table><thead><tr><th>提出ID</th><th>作品</th><th>経路</th><th>AI結果</th><th>主な指摘</th><th>人手判断</th></tr></thead><tbody>
-        <tr><td class="id">SUB-202606-0042</td><td>新クトゥルフ神話TRPG</td><td><span class="pill B">締結後</span></td><td><span class="pill fail">HIGH_RISK</span></td><td class="evi">必須クレジット欠落（p.1）</td><td class="actions"><button class="btn p">原本確認</button><button class="btn">是正要求</button><button class="btn d">上申</button></td></tr>
-        <tr><td class="id">SUB-202606-0039</td><td>ソード・ワールド2.5</td><td><span class="pill B">締結後</span></td><td><span class="pill review">REVIEW</span></td><td class="evi">公式誤認の可能性（表紙）</td><td class="actions"><button class="btn p">原本確認</button><button class="btn">承認(CLEARED)</button><button class="btn">是正要求</button></td></tr>
-        <tr><td class="id">APP-202606-0051</td><td>光砕のリヴァルチャー</td><td><span class="pill A">締結前</span></td><td><span class="pill pass">PASS候補</span></td><td class="evi">明確な違反候補なし</td><td class="actions"><button class="btn">抜取確認</button><span class="src">→ 契約リンク自動送付済</span></td></tr>
-        <tr><td class="id">SUB-202606-0036</td><td>インセイン</td><td><span class="pill B">締結後</span></td><td><span class="pill pass">PASS候補</span></td><td class="evi">—</td><td class="actions"><button class="btn">抜取確認</button></td></tr>
-      </tbody></table>
+      <div class="ph"><h3>審査キュー</h3><span class="hint">AI_Review_Jobs / AI_Findings より</span></div>
+      <table><thead><tr><th>提出ID</th><th>作品</th><th>経路</th><th>AI結果</th><th>主な指摘</th><th>人手判断</th></tr></thead><tbody id="review-tbody"></tbody></table>
     </div>
     <div class="note">AI結果は一次スクリーニングで、承認・適法性保証ではありません。最終判断は人手で行い、判断はEventsへ記録されます。</div>
   </section>
@@ -154,11 +144,7 @@
     <p class="sub">FormRun申込→CloudSign API送信→締結の状態を一覧。締結有無はCloudSignのWebhookでSheetsへ自動書き戻し。</p>
     <div class="panel">
       <div class="ph"><h3>契約一覧</h3><span class="hint">Applications / Contracts より</span></div>
-      <table><thead><tr><th>契約ID</th><th>申込ID</th><th>作品</th><th>契約者</th><th>締結状態</th><th>締結日</th><th>操作</th></tr></thead><tbody>
-        <tr><td class="id">CTR-202606-0018</td><td class="id">APP-202606-0050</td><td>光砕のリヴァルチャー</td><td>＊＊＊＊（個人）</td><td><span class="pill wait">送信済・締結待ち</span></td><td class="id">—</td><td class="actions"><button class="btn">CloudSign確認</button><button class="btn">再送</button></td></tr>
-        <tr><td class="id">CTR-202606-0017</td><td class="id">APP-202606-0048</td><td>新クトゥルフ神話TRPG</td><td>＊＊＊＊（個人）</td><td><span class="pill sign">締結済</span></td><td class="id">06-26</td><td class="actions"><button class="btn">提出案内送付</button><button class="btn d">解除</button></td></tr>
-        <tr><td class="id">CTR-202606-0011</td><td class="id">APP-202606-0040</td><td>インセイン</td><td>＊＊＊＊（個人）</td><td><span class="pill sign">締結済</span></td><td class="id">06-20</td><td class="actions"><button class="btn">契約詳細</button></td></tr>
-      </tbody></table>
+      <table><thead><tr><th>契約ID</th><th>申込ID</th><th>作品</th><th>契約者</th><th>締結状態</th><th>締結日</th><th>操作</th></tr></thead><tbody id="contract-tbody"></tbody></table>
     </div>
     <div class="note">締結状態の遷移（送信済→締結済／辞退／取消）はCloudSign Webhook（COMPLETED等）またはAPI照合バッチのみが更新します。手動での締結化はできません。</div>
   </section>
@@ -169,17 +155,11 @@
     <p class="sub">利用許諾料の請求・入金消込と、半期清算（計算書生成）の起点。入金があったら結果を入力します。</p>
     <div class="panel">
       <div class="ph"><h3>入金管理（利用許諾料）</h3><span class="hint">Invoices / Payments より</span></div>
-      <table><thead><tr><th>契約ID</th><th>作品</th><th>請求額</th><th>入金状態</th><th>入金日</th><th>結果入力</th></tr></thead><tbody>
-        <tr><td class="id">CTR-202606-0017</td><td>新クトゥルフ神話TRPG</td><td>売上の10％</td><td><span class="pill unpaid">入金待ち</span></td><td class="id">—</td><td class="actions"><button class="btn p">入金を記録</button></td></tr>
-        <tr><td class="id">CTR-202606-0011</td><td>インセイン</td><td>16,500円</td><td><span class="pill paid">入金済</span></td><td class="id">06-24</td><td class="actions"><button class="btn">取消</button></td></tr>
-      </tbody></table>
+      <table><thead><tr><th>契約ID</th><th>作品</th><th>請求額</th><th>入金状態</th><th>入金日</th><th>結果入力</th></tr></thead><tbody id="pay-tbody"></tbody></table>
     </div>
     <div class="panel">
       <div class="ph"><h3>半期清算・計算書</h3><span class="hint">Settlements / Settlement_Statements より</span></div>
-      <table><thead><tr><th>期</th><th>パートナー</th><th>配分額</th><th>計算書状態</th><th>異議期限</th><th>操作</th></tr></thead><tbody>
-        <tr><td>2026H1</td><td>どらこにあん</td><td>＊＊＊円</td><td><span class="pill wait">DRAFT</span></td><td class="id">—</td><td class="actions"><button class="btn">集計表で突合</button><button class="btn p">承認</button></td></tr>
-        <tr><td>2026H1</td><td>グループSNE</td><td>＊＊＊円</td><td><span class="pill sign">送信済(みなし確認待ち)</span></td><td class="id">07-26</td><td class="actions"><button class="btn">CloudSign確認</button></td></tr>
-      </tbody></table>
+      <table><thead><tr><th>期</th><th>パートナー</th><th>配分額</th><th>計算書状態</th><th>異議期限</th><th>操作</th></tr></thead><tbody id="settle-tbody"></tbody></table>
     </div>
     <div class="note">パートナー清算書は仕入明細書方式。承認後CloudSignでみなし合意付き送信し、発効日から1ヶ月で確認とみなして支払対象化します。既発生の配分は保護されます。</div>
   </section>
@@ -303,7 +283,12 @@ document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{
   document.querySelectorAll(".tab").forEach(x=>x.classList.remove("on"));
   document.querySelectorAll(".view").forEach(x=>x.classList.remove("on"));
   t.classList.add("on"); document.getElementById("v-"+t.dataset.v).classList.add("on");
-  if(t.dataset.v==="settings") loadSettings();
+  var v=t.dataset.v;
+  if(v==="settings") loadSettings();
+  else if(v==="dash") loadDashboard();
+  else if(v==="review") loadReview();
+  else if(v==="contract") loadContract();
+  else if(v==="pay") loadPay();
   window.scrollTo(0,0);
 });
 // 設定内サブタブ
@@ -422,6 +407,208 @@ function saveFormRun(){
   var s=$("fr-webhook_secret").value; if(s) c.webhook_secret=s;
   call("admin_saveFormRunConfig",[c],function(){ toast("FormRun設定を保存しました"); loadIntegration(); });
 }
+
+// ===== 業務タブの実データ配線 =====
+function setText(id,v){ var el=$(id); if(el) el.textContent=(v==null?"–":v); }
+function td(html){ var c=document.createElement("td"); c.innerHTML=html; return c; }
+function emptyRow(tbody,cols,msg){ tbody.innerHTML='<tr><td colspan="'+cols+'" style="text-align:center;color:var(--soft);padding:18px;">'+(msg||"データがありません")+'</td></tr>'; }
+
+// AI結果 → ピル
+function resultPill(r){
+  switch(String(r)){
+    case "PASS_CANDIDATE": return {cls:"pass", label:"PASS候補"};
+    case "REVIEW_REQUIRED": return {cls:"review", label:"REVIEW"};
+    case "HIGH_RISK": return {cls:"fail", label:"HIGH_RISK"};
+    case "UNREADABLE": return {cls:"wait", label:"判読不可"};
+    case "COMPLETED": return {cls:"pass", label:"完了"};
+    case "QUEUED": case "SCANNING": return {cls:"wait", label:"審査中"};
+    case "BLOCKED": case "ERROR": return {cls:"fail", label:String(r)};
+    default: return {cls:"wait", label:String(r||"-")};
+  }
+}
+// 締結状態 → ピル
+function contractPill(s){
+  s=String(s||"");
+  if(s==="SIGNED") return {cls:"sign", label:"締結済"};
+  if(s==="DECLINED") return {cls:"fail", label:"辞退"};
+  if(s==="CANCELLED") return {cls:"fail", label:"取消"};
+  if(s==="SENT") return {cls:"wait", label:"送信済・締結待ち"};
+  return {cls:"wait", label:s||"-"};
+}
+// 計算書状態 → ピル
+function stmtPill(s){
+  s=String(s||"");
+  if(s==="DRAFT") return {cls:"wait", label:"DRAFT"};
+  if(s==="APPROVED") return {cls:"review", label:"承認済"};
+  if(s==="SENT") return {cls:"sign", label:"送信済(みなし確認待ち)"};
+  if(s==="CONFIRMED") return {cls:"pass", label:"確認済"};
+  if(s==="OBJECTED") return {cls:"fail", label:"異議あり"};
+  if(s==="ISSUED") return {cls:"pass", label:"発行済"};
+  return {cls:"wait", label:s||"-"};
+}
+function pill(p){ return '<span class="pill '+p.cls+'">'+esc(p.label)+'</span>'; }
+
+// ---- ダッシュボード ----
+function loadDashboard(){
+  call("admin_dashboard",[],function(d){
+    if(!d) return; var k=d.kpis||{};
+    setText("kpi-review",k.reviewPending); setText("kpi-high",k.highRisk);
+    setText("kpi-unscreened",k.unscreened); setText("kpi-signing",k.signing);
+    setText("kpi-unpaid",k.unpaid); setText("kpi-reporting",k.reporting);
+    var tb=$("dash-alerts"); tb.innerHTML="";
+    var rows=d.alerts||[];
+    if(!rows.length){ emptyRow(tb,5,"要対応の項目はありません"); return; }
+    rows.forEach(function(a){
+      var tr=document.createElement("tr");
+      tr.innerHTML='<td>'+esc(a.kind)+'</td><td class="id">'+esc(a.target)+'</td><td>'+esc(a.work)+'</td>'+
+        '<td>'+pill({cls:a.cls||"wait",label:a.status})+'</td><td class="id">'+esc(a.at)+'</td>';
+      tb.appendChild(tr);
+    });
+  });
+}
+
+// ---- 審査キュー ----
+function loadReview(){
+  call("admin_reviewQueue",[],function(rows){
+    var tb=$("review-tbody"); tb.innerHTML=""; rows=rows||[];
+    if(!rows.length){ emptyRow(tb,6,"審査対象がありません"); return; }
+    rows.forEach(function(r){
+      var rp=resultPill(r.result);
+      var route=(r.timing==="A")?'<span class="pill A">締結前</span>':'<span class="pill B">締結後</span>';
+      var tr=document.createElement("tr");
+      tr.appendChild(td('<span class="id">'+esc(r.id)+'</span>'));
+      tr.appendChild(td(esc(r.work)));
+      tr.appendChild(td(route));
+      tr.appendChild(td(pill(rp)));
+      tr.appendChild(td('<span class="evi">'+esc(r.finding||"—")+'</span>'));
+      var act=document.createElement("td"); act.className="actions";
+      var bClear=mkBtn("承認(CLEARED)","btn",function(){ humanReview(r.id,"CLEARED"); });
+      var bFix=mkBtn("是正要求","btn",function(){ humanReview(r.id,"CORRECTION_REQUIRED"); });
+      var bEsc=mkBtn("上申","btn d",function(){ humanReview(r.id,"ESCALATED"); });
+      act.appendChild(bClear); act.appendChild(bFix); act.appendChild(bEsc);
+      tr.appendChild(act); tb.appendChild(tr);
+    });
+  });
+}
+function humanReview(id,result){
+  var comment = (result==="CORRECTION_REQUIRED"||result==="ESCALATED") ? (prompt("コメント（任意）：","")||"") : "";
+  call("admin_setHumanReview",[id,result,comment],function(){ toast("人手判断を記録： "+result); loadReview(); loadDashboard(); });
+}
+
+// ---- 契約一覧 ----
+function loadContract(){
+  call("admin_listContracts",[],function(rows){
+    var tb=$("contract-tbody"); tb.innerHTML=""; rows=rows||[];
+    if(!rows.length){ emptyRow(tb,7,"契約がありません"); return; }
+    rows.forEach(function(c){
+      var cp=contractPill(c.status);
+      var tr=document.createElement("tr");
+      tr.appendChild(td('<span class="id">'+esc(c.contract_id)+'</span>'));
+      tr.appendChild(td('<span class="id">'+esc(c.application_id)+'</span>'));
+      tr.appendChild(td(esc(c.work)));
+      tr.appendChild(td(esc(c.applicant)));
+      tr.appendChild(td(pill(cp)));
+      tr.appendChild(td('<span class="id">'+esc(c.signed_at||"—")+'</span>'));
+      var act=document.createElement("td"); act.className="actions";
+      if(String(c.status)==="SIGNED" && c.contract_id && c.contract_id!=="—"){
+        act.appendChild(mkBtn("提出案内送付","btn",function(){
+          if(confirm("作品提出リンクを契約者へ送付しますか？")) call("admin_sendUploadLink",[c.contract_id],function(){ toast("提出案内を送付しました"); });
+        }));
+      } else {
+        act.appendChild(mkBtn("CloudSign確認","btn",function(){ toast("CloudSign管理画面でご確認ください"); }));
+      }
+      tr.appendChild(act); tb.appendChild(tr);
+    });
+  });
+}
+
+// ---- 入金・清算 ----
+function loadPay(){
+  call("admin_listPayments",[],function(rows){
+    var tb=$("pay-tbody"); tb.innerHTML=""; rows=rows||[];
+    if(!rows.length){ emptyRow(tb,6,"請求がありません"); }
+    else rows.forEach(function(v){
+      var paid=String(v.status)==="入金済";
+      var tr=document.createElement("tr");
+      tr.appendChild(td('<span class="id">'+esc(v.contract_id)+'</span>'));
+      tr.appendChild(td(esc(v.work)));
+      tr.appendChild(td(esc(v.amount)));
+      tr.appendChild(td(pill(paid?{cls:"paid",label:"入金済"}:{cls:"unpaid",label:"入金待ち"})));
+      tr.appendChild(td('<span class="id">'+esc(v.paid_at||"—")+'</span>'));
+      var act=document.createElement("td"); act.className="actions";
+      if(paid){
+        act.appendChild(mkBtn("取消","btn d",function(){ if(confirm("入金記録を取り消しますか？")) call("admin_voidPayment",[v.invoice_id],function(){ toast("入金を取り消しました"); loadPay(); loadDashboard(); }); }));
+      } else {
+        act.appendChild(mkBtn("入金を記録","btn p",function(){ recordPay(v); }));
+      }
+      tr.appendChild(act); tb.appendChild(tr);
+    });
+  });
+  call("admin_listSettlements",[],function(rows){
+    var tb=$("settle-tbody"); tb.innerHTML=""; rows=rows||[];
+    if(!rows.length){ emptyRow(tb,6,"清算対象がありません"); return; }
+    rows.forEach(function(s){
+      var sp=stmtPill(s.status);
+      var tr=document.createElement("tr");
+      tr.appendChild(td(esc(s.period)));
+      tr.appendChild(td(esc(s.partner)));
+      tr.appendChild(td(esc(s.amount)));
+      tr.appendChild(td(pill(sp)));
+      tr.appendChild(td('<span class="id">'+esc(s.objection_due||"—")+'</span>'));
+      var act=document.createElement("td"); act.className="actions";
+      if(String(s.status)==="DRAFT"){
+        act.appendChild(mkBtn("承認","btn p",function(){ if(confirm("計算書を承認しますか？（承認後にCloudSign送信）")) call("admin_approveStatement",[s.statement_id],function(){ toast("計算書を承認しました"); loadPay(); }); }));
+      } else {
+        act.appendChild(mkBtn("CloudSign確認","btn",function(){ toast("CloudSign管理画面でご確認ください"); }));
+      }
+      tr.appendChild(act); tb.appendChild(tr);
+    });
+  });
+}
+function recordPay(v){
+  var amount=prompt("入金額（円）：", String(v.amount||"").replace(/[^0-9]/g,"")||"");
+  if(amount===null) return;
+  var today=new Date(); var paidAt=prompt("入金日（YYYY-MM-DD）：", today.getFullYear()+"-"+("0"+(today.getMonth()+1)).slice(-2)+"-"+("0"+today.getDate()).slice(-2));
+  if(paidAt===null) return;
+  call("admin_recordPayment",[v.contract_id,v.invoice_id,amount,paidAt],function(){ toast("入金を記録しました"); loadPay(); loadDashboard(); });
+}
+
+function mkBtn(label,cls,fn){ var b=document.createElement("button"); b.className=cls; b.textContent=label; b.onclick=fn; return b; }
+
+// ===== 業務タブ用モック（スタンドアロン表示） =====
+MOCK.admin_dashboard=function(){ return { kpis:{reviewPending:7,highRisk:2,unscreened:15,signing:4,unpaid:6,reporting:9}, alerts:[
+  {kind:"審査",target:"SUB-202606-0042",work:"新クトゥルフ神話TRPG",status:"HIGH_RISK",cls:"fail",at:"2026-06-27"},
+  {kind:"審査",target:"SUB-202606-0039",work:"ソード・ワールド2.5",status:"REVIEW",cls:"review",at:"2026-06-27"},
+  {kind:"契約",target:"CTR-202606-0018",work:"光砕のリヴァルチャー",status:"締結待ち",cls:"wait",at:"2026-06-26"},
+  {kind:"入金",target:"CTR-202606-0011",work:"インセイン",status:"入金待ち",cls:"unpaid",at:"2026-06-25"}
+]}; };
+MOCK.admin_reviewQueue=function(){ return [
+  {id:"SUB-202606-0042",work:"新クトゥルフ神話TRPG",timing:"B",result:"HIGH_RISK",finding:"必須クレジット欠落（p.1）"},
+  {id:"SUB-202606-0039",work:"ソード・ワールド2.5",timing:"B",result:"REVIEW_REQUIRED",finding:"公式誤認の可能性（表紙）"},
+  {id:"APP-202606-0051",work:"光砕のリヴァルチャー",timing:"A",result:"PASS_CANDIDATE",finding:"明確な違反候補なし"},
+  {id:"SUB-202606-0036",work:"インセイン",timing:"B",result:"PASS_CANDIDATE",finding:"—"}
+]; };
+MOCK.admin_setHumanReview=function(){ return true; };
+MOCK.admin_listContracts=function(){ return [
+  {contract_id:"—",application_id:"APP-202606-0050",work:"光砕のリヴァルチャー",applicant:"＊＊＊＊（個人）",status:"送信済・締結待ち",signed_at:""},
+  {contract_id:"CTR-202606-0017",application_id:"APP-202606-0048",work:"新クトゥルフ神話TRPG",applicant:"＊＊＊＊（個人）",status:"SIGNED",signed_at:"2026-06-26"},
+  {contract_id:"CTR-202606-0011",application_id:"APP-202606-0040",work:"インセイン",applicant:"＊＊＊＊（個人）",status:"SIGNED",signed_at:"2026-06-20"}
+]; };
+MOCK.admin_sendUploadLink=function(){ return true; };
+MOCK.admin_listPayments=function(){ return [
+  {invoice_id:"INV-202606-0001",contract_id:"CTR-202606-0017",work:"新クトゥルフ神話TRPG",amount:"売上の10％",status:"入金待ち",paid_at:""},
+  {invoice_id:"INV-202606-0002",contract_id:"CTR-202606-0011",work:"インセイン",amount:"16,500円",status:"入金済",paid_at:"2026-06-24"}
+]; };
+MOCK.admin_recordPayment=function(){ return true; };
+MOCK.admin_voidPayment=function(){ return true; };
+MOCK.admin_listSettlements=function(){ return [
+  {statement_id:"STM-202606-0001",period:"2026H1",partner:"どらこにあん",amount:"＊＊＊円",status:"DRAFT",objection_due:""},
+  {statement_id:"STM-202606-0002",period:"2026H1",partner:"グループSNE",amount:"＊＊＊円",status:"SENT",objection_due:"2026-07-26"}
+]; };
+MOCK.admin_approveStatement=function(){ return true; };
+
+// 初期表示（ダッシュボード）
+loadDashboard();
 </script>
 </body>
 </html>

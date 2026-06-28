@@ -90,6 +90,18 @@ clasp deploy                          # Web アプリとして公開（バージ
 | CloudSign API 設定 | ScriptProperties | `admin_getIntegrationConfig` / `admin_saveCloudSignConfig` |
 | FormRun 設定 | ScriptProperties | `admin_getIntegrationConfig` / `admin_saveFormRunConfig` |
 
+### 業務タブの実データ配線（GAS関数）
+
+| タブ | 取得 | 操作 |
+|---|---|---|
+| ダッシュボード | `admin_dashboard`（6KPI＋直近の要対応） | — |
+| 作品審査管理 | `admin_reviewQueue`（ジョブ単位に総合結果・経路A/B・主指摘を結合） | `admin_setHumanReview`（CLEARED／CORRECTION_REQUIRED／ESCALATED） |
+| 契約管理 | `admin_listContracts`（締結済＋締結待ちを結合・契約者名はマスク） | `admin_sendUploadLink`（B経路の提出案内送付） |
+| 入金・清算 | `admin_listPayments` / `admin_listSettlements` | `admin_recordPayment` / `admin_voidPayment` / `admin_approveStatement` |
+
+集計・結合（作品名・パートナー名・契約↔請求）はサーバー側で行い、UIは整形済みデータを描画します。
+シートが空でもエラーにならないよう防御的に実装しています（`readRows_` は未作成シートで空配列）。
+
 - 規約テンプレートは差込トークン `{{name}}{{pub}}{{ok}}{{no}}{{media}}{{fee}}{{credit}}` を作品ごとに展開し、
   公開窓口 `index.html` が `api_getLegalTexts()` で取得して申込ウィザードに表示します（取得失敗時は既定文）。
 - 公開状態を `PUBLISHED` にした作品のみ `api_listWorks()` で公開窓口に表示されます。
@@ -116,9 +128,10 @@ GAS 上では `google.script.run` 経由で実データに切り替わるよう�
   **審査タイミング(A/B)は内部属性**で、公開UIにはバッジ・絞り込みを出しません。
 - `report.html`：`serveReport_()` がトークンをテンプレートへ差し込み、`report_getContext(token)`
   で契約情報、`report_submit(token,data)` で報告送信。ログイン／マイページなし。
-- `admin.html`：ダッシュボード／審査／契約／入金の各表は `admin_dashboard / admin_reviewQueue /
-  admin_listContracts / admin_recordPayment` に接続する想定（現状は表示モック）。
-  **「設定」タブは google.script.run で実配線済み**（同意文・規約／作品マスタ／CloudSign／FormRun）。
+- `admin.html`：**全タブ google.script.run で実配線済み**。ダッシュボード（6KPI＋要対応）、
+  審査キュー（人手判断＝承認／是正要求／上申）、契約一覧（提出案内送付）、入金・清算（入金記録・
+  取消・計算書承認）、および「設定」（同意文・規約／作品マスタ／CloudSign／FormRun）。
+  バックエンドは作品名の結合・状態の正規化を行い、UIがそのまま描画できる形で返します。
   スタンドアロン表示時は内蔵モックで動作。社内GWS限定で公開。
 
 ## セキュリティ・個人情報

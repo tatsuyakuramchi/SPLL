@@ -283,30 +283,189 @@ function serveUpload_(e){
 // ============================================================
 // 6. GAS③ 管理コンソール（D-12）― google.script.run で呼ぶ
 // ============================================================
+// ---- 結合・分類ヘルパ ----
+function worksNameMap_(){
+  const m = {}; readRows_(ssMaster_(), 'Works_Master').forEach(w => { m[w.work_id] = w.work_name; });
+  return m;
+}
+function isHighRisk_(r){ return /HIGH/i.test(String(r.severity)) || /HIGH_RISK/i.test(String(r.result)); }
+function sevRank_(f){
+  const s = String(f.severity||'').toUpperCase(), r = String(f.result||'').toUpperCase();
+  if(s.indexOf('HIGH')>=0 || r.indexOf('HIGH')>=0) return 3;
+  if(s.indexOf('MED')>=0  || r.indexOf('REVIEW')>=0) return 2;
+  if(s) return 1; return 0;
+}
+/** ジョブ配下のFindingsから総合結果を決める（最悪を優先） */
+function worstResult_(findings){
+  if(!findings.length) return 'PASS_CANDIDATE';
+  const max = Math.max.apply(null, findings.map(sevRank_));
+  if(max>=3) return 'HIGH_RISK';
+  if(max>=2) return 'REVIEW_REQUIRED';
+  return 'PASS_CANDIDATE';
+}
+
+/** ダッシュボード：6KPI＋直近の要対応（作品名を結合） */
 function admin_dashboard(){
-  const subs = readRows_(ssOps_(),'AI_Review_Jobs');
+  const jobs      = readRows_(ssOps_(),'AI_Review_Jobs');
+  const findings  = readRows_(ssOps_(),'AI_Findings');
   const contracts = readRows_(ssOps_(),'Contracts');
-  const payments = readRows_(ssOps_(),'Payments');
-  const reports = readRows_(ssOps_(),'Usage_Reports');
-  return {
-    review: subs.filter(s=>s.status==='COMPLETED').length,   // 詳細はAI_Findingsで分類
-    signing: contracts.filter(c=>c.status!=='SIGNED').length,
-    unpaid: payments.filter(p=>p.status==='入金待ち').length,
-    reporting: reports.filter(r=>r.status!=='SUBMITTED').length
+  const apps      = readRows_(ssOps_(),'Applications');
+  const invoices  = readRows_(ssOps_(),'Invoices');
+  const reports   = readRows_(ssOps_(),'Usage_Reports');
+  const alerts    = readRows_(ssOps_(),'Compliance_Alerts');
+  const human     = readRows_(ssOps_(),'Human_Reviews');
+  const nameMap   = worksNameMap_();
+  const ctrWork   = {}; contracts.forEach(c => { ctrWork[c.contract_id] = c.work_id; });
+  const cleared   = {}; human.filter(h=>h.result==='CLEARED').forEach(h => { cleared[String(h.submission_id)] = true; });
+
+  const kpis = {
+    reviewPending: jobs.filter(j => j.status==='COMPLETED' && !cleared[String(j.submission_id||j.application_id)]).length,
+    highRisk:      findings.filter(isHighRisk_).length,
+    unscreened:    jobs.filter(j => j.status==='QUEUED' || j.status==='SCANNING').length,
+    signing:       contracts.filter(c => c.status && c.status!=='SIGNED' && c.status!=='DECLINED' && c.status!=='CANCELLED').length
+                   + apps.filter(a => a.status==='SENT').length,
+    unpaid:        invoices.filter(v => v.status && v.status!=='入金済' && v.status!=='取消').length,
+    reporting:     reports.filter(r => r.status && r.status!=='SUBMITTED' && r.status!=='APPROVED' && r.status!=='LOCKED').length
   };
+
+  const rows = [];
+  alerts.filter(a => a.status!=='CLOSED').forEach(a => rows.push({
+    kind:'審査', target:a.submission_id||a.contract_id||'', work:nameMap[ctrWork[a.contract_id]]||'',
+    status:String(a.severity||'ALERT'), cls:isHighRisk_(a)?'fail':'review', at:String(a.occurred_at||'')
+  }));
+  contracts.filter(c => c.status==='SENT').forEach(c => rows.push({
+    kind:'契約', target:c.contract_id, work:nameMap[c.work_id]||'', status:'締結待ち', cls:'wait', at:String(c.signed_at||'')
+  }));
+  invoices.filter(v => v.status==='入金待ち').forEach(v => rows.push({
+    kind:'入金', target:v.contract_id, work:nameMap[ctrWork[v.contract_id]]||'', status:'入金待ち', cls:'unpaid', at:String(v.issued_at||'')
+  }));
+  rows.sort((a,b) => String(b.at).localeCompare(String(a.at)));
+  return { kpis: kpis, alerts: rows.slice(0,8) };
 }
-function admin_reviewQueue(){ return readRows_(ssOps_(),'AI_Findings'); }
-function admin_setHumanReview(submissionId, result, reviewer, comment){
+
+/** 審査キュー：ジョブ単位に総合結果・経路(A/B)・主指摘・作品名を結合 */
+function admin_reviewQueue(){
+  const jobs      = readRows_(ssOps_(),'AI_Review_Jobs');
+  const findings  = readRows_(ssOps_(),'AI_Findings');
+  const apps      = readRows_(ssOps_(),'Applications');
+  const subs      = readRows_(ssOps_(),'Submissions');
+  const contracts = readRows_(ssOps_(),'Contracts');
+  const nameMap   = worksNameMap_();
+  const appById   = {}; apps.forEach(a => { appById[a.application_id] = a; });
+  const subById   = {}; subs.forEach(s => { subById[s.submission_id] = s; });
+  const ctrWork   = {}; contracts.forEach(c => { ctrWork[c.contract_id] = c.work_id; });
+
+  return jobs.map(j => {
+    const fs = findings.filter(f => f.ai_review_id===j.ai_review_id);
+    const top = fs.slice().sort((a,b)=>sevRank_(b)-sevRank_(a))[0];
+    const timing = j.application_id ? 'A' : 'B';        // A=締結前提出 / B=締結後提出
+    let workId = '';
+    if(j.application_id && appById[j.application_id]) workId = appById[j.application_id].work_id;
+    else if(j.submission_id && subById[j.submission_id]) workId = ctrWork[subById[j.submission_id].contract_id];
+    return {
+      id: j.submission_id || j.application_id || j.ai_review_id,
+      ai_review_id: j.ai_review_id,
+      work: nameMap[workId] || '',
+      timing: timing,
+      job_status: j.status,
+      result: j.status==='COMPLETED' ? worstResult_(fs) : (j.status||'QUEUED'),
+      finding: top ? String(top.evidence||top.result||'') : ''
+    };
+  });
+}
+
+/** 人手判断の記録（CLEARED / CORRECTION_REQUIRED / ESCALATED） */
+function admin_setHumanReview(submissionId, result, comment, reviewer){
+  reviewer = reviewer || actor_();
   appendRow_(ssOps_(),'Human_Reviews',{ human_review_id:newId_('HRV'), submission_id:submissionId,
-    reviewer:reviewer, result:result, comments:comment, reviewed_at:new Date().toISOString() });
-  logEvent_('human_review', submissionId, reviewer, null, {result});
+    reviewer:reviewer, result:result, comments:comment||'', reviewed_at:new Date().toISOString() });
+  logEvent_('human_review', submissionId, reviewer, null, {result:result});
+  return true;
 }
-function admin_listContracts(){ return readRows_(ssOps_(),'Contracts'); }
+
+/** 契約一覧：締結済(Contracts)＋締結待ち(Applications status=SENT)を結合、契約者名はマスク */
+function admin_listContracts(){
+  const contracts = readRows_(ssOps_(),'Contracts');
+  const apps      = readRows_(ssOps_(),'Applications');
+  const nameMap   = worksNameMap_();
+  const rows = contracts.map(c => ({
+    contract_id:c.contract_id, application_id:c.application_id, work:nameMap[c.work_id]||'',
+    applicant:'＊＊＊＊（個人）', status:c.status||'', signed_at:String(c.signed_at||'')
+  }));
+  const contracted = {}; contracts.forEach(c => { contracted[c.application_id] = true; });
+  apps.filter(a => a.status==='SENT' && !contracted[a.application_id]).forEach(a => rows.push({
+    contract_id:'—', application_id:a.application_id, work:nameMap[a.work_id]||'',
+    applicant:'＊＊＊＊（個人）', status:'送信済・締結待ち', signed_at:''
+  }));
+  return rows;
+}
+
+/** B経路：締結済契約へ作品提出リンクを送付 */
+function admin_sendUploadLink(contractId){
+  const c = readRows_(ssOps_(),'Contracts').find(x => x.contract_id===contractId);
+  if(!c) throw new Error('契約が見つかりません: '+contractId);
+  const a = readRows_(ssOps_(),'Applications').find(x => x.application_id===c.application_id);
+  if(!a || !a.applicant_email) throw new Error('申込メールが見つかりません');
+  sendUploadLink_(contractId, a.applicant_email);
+  logEvent_('contract', contractId, actor_(), null, {upload_link_sent:true});
+  return true;
+}
+
+/** 入金管理：請求(Invoices)に入金(Payments)状況・作品名を結合 */
+function admin_listPayments(){
+  const invoices  = readRows_(ssOps_(),'Invoices');
+  const payments  = readRows_(ssOps_(),'Payments');
+  const contracts = readRows_(ssOps_(),'Contracts');
+  const nameMap   = worksNameMap_();
+  const ctrWork   = {}; contracts.forEach(c => { ctrWork[c.contract_id] = c.work_id; });
+  return invoices.map(v => {
+    const pay = payments.find(p => String(p.invoice_id)===String(v.invoice_id) && p.status==='入金済');
+    return {
+      invoice_id:v.invoice_id, contract_id:v.contract_id, work:nameMap[ctrWork[v.contract_id]]||'',
+      amount:String(v.amount||v.amount_rule||''), status: pay ? '入金済' : (v.status||'入金待ち'),
+      paid_at: pay ? String(pay.paid_at||'') : ''
+    };
+  });
+}
+
+/** 入金記録（結果入力）。recordedBy/paidAt は未指定なら補完。 */
 function admin_recordPayment(contractId, invoiceId, amount, paidAt, recordedBy){
+  recordedBy = recordedBy || actor_();
+  paidAt = paidAt || new Date().toISOString().slice(0,10);
   appendRow_(ssOps_(),'Payments',{ payment_id:newId_('PAY'), invoice_id:invoiceId, contract_id:contractId,
     amount:amount, paid_at:paidAt, status:'入金済', recorded_by:recordedBy });
   if(invoiceId) updateRow_(ssOps_(),'Invoices','invoice_id',invoiceId,{status:'入金済'});
-  logEvent_('payment', contractId, recordedBy, null, {amount, paid_at:paidAt});
+  logEvent_('payment', contractId, recordedBy, null, {amount:amount, paid_at:paidAt});
+  return true;
+}
+
+/** 入金の取消（請求は入金待ちへ戻す） */
+function admin_voidPayment(invoiceId){
+  const pays = readRows_(ssOps_(),'Payments').filter(p => String(p.invoice_id)===String(invoiceId) && p.status==='入金済');
+  pays.forEach(p => updateRow_(ssOps_(),'Payments','payment_id',p.payment_id,{status:'取消'}));
+  if(invoiceId) updateRow_(ssOps_(),'Invoices','invoice_id',invoiceId,{status:'入金待ち'});
+  logEvent_('payment', invoiceId, actor_(), {status:'入金済'}, {status:'取消'});
+  return true;
+}
+
+/** 半期清算：計算書(Settlement_Statements)に配分額・パートナー名を結合 */
+function admin_listSettlements(){
+  const stmts       = readRows_(ssOps_(),'Settlement_Statements');
+  const settlements = readRows_(ssOps_(),'Settlements');
+  const partners    = readRows_(ssOps_(),'Partners');
+  const pName = {}; partners.forEach(p => { pName[p.partner_id] = p.name; });
+  const sAmt  = {}; settlements.forEach(s => { sAmt[s.settlement_id] = s.amount; });
+  return stmts.map(s => ({
+    statement_id:s.statement_id, period:String(s.period||''), partner:pName[s.partner_id]||String(s.partner_id||''),
+    amount:String(sAmt[s.settlement_id]||''), status:s.status||'', objection_due:String(s.objection_due||'')
+  }));
+}
+
+/** 計算書の承認（DRAFT→APPROVED）。送信は batch_sendStatement_ 側で実施。 */
+function admin_approveStatement(statementId){
+  updateRow_(ssOps_(),'Settlement_Statements','statement_id',statementId,{status:'APPROVED'});
+  logEvent_('settlement_statement', statementId, actor_(), null, {status:'APPROVED'});
+  return true;
 }
 
 // ============================================================
