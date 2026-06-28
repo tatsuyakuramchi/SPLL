@@ -1,0 +1,14 @@
+# clasp: 実プロジェクトの scriptId を含むため、リポジトリにはテンプレートのみを置く
+spll_src/.clasp.json
+.clasprc.json
+
+# 秘密情報は GAS の ScriptProperties に置く。万一ローカルに置いた場合の保険
+.env
+*.local
+secrets.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+node_modules/
+*.log

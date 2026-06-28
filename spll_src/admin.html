@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPLL 事務局 管理コンソール</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+JP:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#14201D;--paper:#ECEFEE;--surface:#FFFFFF;--line:#D2D9D6;--soft:#5C6663;
+    --teal:#0E6E63;--teal-bg:#E2F0ED;
+    --pass:#2F7D5B;--pass-bg:#E2F0E9;--review:#B6661E;--review-bg:#F6E7D6;
+    --fail:#A6342F;--fail-bg:#F3DEDC;--sign:#2C5E8F;--sign-bg:#E2EBF3;--paybg:#EFEAF6;--pay:#5B4B8A;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:"IBM Plex Sans JP",system-ui,sans-serif;font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased;}
+  .mono{font-family:"IBM Plex Mono",monospace;}
+  header{background:var(--ink);color:#E7EEEC;}
+  .hwrap{max-width:1140px;margin:0 auto;padding:13px 22px;display:flex;align-items:center;justify-content:space-between;}
+  .brand{display:flex;align-items:center;gap:11px;}
+  .logo{width:32px;height:32px;border:2px solid var(--teal);border-radius:7px;display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--teal);font-size:12px;}
+  .brand .t{font-weight:700;font-size:15px;}
+  .brand .s{font-family:"IBM Plex Mono";font-size:9px;color:#7FA39C;letter-spacing:.14em;text-transform:uppercase;}
+  .who{font-size:11px;color:#9DB5B0;font-family:"IBM Plex Mono";}
+  .tabs{background:var(--surface);border-bottom:1px solid var(--line);}
+  .twrap{max-width:1140px;margin:0 auto;padding:0 22px;display:flex;gap:4px;}
+  .tab{padding:13px 16px;font-size:13px;font-weight:600;color:var(--soft);cursor:pointer;border-bottom:3px solid transparent;}
+  .tab.on{color:var(--teal);border-color:var(--teal);}
+  main{max-width:1140px;margin:0 auto;padding:24px 22px 80px;}
+  .view{display:none;}.view.on{display:block;}
+  h2{font-size:17px;margin:0 0 4px;}
+  .sub{color:var(--soft);font-size:12px;margin:0 0 18px;}
+
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:22px;}
+  .kpi{background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:15px 16px;}
+  .kpi .n{font-size:28px;font-weight:700;font-family:"IBM Plex Mono";line-height:1;}
+  .kpi .l{font-size:11px;color:var(--soft);margin-top:6px;}
+  .kpi.alert .n{color:var(--fail);}.kpi.warn .n{color:var(--review);}.kpi.sign .n{color:var(--sign);}.kpi.pay .n{color:var(--pay);}
+
+  .panel{background:var(--surface);border:1px solid var(--line);border-radius:11px;overflow:hidden;margin-bottom:16px;}
+  .ph{padding:13px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;}
+  .ph h3{margin:0;font-size:14px;}
+  .ph .hint{font-size:11px;color:var(--soft);font-family:"IBM Plex Mono";}
+  table{width:100%;border-collapse:collapse;}
+  th{background:#F5F7F6;text-align:left;padding:9px 12px;font-size:11px;color:var(--soft);font-family:"IBM Plex Mono";letter-spacing:.04em;border-bottom:1px solid var(--line);white-space:nowrap;}
+  td{padding:10px 12px;border-bottom:1px solid #EDF0EF;font-size:12px;vertical-align:middle;}
+  tr:last-child td{border-bottom:none;}
+  .id{font-family:"IBM Plex Mono";font-size:11px;color:var(--soft);}
+  .pill{font-family:"IBM Plex Mono";font-size:10px;font-weight:600;padding:3px 8px;border-radius:20px;white-space:nowrap;}
+  .pill.pass{background:var(--pass-bg);color:var(--pass);}
+  .pill.review{background:var(--review-bg);color:var(--review);}
+  .pill.fail{background:var(--fail-bg);color:var(--fail);}
+  .pill.sign{background:var(--sign-bg);color:var(--sign);}
+  .pill.wait{background:#ECEDEF;color:#6A6F77;}
+  .pill.paid{background:var(--pass-bg);color:var(--pass);}
+  .pill.unpaid{background:var(--review-bg);color:var(--review);}
+  .pill.A{background:var(--pass-bg);color:var(--pass);}
+  .pill.B{background:#E7E2F2;color:var(--pay);}
+  .btn{font-size:11px;border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:5px 10px;cursor:pointer;font-weight:600;color:var(--ink);}
+  .btn:hover{border-color:var(--teal);color:var(--teal);}
+  .btn.p{background:var(--teal);color:#fff;border-color:var(--teal);}
+  .btn.p:hover{background:#0a5a51;color:#fff;}
+  .btn.d{color:var(--fail);}.btn.d:hover{border-color:var(--fail);}
+  .actions{display:flex;gap:6px;flex-wrap:wrap;}
+  .evi{font-size:11px;color:var(--soft);}
+  .src{font-family:"IBM Plex Mono";font-size:10px;color:#9AA39F;}
+  .note{background:var(--teal-bg);border-left:4px solid var(--teal);border-radius:8px;padding:11px 14px;font-size:12px;margin-bottom:16px;}
+</style>
+</head>
+<body>
+<header><div class="hwrap">
+  <div class="brand"><div class="logo">SP</div><div><div class="t">SPLL 事務局 管理コンソール</div><div class="s">Admin · GAS Web App</div></div></div>
+  <div class="who">事務局・法務／経理　|　社内GWS限定</div>
+</div></header>
+
+<div class="tabs"><div class="twrap">
+  <div class="tab on" data-v="dash">ダッシュボード</div>
+  <div class="tab" data-v="review">作品審査管理</div>
+  <div class="tab" data-v="contract">契約管理</div>
+  <div class="tab" data-v="pay">入金・清算</div>
+</div></div>
+
+<main>
+  <!-- DASH -->
+  <section class="view on" id="v-dash">
+    <h2>ダッシュボード</h2>
+    <p class="sub">各業務台帳（スプレッドシート）の状態をリアルタイムに集約。数値はサンプル。</p>
+    <div class="kpis">
+      <div class="kpi warn"><div class="n">7</div><div class="l">AI審査・要確認</div></div>
+      <div class="kpi alert"><div class="n">2</div><div class="l">高リスク（赤）</div></div>
+      <div class="kpi"><div class="n">15</div><div class="l">未審査（提出済）</div></div>
+      <div class="kpi sign"><div class="n">4</div><div class="l">締結待ち</div></div>
+      <div class="kpi pay"><div class="n">6</div><div class="l">入金待ち</div></div>
+      <div class="kpi"><div class="n">9</div><div class="l">報告待ち</div></div>
+    </div>
+    <div class="note">提出→AI審査→人手確認→締結→入金→報告→清算の各段の滞留を、ここから各タブへドリルダウンします。赤・要確認・締結待ち・入金待ちが主な人手ポイントです。</div>
+    <div class="panel">
+      <div class="ph"><h3>直近の要対応</h3><span class="hint">Compliance_Alerts / Contracts より</span></div>
+      <table><thead><tr><th>区分</th><th>対象</th><th>作品</th><th>状態</th><th>発生</th></tr></thead><tbody>
+        <tr><td>審査</td><td class="id">SUB-202606-0042</td><td>新クトゥルフ神話TRPG</td><td><span class="pill fail">HIGH_RISK</span></td><td class="id">06-27</td></tr>
+        <tr><td>審査</td><td class="id">SUB-202606-0039</td><td>ソード・ワールド2.5</td><td><span class="pill review">REVIEW</span></td><td class="id">06-27</td></tr>
+        <tr><td>契約</td><td class="id">CTR-202606-0018</td><td>光砕のリヴァルチャー</td><td><span class="pill wait">締結待ち</span></td><td class="id">06-26</td></tr>
+        <tr><td>入金</td><td class="id">CTR-202606-0011</td><td>インセイン</td><td><span class="pill unpaid">入金待ち</span></td><td class="id">06-25</td></tr>
+      </tbody></table>
+    </div>
+  </section>
+
+  <!-- REVIEW -->
+  <section class="view" id="v-review">
+    <h2>作品審査管理</h2>
+    <p class="sub">Geminiの一次審査結果（PASS/REVIEW/HIGH_RISK）を受けて、人手判断（承認・是正要求・エスカレーション）を行います。A作品は締結前、B作品は締結後の提出。</p>
+    <div class="panel">
+      <div class="ph"><h3>審査キュー</h3><span class="hint">Submissions / AI_Findings より</span></div>
+      <table><thead><tr><th>提出ID</th><th>作品</th><th>経路</th><th>AI結果</th><th>主な指摘</th><th>人手判断</th></tr></thead><tbody>
+        <tr><td class="id">SUB-202606-0042</td><td>新クトゥルフ神話TRPG</td><td><span class="pill B">締結後</span></td><td><span class="pill fail">HIGH_RISK</span></td><td class="evi">必須クレジット欠落（p.1）</td><td class="actions"><button class="btn p">原本確認</button><button class="btn">是正要求</button><button class="btn d">上申</button></td></tr>
+        <tr><td class="id">SUB-202606-0039</td><td>ソード・ワールド2.5</td><td><span class="pill B">締結後</span></td><td><span class="pill review">REVIEW</span></td><td class="evi">公式誤認の可能性（表紙）</td><td class="actions"><button class="btn p">原本確認</button><button class="btn">承認(CLEARED)</button><button class="btn">是正要求</button></td></tr>
+        <tr><td class="id">APP-202606-0051</td><td>光砕のリヴァルチャー</td><td><span class="pill A">締結前</span></td><td><span class="pill pass">PASS候補</span></td><td class="evi">明確な違反候補なし</td><td class="actions"><button class="btn">抜取確認</button><span class="src">→ 契約リンク自動送付済</span></td></tr>
+        <tr><td class="id">SUB-202606-0036</td><td>インセイン</td><td><span class="pill B">締結後</span></td><td><span class="pill pass">PASS候補</span></td><td class="evi">—</td><td class="actions"><button class="btn">抜取確認</button></td></tr>
+      </tbody></table>
+    </div>
+    <div class="note">AI結果は一次スクリーニングで、承認・適法性保証ではありません。最終判断は人手で行い、判断はEventsへ記録されます。</div>
+  </section>
+
+  <!-- CONTRACT -->
+  <section class="view" id="v-contract">
+    <h2>契約管理</h2>
+    <p class="sub">FormRun申込→CloudSign API送信→締結の状態を一覧。締結有無はCloudSignのWebhookでSheetsへ自動書き戻し。</p>
+    <div class="panel">
+      <div class="ph"><h3>契約一覧</h3><span class="hint">Applications / Contracts より</span></div>
+      <table><thead><tr><th>契約ID</th><th>申込ID</th><th>作品</th><th>契約者</th><th>締結状態</th><th>締結日</th><th>操作</th></tr></thead><tbody>
+        <tr><td class="id">CTR-202606-0018</td><td class="id">APP-202606-0050</td><td>光砕のリヴァルチャー</td><td>＊＊＊＊（個人）</td><td><span class="pill wait">送信済・締結待ち</span></td><td class="id">—</td><td class="actions"><button class="btn">CloudSign確認</button><button class="btn">再送</button></td></tr>
+        <tr><td class="id">CTR-202606-0017</td><td class="id">APP-202606-0048</td><td>新クトゥルフ神話TRPG</td><td>＊＊＊＊（個人）</td><td><span class="pill sign">締結済</span></td><td class="id">06-26</td><td class="actions"><button class="btn">提出案内送付</button><button class="btn d">解除</button></td></tr>
+        <tr><td class="id">CTR-202606-0011</td><td class="id">APP-202606-0040</td><td>インセイン</td><td>＊＊＊＊（個人）</td><td><span class="pill sign">締結済</span></td><td class="id">06-20</td><td class="actions"><button class="btn">契約詳細</button></td></tr>
+      </tbody></table>
+    </div>
+    <div class="note">締結状態の遷移（送信済→締結済／辞退／取消）はCloudSign Webhook（COMPLETED等）またはAPI照合バッチのみが更新します。手動での締結化はできません。</div>
+  </section>
+
+  <!-- PAY -->
+  <section class="view" id="v-pay">
+    <h2>入金・清算</h2>
+    <p class="sub">利用許諾料の請求・入金消込と、半期清算（計算書生成）の起点。入金があったら結果を入力します。</p>
+    <div class="panel">
+      <div class="ph"><h3>入金管理（利用許諾料）</h3><span class="hint">Invoices / Payments より</span></div>
+      <table><thead><tr><th>契約ID</th><th>作品</th><th>請求額</th><th>入金状態</th><th>入金日</th><th>結果入力</th></tr></thead><tbody>
+        <tr><td class="id">CTR-202606-0017</td><td>新クトゥルフ神話TRPG</td><td>売上の10％</td><td><span class="pill unpaid">入金待ち</span></td><td class="id">—</td><td class="actions"><button class="btn p">入金を記録</button></td></tr>
+        <tr><td class="id">CTR-202606-0011</td><td>インセイン</td><td>16,500円</td><td><span class="pill paid">入金済</span></td><td class="id">06-24</td><td class="actions"><button class="btn">取消</button></td></tr>
+      </tbody></table>
+    </div>
+    <div class="panel">
+      <div class="ph"><h3>半期清算・計算書</h3><span class="hint">Settlements / Settlement_Statements より</span></div>
+      <table><thead><tr><th>期</th><th>パートナー</th><th>配分額</th><th>計算書状態</th><th>異議期限</th><th>操作</th></tr></thead><tbody>
+        <tr><td>2026H1</td><td>どらこにあん</td><td>＊＊＊円</td><td><span class="pill wait">DRAFT</span></td><td class="id">—</td><td class="actions"><button class="btn">集計表で突合</button><button class="btn p">承認</button></td></tr>
+        <tr><td>2026H1</td><td>グループSNE</td><td>＊＊＊円</td><td><span class="pill sign">送信済(みなし確認待ち)</span></td><td class="id">07-26</td><td class="actions"><button class="btn">CloudSign確認</button></td></tr>
+      </tbody></table>
+    </div>
+    <div class="note">パートナー清算書は仕入明細書方式。承認後CloudSignでみなし合意付き送信し、発効日から1ヶ月で確認とみなして支払対象化します。既発生の配分は保護されます。</div>
+  </section>
+</main>
+
+<script>
+document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{
+  document.querySelectorAll(".tab").forEach(x=>x.classList.remove("on"));
+  document.querySelectorAll(".view").forEach(x=>x.classList.remove("on"));
+  t.classList.add("on"); document.getElementById("v-"+t.dataset.v).classList.add("on");
+  window.scrollTo(0,0);
+});
+</script>
+</body>
+</html>
