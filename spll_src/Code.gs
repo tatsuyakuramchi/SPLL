@@ -26,8 +26,10 @@ const CFG = {
   RETENTION_DAYS_REJECTED: 365,                     // A経路落選データ保有：1年
 };
 function prop_(k){ return PropertiesService.getScriptProperties().getProperty(k); }
-function ssMaster_(){ return SpreadsheetApp.openById(CFG.SS_MASTER); }
-function ssOps_(){ return SpreadsheetApp.openById(CFG.SS_OPS); }
+/** 設定値の解決：ScriptProperties を優先し、無ければ CFG の既定値にフォールバック */
+function cfg_(k){ return prop_(k) || CFG[k]; }
+function ssMaster_(){ return SpreadsheetApp.openById(cfg_('SS_MASTER')); }
+function ssOps_(){ return SpreadsheetApp.openById(cfg_('SS_OPS')); }
 function sheet_(ss, name){ return ss.getSheetByName(name); }
 
 /** シートを連想配列の配列で読む（1行目をヘッダとみなす） */
@@ -101,6 +103,14 @@ function api_listWorks(){
 }
 function api_getWork(workId){ return api_listWorks().find(w=>w.id===workId) || null; }
 
+/** 公開：同意文（個人情報）・規約テンプレートを返す（管理コンソールから編集可能） */
+function api_getLegalTexts(){
+  return {
+    privacy:       getConfig_('LEGAL_PRIVACY_TEXT', DEFAULT_PRIVACY),
+    termsTemplate: getConfig_('LEGAL_TERMS_TEMPLATE', DEFAULT_TERMS_TEMPLATE)
+  };
+}
+
 // ============================================================
 // 2. 申込 → Applications 書き出し（D-11）
 // ============================================================
@@ -143,6 +153,8 @@ function cloudSignSend_(ctx){
 }
 function cloudSignAccessToken_(){
   const clientId = prop_('CLOUDSIGN_CLIENT_ID');
+  const secret   = prop_('CLOUDSIGN_SECRET');
+  if(!clientId || !secret) throw new Error('CloudSign未設定：管理コンソール「設定」から登録してください');
   // TODO: OAuth client_credentials等でアクセストークン取得
   return 'TODO';
 }
@@ -180,7 +192,7 @@ function isDuplicateWebhook_(docId, event){
 // 4. Drive 提出・Gemini 一次審査
 // ============================================================
 function createContractFolder_(contractId){
-  const root = DriveApp.getFolderById(CFG.DRIVE_ROOT);
+  const root = DriveApp.getFolderById(cfg_('DRIVE_ROOT'));
   const f = root.createFolder(contractId);
   ['01_Contract','02_Submissions','03_AI_Reviews','04_Human_Reviews','05_Usage_Reports','06_Settlements']
     .forEach(n=>f.createFolder(n));
@@ -196,12 +208,13 @@ function sendUploadLink_(contractId, email){
 function enqueueAiReview_(ctx){
   const aiId = newId_('AIR');
   appendRow_(ssOps_(),'AI_Review_Jobs',{ ai_review_id:aiId, application_id:ctx.applicationId||'',
-    submission_id:ctx.submissionId||'', model:CFG.GEMINI_MODEL, status:'QUEUED', retry_count:0 });
+    submission_id:ctx.submissionId||'', model:cfg_('GEMINI_MODEL'), status:'QUEUED', retry_count:0 });
   // 時間主導トリガー or 即時で runAiReview_(aiId)
 }
 /** Vertex AI Gemini 一次審査（response schema 指定・構造化出力） */
 function geminiReview_(fileBlob, rules){
-  const url = `https://${CFG.GCP_REGION}-aiplatform.googleapis.com/v1/projects/${CFG.GCP_PROJECT}/locations/${CFG.GCP_REGION}/publishers/google/models/${CFG.GEMINI_MODEL}:generateContent`;
+  const region=cfg_('GCP_REGION'), project=cfg_('GCP_PROJECT'), model=cfg_('GEMINI_MODEL');
+  const url = `https://${region}-aiplatform.googleapis.com/v1/projects/${project}/locations/${region}/publishers/google/models/${model}:generateContent`;
   const payload = {
     contents:[{ role:'user', parts:[
       { text: buildReviewPrompt_(rules) },
@@ -322,6 +335,144 @@ function batch_purgeRejected(){
   readRows_(ssOps_(),'Applications')
     .filter(a=>a.status==='REJECTED' && a.retention_until && new Date(a.retention_until)<=now)
     .forEach(a=>{ /* TODO: Drive一時ファイル削除＋行マスク */ logEvent_('application',a.application_id,'system',{status:'REJECTED'},{purged:true}); });
+}
+
+// ============================================================
+// 9. GAS③ 管理コンソール：設定
+//    同意文・規約／作品マスタ／データソース／外部API（CloudSign・FormRun）
+//    すべて google.script.run から呼ぶ。社内GWS限定で公開すること。
+// ============================================================
+
+/** 操作者メール（監査用）。取得不能時は 'admin'。 */
+function actor_(){ try{ return Session.getActiveUser().getEmail() || 'admin'; }catch(e){ return 'admin'; } }
+
+// ---- Config シート（業務台帳）read/write ----
+function getConfig_(key, def){
+  const r = readRows_(ssOps_(), 'Config').find(x => String(x.config_key) === key);
+  return (r && r.value !== '' && r.value !== undefined) ? r.value : (def !== undefined ? def : '');
+}
+function setConfig_(key, value){
+  const ss = ssOps_();
+  const patch = { value: value, environment: 'default', updated_at: new Date().toISOString() };
+  if(!updateRow_(ss, 'Config', 'config_key', key, patch)){
+    appendRow_(ss, 'Config', Object.assign({ config_key: key }, patch));
+  }
+}
+
+// ---- 9.1 同意文・規約 ----
+const DEFAULT_PRIVACY =
+'<h4>1. 取得する情報</h4><ol><li>氏名、連絡先（メールアドレス）</li><li>申込作品・利用態様、提出作品データ</li><li>契約に至る場合は、住所・振込先その他の契約履行に必要な情報</li></ol>'+
+'<h4>2. 利用目的</h4><ol><li>SPLL利用許諾の審査・契約の締結および管理</li><li>提出作品の適合性審査（AIによる一次審査を含む）</li><li>利用許諾料・配分の計算および清算</li><li>お問い合わせ対応・連絡</li><li>法令遵守および権利保護</li></ol>'+
+'<h4>3. 委託・第三者提供</h4><ol><li>契約締結のため電子契約サービス（CloudSign）に取扱いを委託します。</li><li>データの保管・処理のためGoogle Workspace／Google Cloud（Vertex AI Geminiによる作品審査を含む）に取扱いを委託します。</li><li>法令に基づく場合を除き、ご本人の同意なく第三者へ提供しません。</li></ol>'+
+'<h4>4. 保有期間</h4><ol><li>契約に至らなかった申込情報・提出作品データは、取得から1年で削除します。</li><li>契約に至った場合は、契約期間および関係法令の定める期間、保有します。</li></ol>'+
+'<h4>5. 開示等の請求</h4><ol><li>保有個人データの開示・訂正・利用停止等のご請求は、下記窓口で受け付けます。［窓口記載・法務確定前］</li></ol>';
+
+// 規約はテンプレート。{{name}}{{pub}}{{ok}}{{no}}{{media}}{{fee}}{{credit}} を作品ごとに差込む。
+const DEFAULT_TERMS_TEMPLATE =
+'<h4>第1条（許諾の範囲）</h4><ol><li>本作品の許諾要素（{{ok}}）について、対象媒体（{{media}}）での二次創作・頒布を許諾します。</li><li>禁止要素（{{no}}）は利用できません。</li></ol>'+
+'<h4>第2条（利用許諾料）</h4><ol><li>利用許諾料は {{fee}} とします。免除・追加契約の条件は別表によります。</li></ol>'+
+'<h4>第3条（クレジット表記）</h4><ol><li>{{credit}}。「公式」「公認」等と誤認させる表示は行いません。</li></ol>'+
+'<h4>第4条（作品審査・是正）</h4><ol><li>提出作品はAI（Vertex AI Gemini）による一次審査に付されます。AIの判定は最終決定ではなく、当社・事務局の人的判断と区別されます。</li><li>適合性に疑義がある場合、是正の要求・公開停止・許諾の取消し等を行うことがあります。</li></ol>'+
+'<h4>第5条（非承認・非保証）</h4><ol><li>審査の通過、または一定期間の無指摘は、当社の承認・適法性保証・権利非侵害保証を意味しません。</li></ol>'+
+'<h4>第6条（解除）</h4><ol><li>表明の虚偽、本規約違反その他の事由があるときは、本許諾を解除できます。［解除の遡及／非遡及は別途規定・法務確定前］</li></ol>'+
+'<h4>第7条（準拠法・管轄）</h4><ol><li>日本法に準拠し、当社所在地を管轄する裁判所を専属的合意管轄とします。</li></ol>';
+
+function admin_getLegalTexts(){ return api_getLegalTexts(); }
+function admin_saveLegalTexts(privacy, termsTemplate){
+  if(privacy !== undefined)        setConfig_('LEGAL_PRIVACY_TEXT', String(privacy));
+  if(termsTemplate !== undefined)  setConfig_('LEGAL_TERMS_TEMPLATE', String(termsTemplate));
+  logEvent_('config', 'LEGAL', actor_(), null, { saved: true });
+  return true;
+}
+
+// ---- 9.2 作品マスタ（スプレッドシート設定） ----
+const WORK_FIELDS = ['work_id','work_name','publisher','category','publish_status',
+  'review_timing','review_policy','fee_label','media','ok_elements','no_elements',
+  'credit_text','allocation_scheme_id'];
+
+/** 作品マスタ全件（内部列含む。管理用なのでホワイトリストしない） */
+function admin_listWorksMaster(){ return readRows_(ssMaster_(), 'Works_Master'); }
+
+/** 作品の追加・更新（work_id一致でupsert）。media/ok/no はCSV文字列で保存。 */
+function admin_saveWork(work){
+  const row = {};
+  WORK_FIELDS.forEach(k => { if(work[k] !== undefined) row[k] = work[k]; });
+  if(!row.work_id) row.work_id = newId_('WRK');
+  if(!row.publish_status) row.publish_status = 'DRAFT';
+  if(!updateRow_(ssMaster_(), 'Works_Master', 'work_id', row.work_id, row)){
+    appendRow_(ssMaster_(), 'Works_Master', row);
+  }
+  logEvent_('work', row.work_id, actor_(), null, { saved: true, publish_status: row.publish_status });
+  return row.work_id;
+}
+
+/** 公開状態の切替（PUBLISHED / DRAFT / UNPUBLISHED 等） */
+function admin_setWorkPublish(workId, status){
+  updateRow_(ssMaster_(), 'Works_Master', 'work_id', workId, { publish_status: status });
+  logEvent_('work', workId, actor_(), null, { publish_status: status });
+  return true;
+}
+
+// ---- 9.3 データソース設定（スプレッドシート/Drive/GCPの接続先） ----
+function admin_getDataSourceConfig(){
+  return {
+    SS_MASTER:   prop_('SS_MASTER')   || '',
+    SS_OPS:      prop_('SS_OPS')      || '',
+    DRIVE_ROOT:  prop_('DRIVE_ROOT')  || '',
+    GCP_PROJECT: prop_('GCP_PROJECT') || '',
+    GCP_REGION:  prop_('GCP_REGION')  || '',
+    GEMINI_MODEL:prop_('GEMINI_MODEL')|| '',
+    defaults: {  // 未設定時に使われる CFG 既定値（参考表示用）
+      SS_MASTER:CFG.SS_MASTER, SS_OPS:CFG.SS_OPS, DRIVE_ROOT:CFG.DRIVE_ROOT,
+      GCP_PROJECT:CFG.GCP_PROJECT, GCP_REGION:CFG.GCP_REGION, GEMINI_MODEL:CFG.GEMINI_MODEL
+    }
+  };
+}
+function admin_saveDataSourceConfig(c){
+  const sp = PropertiesService.getScriptProperties();
+  ['SS_MASTER','SS_OPS','DRIVE_ROOT','GCP_PROJECT','GCP_REGION','GEMINI_MODEL']
+    .forEach(k => { if(c[k] !== undefined) sp.setProperty(k, String(c[k])); });
+  logEvent_('config', 'DATASOURCE', actor_(), null, { saved: true });
+  return true;
+}
+
+// ---- 9.4 外部API：CloudSign / FormRun（秘密はScriptProperties・読み出しはマスク） ----
+/** 設定の取得。secret等の機微情報は値を返さず「設定済みか」のみ返す。 */
+function admin_getIntegrationConfig(){
+  return {
+    cloudsign: {
+      client_id:    prop_('CLOUDSIGN_CLIENT_ID')   || '',
+      secret_set:   !!prop_('CLOUDSIGN_SECRET'),
+      template_id:  prop_('CLOUDSIGN_TEMPLATE_ID') || '',
+      callback_url: prop_('CLOUDSIGN_CALLBACK_URL')|| '',
+      sandbox:      prop_('CLOUDSIGN_SANDBOX') === 'true'
+    },
+    formrun: {
+      form_url:           prop_('FORMRUN_FORM_URL')   || '',
+      webhook_secret_set: !!prop_('FORMRUN_WEBHOOK_SECRET'),
+      field_map:          prop_('FORMRUN_FIELD_MAP')  || ''
+    }
+  };
+}
+/** CloudSign設定の保存。secretは値が来た時のみ更新（空なら据え置き）。 */
+function admin_saveCloudSignConfig(c){
+  const sp = PropertiesService.getScriptProperties();
+  if(c.client_id    !== undefined) sp.setProperty('CLOUDSIGN_CLIENT_ID',    String(c.client_id));
+  if(c.secret)                     sp.setProperty('CLOUDSIGN_SECRET',       String(c.secret));
+  if(c.template_id  !== undefined) sp.setProperty('CLOUDSIGN_TEMPLATE_ID',  String(c.template_id));
+  if(c.callback_url !== undefined) sp.setProperty('CLOUDSIGN_CALLBACK_URL', String(c.callback_url));
+  if(c.sandbox      !== undefined) sp.setProperty('CLOUDSIGN_SANDBOX',      c.sandbox ? 'true' : 'false');
+  logEvent_('config', 'CLOUDSIGN', actor_(), null, { saved: true });
+  return true;
+}
+/** FormRun設定の保存。webhook_secretは値が来た時のみ更新。 */
+function admin_saveFormRunConfig(c){
+  const sp = PropertiesService.getScriptProperties();
+  if(c.form_url       !== undefined) sp.setProperty('FORMRUN_FORM_URL',  String(c.form_url));
+  if(c.webhook_secret)               sp.setProperty('FORMRUN_WEBHOOK_SECRET', String(c.webhook_secret));
+  if(c.field_map      !== undefined) sp.setProperty('FORMRUN_FIELD_MAP', String(c.field_map));
+  logEvent_('config', 'FORMRUN', actor_(), null, { saved: true });
+  return true;
 }
 
 // ---- utils ----

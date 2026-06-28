@@ -337,26 +337,52 @@ function showDetail(id){
   show("detail");
 }
 
-const PRIVACY=`
+// 同意文・規約は管理コンソール（admin）から編集可能。GAS上では api_getLegalTexts() で取得し、
+// 取得できない場合は下記の既定文にフォールバックする。規約は {{token}} を作品ごとに差込む。
+const DEFAULT_PRIVACY=`
 <h4>1. 取得する情報</h4><ol><li>氏名、連絡先（メールアドレス）</li><li>申込作品・利用態様、提出作品データ</li><li>契約に至る場合は、住所・振込先その他の契約履行に必要な情報</li></ol>
 <h4>2. 利用目的</h4><ol><li>SPLL利用許諾の審査・契約の締結および管理</li><li>提出作品の適合性審査（AIによる一次審査を含む）</li><li>利用許諾料・配分の計算および清算</li><li>お問い合わせ対応・連絡</li><li>法令遵守および権利保護</li></ol>
 <h4>3. 委託・第三者提供</h4><ol><li>契約締結のため電子契約サービス（CloudSign）に取扱いを委託します。</li><li>データの保管・処理のためGoogle Workspace／Google Cloud（Vertex AI Geminiによる作品審査を含む）に取扱いを委託します。</li><li>法令に基づく場合を除き、ご本人の同意なく第三者へ提供しません。</li></ol>
 <h4>4. 保有期間</h4><ol><li>契約に至らなかった申込情報・提出作品データは、取得から1年で削除します。</li><li>契約に至った場合は、契約期間および関係法令の定める期間、保有します。</li></ol>
 <h4>5. 開示等の請求</h4><ol><li>保有個人データの開示・訂正・利用停止等のご請求は、下記窓口で受け付けます。［窓口記載・法務確定前］</li></ol>`;
 
-function termsHTML(w){return `
-<h4>第1条（許諾の範囲）</h4><ol><li>本作品の許諾要素（${w.ok.join("、")}）について、対象媒体（${w.media.join("、")}）での二次創作・頒布を許諾します。</li><li>禁止要素（${w.no.join("、")}）は利用できません。</li></ol>
-<h4>第2条（利用許諾料）</h4><ol><li>利用許諾料は ${w.fee} とします。免除・追加契約の条件は別表によります。</li></ol>
-<h4>第3条（クレジット表記）</h4><ol><li>${w.credit}。「公式」「公認」等と誤認させる表示は行いません。</li></ol>
+const DEFAULT_TERMS_TEMPLATE=`
+<h4>第1条（許諾の範囲）</h4><ol><li>本作品の許諾要素（{{ok}}）について、対象媒体（{{media}}）での二次創作・頒布を許諾します。</li><li>禁止要素（{{no}}）は利用できません。</li></ol>
+<h4>第2条（利用許諾料）</h4><ol><li>利用許諾料は {{fee}} とします。免除・追加契約の条件は別表によります。</li></ol>
+<h4>第3条（クレジット表記）</h4><ol><li>{{credit}}。「公式」「公認」等と誤認させる表示は行いません。</li></ol>
 <h4>第4条（作品審査・是正）</h4><ol><li>提出作品はAI（Vertex AI Gemini）による一次審査に付されます。AIの判定は最終決定ではなく、当社・事務局の人的判断と区別されます。</li><li>適合性に疑義がある場合、是正の要求・公開停止・許諾の取消し等を行うことがあります。</li></ol>
 <h4>第5条（非承認・非保証）</h4><ol><li>審査の通過、または一定期間の無指摘は、当社の承認・適法性保証・権利非侵害保証を意味しません。</li></ol>
 <h4>第6条（解除）</h4><ol><li>表明の虚偽、本規約違反その他の事由があるときは、本許諾を解除できます。［解除の遡及／非遡及は別途規定・法務確定前］</li></ol>
-<h4>第7条（準拠法・管轄）</h4><ol><li>日本法に準拠し、当社所在地を管轄する裁判所を専属的合意管轄とします。</li></ol>`;}
+<h4>第7条（準拠法・管轄）</h4><ol><li>日本法に準拠し、当社所在地を管轄する裁判所を専属的合意管轄とします。</li></ol>`;
+
+let LEGAL = { privacy: DEFAULT_PRIVACY, termsTemplate: DEFAULT_TERMS_TEMPLATE };
+
+/** 管理コンソールで編集された同意文・規約を取得（失敗時は既定文のまま） */
+function loadLegal(){
+  if(typeof google!=="undefined" && google.script && google.script.run){
+    google.script.run.withSuccessHandler(l=>{
+      if(l && l.privacy) LEGAL.privacy = l.privacy;
+      if(l && l.termsTemplate) LEGAL.termsTemplate = l.termsTemplate;
+    }).api_getLegalTexts();
+  }
+}
+
+/** 規約テンプレートに作品データを差込んでHTML化 */
+function termsHTML(w){
+  return LEGAL.termsTemplate
+    .replace(/{{name}}/g, w.name)
+    .replace(/{{pub}}/g, w.pub)
+    .replace(/{{ok}}/g, w.ok.join("、"))
+    .replace(/{{no}}/g, w.no.join("、"))
+    .replace(/{{media}}/g, w.media.join("、"))
+    .replace(/{{fee}}/g, w.fee)
+    .replace(/{{credit}}/g, w.credit);
+}
 
 function startWizard(id){
   current=id; step=0;
   const w=WORKS.find(x=>x.id===id); const isA=w.timing==="A";
-  document.getElementById("privacyText").innerHTML=PRIVACY;
+  document.getElementById("privacyText").innerHTML=LEGAL.privacy;
   document.getElementById("termsText").innerHTML=termsHTML(w);
   const rb=document.getElementById("routeBanner"); rb.className="routebanner "+w.timing;
   rb.innerHTML=isA
@@ -392,6 +418,7 @@ function updateGates(){
 function show(v){document.querySelectorAll(".view").forEach(x=>x.classList.remove("active"));document.getElementById("v-"+v).classList.add("active");window.scrollTo(0,0);}
 document.addEventListener("change",e=>{if(/g0|g1|g2/.test(e.target.className))updateGates();});
 document.querySelectorAll(".chip").forEach(c=>c.onclick=()=>{document.querySelectorAll(".chip").forEach(x=>x.classList.remove("on"));c.classList.add("on");filter=c.dataset.f;renderGrid();});
+loadLegal();
 loadWorks();
 </script>
 </body>

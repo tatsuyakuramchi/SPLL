@@ -66,13 +66,35 @@ clasp deploy                          # Web アプリとして公開（バージ
 ### ScriptProperties（秘密情報・設定）
 
 秘密情報・環境依存値はコードに固定せず、各 GAS プロジェクトの **ScriptProperties** に設定します。
+下記は**管理コンソールの「設定」タブから登録・更新できます**（初回のみ手動投入でも可）。
 
 | キー | 用途 |
 |---|---|
-| `CLOUDSIGN_CLIENT_ID` / `CLOUDSIGN_SECRET` | CloudSign API 認証 |
-| （`Code.gs` の `CFG`） | `SS_MASTER` / `SS_OPS` / `DRIVE_ROOT` / `GCP_PROJECT` / `GCP_REGION` / `GEMINI_MODEL` |
+| `SS_MASTER` / `SS_OPS` / `DRIVE_ROOT` | 作品マスタ・業務台帳・Drive 親フォルダの ID（未設定時は `CFG` の既定値） |
+| `GCP_PROJECT` / `GCP_REGION` / `GEMINI_MODEL` | Vertex AI Gemini の接続先・モデル |
+| `CLOUDSIGN_CLIENT_ID` / `CLOUDSIGN_SECRET` | CloudSign API 認証（secret は画面に再表示しない） |
+| `CLOUDSIGN_TEMPLATE_ID` / `CLOUDSIGN_CALLBACK_URL` / `CLOUDSIGN_SANDBOX` | CloudSign 送信テンプレ・Webhook URL・サンドボックス切替 |
+| `FORMRUN_FORM_URL` / `FORMRUN_WEBHOOK_SECRET` / `FORMRUN_FIELD_MAP` | FormRun の連携設定（secret は画面に再表示しない） |
 
-`CFG` のプレースホルダ（`PUT_..._ID`）は各環境の実 ID に置換、または ScriptProperties 化してください。
+`Code.gs` の値解決は `cfg_(key)`（ScriptProperties 優先 → `CFG` 既定値）で行います。`CFG` の
+プレースホルダ（`PUT_..._ID`）は ScriptProperties で上書きするか、コード側を実 ID に置換します。
+
+### 管理コンソールからの設定（「設定」タブ）
+
+`admin.html` の「設定」タブから、運用担当が次を画面操作で更新できます（保存は即時反映）。
+
+| 区分 | 保存先 | 主な GAS 関数 |
+|---|---|---|
+| 個人情報取得同意文・規約テンプレート | `Config` シート（`LEGAL_PRIVACY_TEXT` / `LEGAL_TERMS_TEMPLATE`） | `admin_getLegalTexts` / `admin_saveLegalTexts` |
+| 作品マスタ（データソース＋作品の追加・編集・公開切替） | ScriptProperties ＋ `Works_Master` シート | `admin_getDataSourceConfig` / `admin_saveDataSourceConfig` / `admin_listWorksMaster` / `admin_saveWork` / `admin_setWorkPublish` |
+| CloudSign API 設定 | ScriptProperties | `admin_getIntegrationConfig` / `admin_saveCloudSignConfig` |
+| FormRun 設定 | ScriptProperties | `admin_getIntegrationConfig` / `admin_saveFormRunConfig` |
+
+- 規約テンプレートは差込トークン `{{name}}{{pub}}{{ok}}{{no}}{{media}}{{fee}}{{credit}}` を作品ごとに展開し、
+  公開窓口 `index.html` が `api_getLegalTexts()` で取得して申込ウィザードに表示します（取得失敗時は既定文）。
+- 公開状態を `PUBLISHED` にした作品のみ `api_listWorks()` で公開窓口に表示されます。
+- 秘密情報（CloudSign secret・FormRun webhook secret）は保存時のみ入力し、読み出しでは
+  「設定済みか」だけを返します（値は画面に出しません）。
 
 ### スプレッドシート
 
@@ -94,8 +116,10 @@ GAS 上では `google.script.run` 経由で実データに切り替わるよう�
   **審査タイミング(A/B)は内部属性**で、公開UIにはバッジ・絞り込みを出しません。
 - `report.html`：`serveReport_()` がトークンをテンプレートへ差し込み、`report_getContext(token)`
   で契約情報、`report_submit(token,data)` で報告送信。ログイン／マイページなし。
-- `admin.html`：各表のサンプル行を `admin_dashboard / admin_reviewQueue / admin_listContracts /
-  admin_recordPayment` に接続する想定（現状は表示モック）。社内GWS限定で公開。
+- `admin.html`：ダッシュボード／審査／契約／入金の各表は `admin_dashboard / admin_reviewQueue /
+  admin_listContracts / admin_recordPayment` に接続する想定（現状は表示モック）。
+  **「設定」タブは google.script.run で実配線済み**（同意文・規約／作品マスタ／CloudSign／FormRun）。
+  スタンドアロン表示時は内蔵モックで動作。社内GWS限定で公開。
 
 ## セキュリティ・個人情報
 

@@ -67,6 +67,30 @@
   .evi{font-size:11px;color:var(--soft);}
   .src{font-family:"IBM Plex Mono";font-size:10px;color:#9AA39F;}
   .note{background:var(--teal-bg);border-left:4px solid var(--teal);border-radius:8px;padding:11px 14px;font-size:12px;margin-bottom:16px;}
+
+  /* ===== SETTINGS ===== */
+  .subtabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;}
+  .subtab{padding:7px 14px;border:1px solid var(--line);border-radius:20px;font-size:12px;font-weight:600;color:var(--soft);cursor:pointer;background:var(--surface);}
+  .subtab.on{background:var(--teal);color:#fff;border-color:var(--teal);}
+  .setpane{display:none;}.setpane.on{display:block;}
+  .setnote{font-size:11.5px;color:var(--soft);margin:0 0 14px;}
+  .pbody{padding:16px;}
+  .pfoot{padding:12px 16px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px;background:#FAFBFB;}
+  .fld{margin-bottom:12px;}
+  .fld label{display:block;font-size:12px;font-weight:600;margin-bottom:4px;}
+  .fld .h{font-size:11px;color:var(--soft);font-weight:400;font-family:"IBM Plex Mono";}
+  .fld input,.fld select,.fld textarea{width:100%;border:1px solid var(--line);border-radius:7px;padding:8px 10px;font-size:13px;font-family:inherit;color:var(--ink);background:var(--surface);}
+  .fld input:focus,.fld select:focus,.fld textarea:focus{outline:none;border-color:var(--teal);}
+  .fld textarea.code{min-height:160px;font-family:"IBM Plex Mono",monospace;font-size:12px;line-height:1.55;resize:vertical;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  @media(max-width:720px){.grid2{grid-template-columns:1fr;}}
+  .save{background:var(--teal);color:#fff;border:1px solid var(--teal);border-radius:8px;padding:9px 18px;font-size:13px;font-weight:700;cursor:pointer;}
+  .save:hover{background:#0a5a51;}
+  .chk{display:flex;align-items:center;gap:8px;font-size:12px;margin-top:4px;}
+  .chk input{width:auto;}
+  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:11px 20px;border-radius:9px;font-size:13px;z-index:50;opacity:0;transition:.2s;pointer-events:none;box-shadow:0 6px 24px rgba(0,0,0,.25);}
+  .toast.show{opacity:1;}
+  .toast.err{background:var(--fail);}
 </style>
 </head>
 <body>
@@ -80,6 +104,7 @@
   <div class="tab" data-v="review">作品審査管理</div>
   <div class="tab" data-v="contract">契約管理</div>
   <div class="tab" data-v="pay">入金・清算</div>
+  <div class="tab" data-v="settings">設定</div>
 </div></div>
 
 <main>
@@ -158,15 +183,245 @@
     </div>
     <div class="note">パートナー清算書は仕入明細書方式。承認後CloudSignでみなし合意付き送信し、発効日から1ヶ月で確認とみなして支払対象化します。既発生の配分は保護されます。</div>
   </section>
+
+  <!-- SETTINGS -->
+  <section class="view" id="v-settings">
+    <h2>設定</h2>
+    <p class="sub">公開申込窓口で表示する同意文・規約、作品マスタ（スプレッドシート）、外部API（CloudSign・FormRun）の接続設定を管理します。保存内容は即時に反映されます。</p>
+    <div class="subtabs">
+      <div class="subtab on" data-p="legal">同意文・規約</div>
+      <div class="subtab" data-p="works">作品マスタ</div>
+      <div class="subtab" data-p="cloudsign">CloudSign API</div>
+      <div class="subtab" data-p="formrun">FormRun</div>
+    </div>
+
+    <!-- LEGAL -->
+    <div class="setpane on" id="p-legal">
+      <div class="panel">
+        <div class="ph"><h3>個人情報の取得同意文</h3><span class="hint">Config: LEGAL_PRIVACY_TEXT</span></div>
+        <div class="pbody">
+          <p class="setnote">申込ウィザードのステップ1で表示されます。HTML可（&lt;h4&gt; / &lt;ol&gt; / &lt;li&gt; 等）。</p>
+          <div class="fld"><textarea id="set-privacy" class="code" placeholder="個人情報の取得同意文（HTML）"></textarea></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="ph"><h3>利用規約テンプレート</h3><span class="hint">Config: LEGAL_TERMS_TEMPLATE</span></div>
+        <div class="pbody">
+          <p class="setnote">差込トークン： <span class="mono">{{name}}</span> 作品名 ／ <span class="mono">{{pub}}</span> 出版社 ／ <span class="mono">{{ok}}</span> 許諾要素 ／ <span class="mono">{{no}}</span> 禁止要素 ／ <span class="mono">{{media}}</span> 媒体 ／ <span class="mono">{{fee}}</span> 許諾料 ／ <span class="mono">{{credit}}</span> クレジット。作品ごとに自動で差し込まれます。</p>
+          <div class="fld"><textarea id="set-terms" class="code" placeholder="利用規約テンプレート（HTML・差込トークン可）"></textarea></div>
+        </div>
+        <div class="pfoot"><button class="save" onclick="saveLegal()">同意文・規約を保存</button></div>
+      </div>
+    </div>
+
+    <!-- WORKS -->
+    <div class="setpane" id="p-works">
+      <div class="panel">
+        <div class="ph"><h3>データソース接続</h3><span class="hint">ScriptProperties</span></div>
+        <div class="pbody">
+          <p class="setnote">作品マスタ・業務台帳のスプレッドシートIDや保存先を設定します。未入力の項目はコード既定値（プレースホルダ表示）が使われます。</p>
+          <div class="grid2">
+            <div class="fld"><label>作品マスタ Spreadsheet ID <span class="h">SS_MASTER</span></label><input id="ds-SS_MASTER"></div>
+            <div class="fld"><label>業務台帳 Spreadsheet ID <span class="h">SS_OPS</span></label><input id="ds-SS_OPS"></div>
+            <div class="fld"><label>Drive 親フォルダ ID <span class="h">DRIVE_ROOT</span></label><input id="ds-DRIVE_ROOT"></div>
+            <div class="fld"><label>GCP プロジェクト <span class="h">GCP_PROJECT</span></label><input id="ds-GCP_PROJECT"></div>
+            <div class="fld"><label>GCP リージョン <span class="h">GCP_REGION</span></label><input id="ds-GCP_REGION"></div>
+            <div class="fld"><label>Gemini モデル <span class="h">GEMINI_MODEL</span></label><input id="ds-GEMINI_MODEL"></div>
+          </div>
+        </div>
+        <div class="pfoot"><button class="save" onclick="saveDataSource()">データソースを保存</button></div>
+      </div>
+
+      <div class="panel">
+        <div class="ph"><h3>作品一覧（Works_Master）</h3><span class="hint" id="works-count"></span></div>
+        <table><thead><tr><th>作品ID</th><th>作品名</th><th>出版社</th><th>審査</th><th>公開状態</th><th>操作</th></tr></thead><tbody id="works-tbody"></tbody></table>
+      </div>
+
+      <div class="panel">
+        <div class="ph"><h3 id="work-form-title">作品を追加</h3><span class="hint">Works_Master へ upsert</span></div>
+        <div class="pbody">
+          <div class="grid2">
+            <div class="fld"><label>作品ID <span class="h">空欄で自動採番(WRK-)</span></label><input id="w-work_id" placeholder="WRK-…"></div>
+            <div class="fld"><label>作品名</label><input id="w-work_name"></div>
+            <div class="fld"><label>出版社</label><input id="w-publisher"></div>
+            <div class="fld"><label>カテゴリ</label><input id="w-category" placeholder="TRPG / ルールブック"></div>
+            <div class="fld"><label>審査タイミング</label><select id="w-review_timing"><option value="A">A（契約前審査）</option><option value="B">B（契約後審査）</option></select></div>
+            <div class="fld"><label>審査ポリシー</label><input id="w-review_policy" placeholder="PRE_CONTRACT / PATROL_ONLY"></div>
+            <div class="fld"><label>利用許諾料（表示）</label><input id="w-fee_label" placeholder="電子書籍：売上の10％"></div>
+            <div class="fld"><label>公開状態</label><select id="w-publish_status"><option>DRAFT</option><option>PUBLISHED</option><option>UNPUBLISHED</option></select></div>
+            <div class="fld"><label>対象媒体 <span class="h">カンマ区切り</span></label><input id="w-media" placeholder="書籍,電子書籍,商品販売"></div>
+            <div class="fld"><label>クレジット表記</label><input id="w-credit_text" placeholder="指定の権利表記を記載"></div>
+            <div class="fld"><label>許諾要素 <span class="h">カンマ区切り</span></label><input id="w-ok_elements" placeholder="世界観設定,シナリオ"></div>
+            <div class="fld"><label>禁止要素 <span class="h">カンマ区切り</span></label><input id="w-no_elements" placeholder="公式イラスト流用"></div>
+          </div>
+        </div>
+        <div class="pfoot"><button class="btn" onclick="resetWorkForm()">クリア</button><button class="save" onclick="saveWork()">作品を保存</button></div>
+      </div>
+      <div class="note">公開状態を <span class="mono">PUBLISHED</span> にした作品のみ、公開申込窓口（api_listWorks）に表示されます。審査タイミング(A/B)は内部属性で、公開UIにはバッジを出しません。</div>
+    </div>
+
+    <!-- CLOUDSIGN -->
+    <div class="setpane" id="p-cloudsign">
+      <div class="panel">
+        <div class="ph"><h3>CloudSign API 設定</h3><span class="hint">ScriptProperties（secretはマスク）</span></div>
+        <div class="pbody">
+          <p class="setnote">電子契約の送信・締結Webhookに使用します。Client Secret は保存時のみ入力してください（空欄なら現在値を据え置き）。</p>
+          <div class="grid2">
+            <div class="fld"><label>Client ID <span class="h">CLOUDSIGN_CLIENT_ID</span></label><input id="cs-client_id"></div>
+            <div class="fld"><label>Client Secret <span class="h">CLOUDSIGN_SECRET</span></label><input id="cs-secret" type="password"></div>
+            <div class="fld"><label>テンプレートID <span class="h">CLOUDSIGN_TEMPLATE_ID</span></label><input id="cs-template_id"></div>
+            <div class="fld"><label>Webhook(Callback) URL <span class="h">CLOUDSIGN_CALLBACK_URL</span></label><input id="cs-callback_url" placeholder="GAS② の doPost URL"></div>
+          </div>
+          <label class="chk"><input type="checkbox" id="cs-sandbox"> サンドボックス環境を使用する</label>
+        </div>
+        <div class="pfoot"><button class="save" onclick="saveCloudSign()">CloudSign設定を保存</button></div>
+      </div>
+      <div class="note">秘密情報はGASの ScriptProperties に保存され、画面には再表示されません（設定済みかどうかのみ表示）。</div>
+    </div>
+
+    <!-- FORMRUN -->
+    <div class="setpane" id="p-formrun">
+      <div class="panel">
+        <div class="ph"><h3>FormRun 設定</h3><span class="hint">ScriptProperties（secretはマスク）</span></div>
+        <div class="pbody">
+          <p class="setnote">申込フォーム（FormRun）と <span class="mono">createApplication_</span> の連携設定。Webhook Secret は保存時のみ入力してください。</p>
+          <div class="fld"><label>フォームURL <span class="h">FORMRUN_FORM_URL</span></label><input id="fr-form_url" placeholder="https://form.run/@…"></div>
+          <div class="fld"><label>Webhook Secret <span class="h">FORMRUN_WEBHOOK_SECRET</span></label><input id="fr-webhook_secret" type="password"></div>
+          <div class="fld"><label>フィールドマッピング <span class="h">FORMRUN_FIELD_MAP（JSON）</span></label><textarea id="fr-field_map" class="code" placeholder='{"作品ID":"work_id","メールアドレス":"email","お名前":"name","提出ファイル":"file_id"}'></textarea></div>
+        </div>
+        <div class="pfoot"><button class="save" onclick="saveFormRun()">FormRun設定を保存</button></div>
+      </div>
+    </div>
+  </section>
 </main>
 
+<div class="toast" id="toast"></div>
+
 <script>
+// ===== タブ切替 =====
 document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{
   document.querySelectorAll(".tab").forEach(x=>x.classList.remove("on"));
   document.querySelectorAll(".view").forEach(x=>x.classList.remove("on"));
   t.classList.add("on"); document.getElementById("v-"+t.dataset.v).classList.add("on");
+  if(t.dataset.v==="settings") loadSettings();
   window.scrollTo(0,0);
 });
+// 設定内サブタブ
+document.querySelectorAll(".subtab").forEach(s=>s.onclick=()=>{
+  document.querySelectorAll(".subtab").forEach(x=>x.classList.remove("on"));
+  document.querySelectorAll(".setpane").forEach(x=>x.classList.remove("on"));
+  s.classList.add("on"); document.getElementById("p-"+s.dataset.p).classList.add("on");
+});
+
+// ===== GAS呼び出しラッパ（スタンドアロン時はMOCKにフォールバック） =====
+function inGAS(){ return typeof google!=="undefined" && google.script && google.script.run; }
+function call(fn, args, onOk, onErr){
+  args = args || [];
+  onOk = onOk || function(){};
+  onErr = onErr || function(e){ toast("保存に失敗しました: "+(e&&e.message||e), true); };
+  if(inGAS()){
+    var r = google.script.run.withSuccessHandler(onOk).withFailureHandler(onErr);
+    r[fn].apply(r, args);
+  } else {
+    try{ onOk(MOCK[fn] ? MOCK[fn].apply(null, args) : null); }
+    catch(e){ onErr(e); }
+  }
+}
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];}); }
+function toast(msg, err){ var t=$("toast"); t.textContent=msg; t.className="toast show"+(err?" err":""); setTimeout(function(){ t.className="toast"; }, 2300); }
+
+// ===== スタンドアロン用モック =====
+var _mLegal = {
+  privacy:"（既定の個人情報取得同意文。ここを編集すると公開窓口の申込ウィザードに反映されます）",
+  termsTemplate:"<h4>第1条（許諾の範囲）</h4><ol><li>許諾要素（{{ok}}）について、媒体（{{media}}）での頒布を許諾します。禁止要素（{{no}}）は利用できません。</li></ol><h4>第2条（許諾料）</h4><ol><li>利用許諾料は {{fee}} とします。</li></ol>"
+};
+var _mWorks = [
+  {work_id:"WRK-ARK00045",work_name:"光砕のリヴァルチャー",publisher:"どらこにあん／アークライト",category:"TRPG / ルールブック",review_timing:"A",review_policy:"PRE_CONTRACT",fee_label:"書籍：16,500円／作品",publish_status:"PUBLISHED",media:"書籍,電子書籍,商品販売",ok_elements:"世界観設定,シナリオ,キャラクター名称",no_elements:"公式イラスト流用",credit_text:"指定の権利表記を記載"},
+  {work_id:"WRK-ARK00012",work_name:"新クトゥルフ神話TRPG",publisher:"アークライト／KADOKAWA",category:"TRPG / ルールブック",review_timing:"B",review_policy:"PATROL_ONLY",fee_label:"電子書籍：売上の10％",publish_status:"PUBLISHED",media:"書籍,電子書籍,商品販売",ok_elements:"世界観・神話設定,シナリオ",no_elements:"公式イラスト流用,ルールデータ転載",credit_text:"指定のシリーズ権利表記を記載"},
+  {work_id:"WRK-BKK00019",work_name:"インセイン",publisher:"冒険企画局",category:"TRPG / ルールブック",review_timing:"B",review_policy:"PATROL_ONLY",fee_label:"電子書籍：売上の10％",publish_status:"DRAFT",media:"電子書籍",ok_elements:"世界観設定,ハンドアウト形式",no_elements:"シナリオデータ転載",credit_text:"指定の権利表記を記載"}
+];
+var _mDS = {SS_MASTER:"",SS_OPS:"",DRIVE_ROOT:"",GCP_PROJECT:"",GCP_REGION:"",GEMINI_MODEL:"",
+  defaults:{SS_MASTER:"PUT_WORKS_MASTER_SPREADSHEET_ID",SS_OPS:"PUT_OPS_SPREADSHEET_ID",DRIVE_ROOT:"PUT_SHARED_DRIVE_FOLDER_ID",GCP_PROJECT:"PUT_GCP_PROJECT_ID",GCP_REGION:"us-central1",GEMINI_MODEL:"gemini-2.5-flash"}};
+var _mInt = {cloudsign:{client_id:"",secret_set:false,template_id:"",callback_url:"",sandbox:false},
+  formrun:{form_url:"",webhook_secret_set:false,field_map:""}};
+var MOCK = {
+  admin_getLegalTexts:function(){ return _mLegal; },
+  admin_saveLegalTexts:function(p,t){ _mLegal.privacy=p; _mLegal.termsTemplate=t; return true; },
+  admin_listWorksMaster:function(){ return _mWorks; },
+  admin_saveWork:function(w){ if(!w.work_id) w.work_id="WRK-NEW-"+(_mWorks.length+1); var i=-1; for(var k=0;k<_mWorks.length;k++){ if(_mWorks[k].work_id===w.work_id) i=k; } if(i>=0){ for(var key in w) _mWorks[i][key]=w[key]; } else { _mWorks.push(w); } return w.work_id; },
+  admin_setWorkPublish:function(id,s){ for(var k=0;k<_mWorks.length;k++){ if(_mWorks[k].work_id===id) _mWorks[k].publish_status=s; } return true; },
+  admin_getDataSourceConfig:function(){ return _mDS; },
+  admin_saveDataSourceConfig:function(c){ for(var k in c) _mDS[k]=c[k]; return true; },
+  admin_getIntegrationConfig:function(){ return _mInt; },
+  admin_saveCloudSignConfig:function(c){ _mInt.cloudsign.client_id=c.client_id; _mInt.cloudsign.template_id=c.template_id; _mInt.cloudsign.callback_url=c.callback_url; _mInt.cloudsign.sandbox=c.sandbox; if(c.secret) _mInt.cloudsign.secret_set=true; return true; },
+  admin_saveFormRunConfig:function(c){ _mInt.formrun.form_url=c.form_url; _mInt.formrun.field_map=c.field_map; if(c.webhook_secret) _mInt.formrun.webhook_secret_set=true; return true; }
+};
+
+// ===== 設定ロード =====
+var settingsLoaded = false;
+function loadSettings(){ if(settingsLoaded) return; settingsLoaded=true; loadLegal(); loadWorksPane(); loadIntegration(); }
+
+// 同意文・規約
+function loadLegal(){ call("admin_getLegalTexts",[],function(l){ if(!l) return; $("set-privacy").value=l.privacy||""; $("set-terms").value=l.termsTemplate||""; }); }
+function saveLegal(){ call("admin_saveLegalTexts",[$("set-privacy").value,$("set-terms").value],function(){ toast("同意文・規約を保存しました"); }); }
+
+// データソース
+var DSKEYS = ["SS_MASTER","SS_OPS","DRIVE_ROOT","GCP_PROJECT","GCP_REGION","GEMINI_MODEL"];
+function loadDataSource(){ call("admin_getDataSourceConfig",[],function(c){ if(!c) return; DSKEYS.forEach(function(k){ var el=$("ds-"+k); el.value=c[k]||""; if(c.defaults&&c.defaults[k]) el.placeholder=c.defaults[k]; }); }); }
+function saveDataSource(){ var c={}; DSKEYS.forEach(function(k){ c[k]=$("ds-"+k).value; }); call("admin_saveDataSourceConfig",[c],function(){ toast("データソース設定を保存しました"); }); }
+
+// 作品マスタ
+var WFIELDS = ["work_id","work_name","publisher","category","review_timing","review_policy","fee_label","publish_status","media","ok_elements","no_elements","credit_text"];
+function loadWorksPane(){ loadDataSource(); reloadWorks(); }
+function reloadWorks(){ call("admin_listWorksMaster",[],renderWorks); }
+function renderWorks(rows){
+  rows = rows || []; $("works-count").textContent = rows.length+" 件";
+  var tb=$("works-tbody"); tb.innerHTML="";
+  rows.forEach(function(w){
+    var pub = String(w.publish_status||"")==="PUBLISHED";
+    var tr=document.createElement("tr");
+    tr.innerHTML = '<td class="id">'+esc(w.work_id)+'</td><td>'+esc(w.work_name)+'</td><td>'+esc(w.publisher)+'</td>'+
+      '<td><span class="pill '+(w.review_timing==="A"?"A":"B")+'">'+esc(w.review_timing||"")+'</span></td>'+
+      '<td><span class="pill '+(pub?"pass":"wait")+'">'+esc(w.publish_status||"DRAFT")+'</span></td>';
+    var td=document.createElement("td"); td.className="actions";
+    var bEdit=document.createElement("button"); bEdit.className="btn"; bEdit.textContent="編集"; bEdit.onclick=function(){ editWork(w); };
+    var bPub=document.createElement("button"); bPub.className="btn"; bPub.textContent=pub?"非公開に":"公開する"; bPub.onclick=function(){ togglePublish(w.work_id, pub?"UNPUBLISHED":"PUBLISHED"); };
+    td.appendChild(bEdit); td.appendChild(bPub); tr.appendChild(td); tb.appendChild(tr);
+  });
+}
+function editWork(w){ $("work-form-title").textContent="作品を編集： "+(w.work_name||w.work_id); WFIELDS.forEach(function(k){ var el=$("w-"+k); if(el) el.value=(w[k]==null?"":w[k]); }); window.scrollTo(0,document.body.scrollHeight); }
+function resetWorkForm(){ $("work-form-title").textContent="作品を追加"; WFIELDS.forEach(function(k){ var el=$("w-"+k); if(el) el.value=(k==="review_timing"?"A":(k==="publish_status"?"DRAFT":"")); }); }
+function saveWork(){
+  var w={}; WFIELDS.forEach(function(k){ var el=$("w-"+k); if(el) w[k]=el.value; });
+  if(!w.work_name){ toast("作品名を入力してください", true); return; }
+  call("admin_saveWork",[w],function(id){ toast("作品を保存しました（"+id+"）"); resetWorkForm(); reloadWorks(); });
+}
+function togglePublish(id,status){ call("admin_setWorkPublish",[id,status],function(){ toast("公開状態を更新： "+status); reloadWorks(); }); }
+
+// 外部API（CloudSign / FormRun）
+function loadIntegration(){
+  call("admin_getIntegrationConfig",[],function(c){
+    if(!c) return;
+    var cs=c.cloudsign||{};
+    $("cs-client_id").value=cs.client_id||""; $("cs-template_id").value=cs.template_id||"";
+    $("cs-callback_url").value=cs.callback_url||""; $("cs-sandbox").checked=!!cs.sandbox;
+    $("cs-secret").value=""; $("cs-secret").placeholder=cs.secret_set?"設定済み（変更時のみ入力）":"未設定";
+    var fr=c.formrun||{};
+    $("fr-form_url").value=fr.form_url||""; $("fr-field_map").value=fr.field_map||"";
+    $("fr-webhook_secret").value=""; $("fr-webhook_secret").placeholder=fr.webhook_secret_set?"設定済み（変更時のみ入力）":"未設定";
+  });
+}
+function saveCloudSign(){
+  var c={client_id:$("cs-client_id").value, template_id:$("cs-template_id").value, callback_url:$("cs-callback_url").value, sandbox:$("cs-sandbox").checked};
+  var s=$("cs-secret").value; if(s) c.secret=s;
+  call("admin_saveCloudSignConfig",[c],function(){ toast("CloudSign設定を保存しました"); loadIntegration(); });
+}
+function saveFormRun(){
+  var c={form_url:$("fr-form_url").value, field_map:$("fr-field_map").value};
+  var s=$("fr-webhook_secret").value; if(s) c.webhook_secret=s;
+  call("admin_saveFormRunConfig",[c],function(){ toast("FormRun設定を保存しました"); loadIntegration(); });
+}
 </script>
 </body>
 </html>
