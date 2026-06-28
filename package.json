@@ -6,18 +6,17 @@
   "scripts": {
     "login": "clasp login",
     "logout": "clasp logout",
-    "create": "cd spll_src && clasp create --type webapp --title \"SPLL 利用申込窓口\" --rootDir .",
-    "setup": "cd spll_src && clasp create --type webapp --title \"SPLL 利用申込窓口\" --rootDir . && git checkout -- appsscript.json && clasp push -f",
-    "clone": "cd spll_src && clasp clone",
-    "push": "cd spll_src && clasp push",
-    "push:watch": "cd spll_src && clasp push --watch",
-    "deploy": "cd spll_src && clasp deploy",
-    "redeploy": "cd spll_src && clasp deploy",
-    "deployments": "cd spll_src && clasp deployments",
-    "open": "cd spll_src && clasp open",
-    "open:web": "cd spll_src && clasp open --webapp",
-    "logs": "cd spll_src && clasp logs",
-    "status": "cd spll_src && clasp status"
+    "create": "clasp create --type webapp --title \"SPLL 利用申込窓口\" --rootDir spll_src",
+    "setup": "clasp create --type webapp --title \"SPLL 利用申込窓口\" --rootDir spll_src && git checkout -- spll_src/appsscript.json && clasp push -f",
+    "clone": "clasp clone",
+    "push": "clasp push",
+    "push:watch": "clasp push --watch",
+    "deploy": "clasp deploy",
+    "deployments": "clasp deployments",
+    "open": "clasp open",
+    "open:web": "clasp open --webapp",
+    "logs": "clasp logs",
+    "status": "clasp status"
   },
   "devDependencies": {
     "@google/clasp": "^2.4.2"

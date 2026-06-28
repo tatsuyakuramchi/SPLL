@@ -15,10 +15,12 @@ License）」を、Google Workspace + Google Apps Script（GAS）で実装する
 ```
 SPLL/
 ├── README.md
+├── package.json              # clasp と npm スクリプト
 ├── .gitignore
+├── .clasp.json.template      # コピーして .clasp.json を作成し scriptId を記入（rootDir=spll_src）
+├── .claspignore              # push 対象を spll_src 内の GAS ソースに限定
 └── spll_src/                  # clasp の push 対象（rootDir）
     ├── appsscript.json        # マニフェスト（OAuthスコープ・webapp設定）
-    ├── .clasp.json.template   # コピーして .clasp.json を作成し scriptId を記入
     ├── Code.gs                # サーバーサイド（3プロジェクト分を集約した参照実装）
     ├── index.html             # 公開入口（GAS①・申込窓口）
     ├── admin.html             # 管理コンソール（GAS③・社内GWS限定）
@@ -51,9 +53,11 @@ SPLL/
 
 ## セットアップ・デプロイ（clasp）
 
-ルートに `package.json`（clasp と npm スクリプト）を用意しています。`clasp` 本体はローカルに
-インストールし、**`clasp login` はブラウザ認証が必要なためローカルで実行**してください
-（リモート/CI環境では不可）。push 対象は `spll_src/.claspignore` で GAS ソースのみに限定しています。
+ルートに `package.json`（clasp と npm スクリプト）と `.clasp.json`/`.claspignore`（`rootDir=spll_src`）を
+用意しています。`.clasp.json` をルートに置く構成なので、**すべてのコマンドはリポジトリ直下から
+そのまま実行**できます（`cd` 不要）。`clasp` 本体はローカルにインストールし、**`clasp login` は
+ブラウザ認証が必要なためローカルで実行**してください（リモート/CI環境では不可）。push 対象は
+`.claspignore` で GAS ソース5ファイルのみに限定しています。
 
 ```bash
 npm install              # devDependency の @google/clasp を取得
@@ -63,12 +67,12 @@ npm run login            # ブラウザでGoogle認証（ローカルのみ）
 npm run setup            # clasp create(webapp) → appsscript.json復元 → clasp push -f
 
 #   ↑の内訳を手動でやる場合:
-#   npm run create       # webアプリ型でGASプロジェクト作成（spll_src/.clasp.json生成）
-#   git checkout -- spll_src/appsscript.json   # create が上書きする既定マニフェストを本書の内容へ戻す
-#   npm run push         # ローカル → GAS
+#   npm run create                              # webアプリ型でGASプロジェクト作成（.clasp.json生成）
+#   git checkout -- spll_src/appsscript.json    # create が上書きする既定マニフェストを本書の内容へ戻す
+#   npm run push                                # ローカル → GAS
 
 # 既存のGASプロジェクトに接続する場合
-cd spll_src && cp .clasp.json.template .clasp.json   # scriptId を記入 → 戻って
+cp .clasp.json.template .clasp.json   # scriptId を記入
 npm run push
 
 # 公開
