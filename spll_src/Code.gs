@@ -1050,6 +1050,144 @@ function admin_saveFormRunConfig(c){
   return true;
 }
 
+// ============================================================
+// 10. セットアップ / インストーラ（Apps Scriptエディタから1回 Run）
+//     スプレッドシート（SS_MASTER/SS_OPS）・Drive親フォルダを自動作成し、
+//     各IDを ScriptProperties へ登録、既定設定とサンプルを投入する。冪等。
+// ============================================================
+const SCHEMA_MASTER = {
+  Works_Master:    ['work_id','work_name','publisher','category','publish_status','review_timing','review_policy','fee_label','media','ok_elements','no_elements','credit_text','allocation_scheme_id','royalty_rate','partner_id'],
+  Review_Rules:    ['rule_id','work_id','category','rule_text','severity','effective_from','effective_to'],
+  Reference_Assets:['asset_id','work_id','asset_type','drive_file_id','allowed_flag']
+};
+const SCHEMA_OPS = {
+  Applications:         ['application_id','work_id','review_timing','applicant_email','applicant_name','cloudsign_document_id','status','retention_until','created_at'],
+  Contracts:            ['contract_id','cloudsign_document_id','application_id','work_id','review_timing','status','signed_at','folder_id'],
+  Upload_Tokens:        ['token_id','contract_id','token_hash','status','expires_at'],
+  Submissions:          ['submission_id','contract_id','application_id','submission_no','status','submitted_at'],
+  Submission_Files:     ['submission_file_id','submission_id','drive_file_id','sha256','mime','size'],
+  AI_Review_Jobs:       ['ai_review_id','application_id','submission_id','model','prompt_version','status','retry_count'],
+  AI_Findings:          ['finding_id','ai_review_id','rule_id','severity','result','page','evidence','confidence'],
+  Human_Reviews:        ['human_review_id','submission_id','reviewer','result','comments','reviewed_at'],
+  Compliance_Alerts:    ['alert_id','contract_id','submission_id','severity','status','settlement_block'],
+  Usage_Reports:        ['report_id','contract_id','period','channel','qty','gross_sales','returns','deductions','net_sales','sales_url','status','submitted_at'],
+  Invoices:             ['invoice_id','contract_id','period','amount_rule','amount','status','issued_at'],
+  Payments:             ['payment_id','invoice_id','contract_id','amount','paid_at','method','status','recorded_by'],
+  Settlements:          ['settlement_id','partner_id','period','amount','status','hold_reason'],
+  Settlement_Details:   ['settlement_detail_id','settlement_id','contract_id','rate_snapshot','amount'],
+  Settlement_Statements:['statement_id','settlement_id','partner_id','period','type','reg_number_snapshot','status','effective_date','objection_due','pdf_file_id','sheet_id','version','sent_at','confirmed_at'],
+  Partners:             ['partner_id','name','invoice_reg_number','is_qualified_issuer','bank','contact'],
+  Events:               ['event_id','entity_type','entity_id','actor','before','after','occurred_at'],
+  Config:               ['config_key','value','environment','updated_at']
+};
+
+const SAMPLE_WORKS_SEED = [
+  {work_id:'WRK-ARK00045', work_name:'光砕のリヴァルチャー', publisher:'どらこにあん／アークライト', category:'TRPG / ルールブック', publish_status:'PUBLISHED', review_timing:'A', review_policy:'PRE_CONTRACT（契約前審査）', fee_label:'書籍：16,500円／作品', media:'書籍,電子書籍,商品販売', ok_elements:'世界観設定,シナリオ,キャラクター名称', no_elements:'公式イラスト流用', credit_text:'指定の権利表記を記載', allocation_scheme_id:'', royalty_rate:'', partner_id:'PRT-DRACO'},
+  {work_id:'WRK-ARK00012', work_name:'新クトゥルフ神話TRPG', publisher:'アークライト／KADOKAWA', category:'TRPG / ルールブック', publish_status:'PUBLISHED', review_timing:'B', review_policy:'PATROL_ONLY（契約後審査）', fee_label:'電子書籍：売上の10％', media:'書籍,電子書籍,商品販売', ok_elements:'世界観・神話設定,シナリオ', no_elements:'公式イラスト流用,ルールデータ転載', credit_text:'指定のシリーズ権利表記を記載', allocation_scheme_id:'', royalty_rate:'0.10', partner_id:'PRT-ARK'},
+  {work_id:'WRK-BKK00019', work_name:'インセイン', publisher:'冒険企画局', category:'TRPG / ルールブック', publish_status:'DRAFT', review_timing:'B', review_policy:'PATROL_ONLY（契約後審査）', fee_label:'電子書籍：売上の10％', media:'電子書籍', ok_elements:'世界観設定,ハンドアウト形式', no_elements:'シナリオデータ転載', credit_text:'指定の権利表記を記載', allocation_scheme_id:'', royalty_rate:'0.10', partner_id:''}
+];
+const SAMPLE_PARTNERS_SEED = [
+  {partner_id:'PRT-DRACO', name:'どらこにあん', invoice_reg_number:'T0000000000000', is_qualified_issuer:'true', bank:'', contact:''},
+  {partner_id:'PRT-ARK',   name:'アークライト', invoice_reg_number:'T0000000000000', is_qualified_issuer:'true', bank:'', contact:''}
+];
+
+/** シートをスキーマ通りに用意（ヘッダ設定・先頭行固定・既定シート削除）。既存ヘッダは上書きしない。 */
+function initSheets_(ss, schema){
+  const names = Object.keys(schema);
+  names.forEach(name => {
+    let sh = ss.getSheetByName(name);
+    if(!sh) sh = ss.insertSheet(name);
+    const headers = schema[name];
+    const first = sh.getRange(1,1,1,Math.max(1,sh.getLastColumn())).getValues()[0];
+    const hasHeader = first && String(first[0]||'') !== '';
+    if(!hasHeader){
+      sh.getRange(1,1,1,headers.length).setValues([headers]);
+      sh.setFrozenRows(1);
+    }
+  });
+  // schema に無い既定シート（'シート1' / 'Sheet1' 等）を削除
+  ss.getSheets().filter(sh => names.indexOf(sh.getName()) < 0).forEach(sh => {
+    if(ss.getSheets().length > 1) ss.deleteSheet(sh);
+  });
+}
+
+/**
+ * ワンクリック・セットアップ。Apps Scriptエディタで関数 setup_bootstrap を選び Run。
+ * opts: { force:true で既存IDを無視して再作成, seed:false でサンプル投入なし }
+ * 返り値（実行ログにも出力）に作成した各IDを含む。
+ */
+function setup_bootstrap(opts){
+  opts = opts || {};
+  const sp = PropertiesService.getScriptProperties();
+  const out = { created:{}, reused:{} };
+
+  // 1) 作品マスタ
+  let masterId = sp.getProperty('SS_MASTER');
+  if(masterId && !opts.force){ out.reused.SS_MASTER = masterId; }
+  else {
+    const ss = SpreadsheetApp.create('SPLL 作品マスタ (SS_MASTER)');
+    initSheets_(ss, SCHEMA_MASTER);
+    masterId = ss.getId(); sp.setProperty('SS_MASTER', masterId);
+    out.created.SS_MASTER = masterId;
+  }
+  // 2) 業務台帳
+  let opsId = sp.getProperty('SS_OPS');
+  if(opsId && !opts.force){ out.reused.SS_OPS = opsId; }
+  else {
+    const ss = SpreadsheetApp.create('SPLL 業務台帳 (SS_OPS)');
+    initSheets_(ss, SCHEMA_OPS);
+    opsId = ss.getId(); sp.setProperty('SS_OPS', opsId);
+    out.created.SS_OPS = opsId;
+  }
+  // 3) Drive 親フォルダ
+  let rootId = sp.getProperty('DRIVE_ROOT');
+  if(rootId && !opts.force){ out.reused.DRIVE_ROOT = rootId; }
+  else {
+    rootId = DriveApp.createFolder('SPLL 契約フォルダ (DRIVE_ROOT)').getId();
+    sp.setProperty('DRIVE_ROOT', rootId);
+    out.created.DRIVE_ROOT = rootId;
+  }
+
+  // 4) 既定設定（未設定のみ）
+  if(!getConfig_('LEGAL_PRIVACY_TEXT',''))   setConfig_('LEGAL_PRIVACY_TEXT',   DEFAULT_PRIVACY);
+  if(!getConfig_('LEGAL_TERMS_TEMPLATE','')) setConfig_('LEGAL_TERMS_TEMPLATE', DEFAULT_TERMS_TEMPLATE);
+  if(!getConfig_('DEFAULT_ROYALTY_RATE','')) setConfig_('DEFAULT_ROYALTY_RATE','0.10');
+  if(!getConfig_('HANDLING_FEE_RATE',''))    setConfig_('HANDLING_FEE_RATE',   '0.30');
+
+  // 5) サンプル投入（既定ON・既存があればスキップ）
+  if(opts.seed !== false) setup_seedSamples_();
+
+  out.properties = { SS_MASTER:masterId, SS_OPS:opsId, DRIVE_ROOT:rootId };
+  out.urls = {
+    SS_MASTER:'https://docs.google.com/spreadsheets/d/'+masterId,
+    SS_OPS:'https://docs.google.com/spreadsheets/d/'+opsId,
+    DRIVE_ROOT:'https://drive.google.com/drive/folders/'+rootId
+  };
+  logEvent_('batch','bootstrap','setup', null, out.properties);
+  Logger.log('SS_MASTER = %s', masterId);
+  Logger.log('SS_OPS    = %s', opsId);
+  Logger.log('DRIVE_ROOT= %s', rootId);
+  Logger.log('done: %s', JSON.stringify(out));
+  return out;
+}
+
+/** サンプル作品・パートナーを投入（各シートが空のときのみ） */
+function setup_seedSamples_(){
+  if(readRows_(ssMaster_(),'Works_Master').length === 0){
+    SAMPLE_WORKS_SEED.forEach(w => appendRow_(ssMaster_(),'Works_Master', w));
+  }
+  if(readRows_(ssOps_(),'Partners').length === 0){
+    SAMPLE_PARTNERS_SEED.forEach(p => appendRow_(ssOps_(),'Partners', p));
+  }
+}
+
+/** 現在の接続先IDを確認（エディタ実行用）。 */
+function setup_status(){
+  const s = { SS_MASTER:prop_('SS_MASTER')||'(未設定)', SS_OPS:prop_('SS_OPS')||'(未設定)',
+    DRIVE_ROOT:prop_('DRIVE_ROOT')||'(未設定)' };
+  Logger.log(JSON.stringify(s)); return s;
+}
+
 // ---- utils ----
 function hash_(s){ return Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, s)); }
 function sha256Bytes_(bytes){ return Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes)); }

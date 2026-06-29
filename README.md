@@ -141,7 +141,26 @@ GAS②契約・審査=限定＋Webhook、GAS③管理コンソール=社内GWS�
 - 秘密情報（CloudSign secret・FormRun webhook secret）は保存時のみ入力し、読み出しでは
   「設定済みか」だけを返します（値は画面に出しません）。
 
-### スプレッドシート
+### ワンクリック・セットアップ（setup_bootstrap）
+
+スプレッドシートや Drive フォルダを手作業で作らず、**Apps Script エディタで `setup_bootstrap` を一度 Run**
+すれば自動で初期化できます（冪等）。
+
+1. `npm run push` で最新コードを GAS へ反映 → `npm run open`（または `clasp open`）でエディタを開く。
+2. 関数選択で **`setup_bootstrap`** を選び **Run**。初回は Drive/Spreadsheet 作成の権限承認が出ます。
+3. 実行ログに作成された `SS_MASTER`/`SS_OPS`/`DRIVE_ROOT` の ID と URL が出力されます。
+
+`setup_bootstrap` の処理:
+
+- `SS_MASTER`（作品マスタ）/`SS_OPS`（業務台帳）を §3 スキーマの全シート・ヘッダ付きで作成
+- Drive 親フォルダ（`DRIVE_ROOT`）を作成し、各 ID を **ScriptProperties** へ登録
+- 既定の同意文・規約・レート（`DEFAULT_ROYALTY_RATE`/`HANDLING_FEE_RATE`）を `Config` へ投入
+- サンプル作品・パートナーを投入（`opts.seed:false` で無効化、`opts.force:true` で再作成）
+- `setup_status` で現在の接続先 ID を確認可能
+
+ScriptProperties は実行時に読まれるため、Run 後は**再デプロイ不要**で公開アプリが実データ（投入された作品）に切り替わります。
+
+### スプレッドシート（手動で作る場合）
 
 `SS_MASTER`（作品マスタ）／`SS_OPS`（業務台帳）の各シートを設計書 §3 のスキーマで作成します。
 1行目をヘッダ行とし、`Code.gs` の `readRows_/appendRow_/updateRow_` がヘッダ名で突合します。
