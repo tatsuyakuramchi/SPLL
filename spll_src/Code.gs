@@ -255,6 +255,14 @@ function doPost(e){
   if(app) updateRow_(ssOps_(),'Applications','application_id',app.application_id,{status:'SIGNED'});
   logEvent_('contract', contractId, 'cloudsign', null, {status:'SIGNED'});
 
+  // 後払い（電子書籍＝従量課金）は入金が後になるため、締結時に認証バッジを発行
+  if(prop_('BADGE_AUTO') !== 'false' && app){
+    const w = readRows_(ssMaster_(),'Works_Master').find(function(x){ return x.work_id === app.work_id; });
+    if(w && isPostpaid_(w)){
+      try{ issueBadge_(contractId); }catch(e){ logEvent_('badge', contractId, 'system', null, { issue_error:String(e) }); }
+    }
+  }
+
   // B経路：締結後に作品審査用アップロードリンクを送付（全員一択）
   if(app && app.review_timing === 'B') sendUploadLink_(contractId, app.applicant_email);
   return ContentService.createTextOutput('ok');
@@ -702,9 +710,13 @@ function admin_recordPayment(contractId, invoiceId, amount, paidAt, recordedBy){
     amount:amount, paid_at:paidAt, status:'入金済', recorded_by:recordedBy });
   if(invoiceId) updateRow_(ssOps_(),'Invoices','invoice_id',invoiceId,{status:'入金済'});
   logEvent_('payment', contractId, recordedBy, null, {amount:amount, paid_at:paidAt});
-  // 入金確認後：認証バッジを自動発行（設定OFFや失敗でも入金記録は確定させる）
+  // 入金確認後：前払い（定額）契約のみ認証バッジを発行。後払い（電子書籍等）は締結時に発行済み。
+  // 設定OFFや失敗でも入金記録は確定させる。
   if(prop_('BADGE_AUTO') !== 'false'){
-    try{ issueBadge_(contractId); }catch(e){ logEvent_('badge', contractId, 'system', null, { issue_error:String(e) }); }
+    const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === contractId; });
+    if(c && !contractIsPostpaid_(c)){
+      try{ issueBadge_(contractId); }catch(e){ logEvent_('badge', contractId, 'system', null, { issue_error:String(e) }); }
+    }
   }
   return true;
 }
@@ -968,7 +980,7 @@ function admin_saveLegalTexts(privacy, termsTemplate){
 // ---- 9.2 作品マスタ（スプレッドシート設定） ----
 const WORK_FIELDS = ['work_id','work_name','publisher','category','publish_status',
   'review_timing','review_policy','fee_label','media','ok_elements','no_elements',
-  'credit_text','allocation_scheme_id'];
+  'credit_text','allocation_scheme_id','billing_type'];
 
 /** 作品マスタ全件（内部列含む。管理用なのでホワイトリストしない） */
 function admin_listWorksMaster(){ return readRows_(ssMaster_(), 'Works_Master'); }
@@ -983,16 +995,14 @@ function admin_saveWork(work){
     appendRow_(ssMaster_(), 'Works_Master', row);
   }
   logEvent_('work', row.work_id, actor_(), null, { saved: true, publish_status: row.publish_status });
-  if(row.publish_status === 'PUBLISHED') x_maybeAutoPostOnPublish_(row.work_id);   // 公開時にX告知
-  return row.work_id;
+  return row.work_id;   // X投稿は保存後にクライアント側で送信許可ポップアップ→admin_postWorkToX
 }
 
 /** 公開状態の切替（PUBLISHED / DRAFT / UNPUBLISHED 等） */
 function admin_setWorkPublish(workId, status){
   updateRow_(ssMaster_(), 'Works_Master', 'work_id', workId, { publish_status: status });
   logEvent_('work', workId, actor_(), null, { publish_status: status });
-  if(status === 'PUBLISHED') x_maybeAutoPostOnPublish_(workId);   // 公開時にX告知
-  return true;
+  return true;   // X投稿は送信許可ポップアップ→admin_postWorkToX
 }
 
 // ---- 9.3 データソース設定（スプレッドシート/Drive/GCPの接続先） ----
@@ -1063,7 +1073,7 @@ function admin_saveFormRunConfig(c){
 //     各IDを ScriptProperties へ登録、既定設定とサンプルを投入する。冪等。
 // ============================================================
 const SCHEMA_MASTER = {
-  Works_Master:    ['work_id','work_name','publisher','category','publish_status','review_timing','review_policy','fee_label','media','ok_elements','no_elements','credit_text','allocation_scheme_id','royalty_rate','partner_id'],
+  Works_Master:    ['work_id','work_name','publisher','category','publish_status','review_timing','review_policy','fee_label','media','ok_elements','no_elements','credit_text','allocation_scheme_id','royalty_rate','partner_id','billing_type'],
   Review_Rules:    ['rule_id','work_id','category','rule_text','severity','effective_from','effective_to'],
   Reference_Assets:['asset_id','work_id','asset_type','drive_file_id','allowed_flag']
 };
@@ -1259,12 +1269,21 @@ function admin_postWorkToX(workId){
   logEvent_('work', workId, actor_(), null, { x_posted:true, tweet_id:tid });
   return { tweet_id: tid, text: text };
 }
-/** 公開時の自動投稿（設定ONかつ未投稿のときのみ）。失敗しても業務は止めない。 */
-function x_maybeAutoPostOnPublish_(workId){
-  if(!x_autopost_() || !x_isConfigured_()) return;
-  if(prop_('XP_' + workId)) return;                         // 既投稿はスキップ
-  try{ admin_postWorkToX(workId); }
-  catch(e){ logEvent_('work', workId, 'system', null, { x_autopost_error:String(e) }); }
+/**
+ * 送信許可ポップアップ用のプレビュー。作品データ更新時にクライアントが呼び、
+ * autopost=ON かつ 設定済み なら text を確認ダイアログに表示 → 承認で admin_postWorkToX。
+ * （サイレント自動投稿はしない：送信は必ず人の許可を挟む）
+ */
+function admin_getXPostPreview(workId){
+  const w = readRows_(ssMaster_(),'Works_Master').find(function(x){ return x.work_id === workId; });
+  if(!w) return { text:'', configured:false, autopost:false, published:false };
+  return {
+    text:       x_buildPostText_(w),
+    configured: x_isConfigured_(),
+    autopost:   x_autopost_(),
+    published:  w.publish_status === 'PUBLISHED',
+    already_posted: !!prop_('XP_' + workId)
+  };
 }
 
 // ============================================================
@@ -1272,6 +1291,24 @@ function x_maybeAutoPostOnPublish_(workId){
 //     Google Slidesで1枚を組版→サムネイル(LARGE/MEDIUM/SMALL)をPNG化→Drive保存→トークンDLページ＋メール。
 // ============================================================
 const BADGE_SIZES = [{ key:'L', size:'LARGE' }, { key:'M', size:'MEDIUM' }, { key:'S', size:'SMALL' }];
+
+/**
+ * 課金モデルの判定。従量課金・後払い（電子書籍等）は true。
+ * 明示列 billing_type（PREPAID/POSTPAID）を優先し、無ければ料金表記から推定
+ * （％や「売上」を含む＝従量課金・後払い）。
+ */
+function isPostpaid_(work){
+  const bt = String(work.billing_type || '').toUpperCase();
+  if(bt === 'POSTPAID' || bt === '後払い' || bt === '従量') return true;
+  if(bt === 'PREPAID'  || bt === '前払い' || bt === '定額') return false;
+  return /[%％]|従量|売上/.test(String(work.fee_label || ''));
+}
+function contractIsPostpaid_(contract){
+  const w = readRows_(ssMaster_(),'Works_Master').find(function(x){ return x.work_id === contract.work_id; }) || {};
+  return isPostpaid_(w);
+}
+/** バッジ発行トリガーの判定 → 'ON_SIGN'（後払い）/ 'ON_PAYMENT'（前払い） */
+function badgeTriggerFor_(contract){ return contractIsPostpaid_(contract) ? 'ON_SIGN' : 'ON_PAYMENT'; }
 
 /** バッジ発行（契約単位・冪等）。BADGE_TEMPLATE_IDがあればテンプレ差込、無ければ自動組版。 */
 function issueBadge_(contractId){

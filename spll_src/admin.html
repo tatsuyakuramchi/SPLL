@@ -229,6 +229,7 @@
             <div class="fld"><label>審査タイミング</label><select id="w-review_timing"><option value="A">A（契約前審査）</option><option value="B">B（契約後審査）</option></select></div>
             <div class="fld"><label>審査ポリシー</label><input id="w-review_policy" placeholder="PRE_CONTRACT / PATROL_ONLY"></div>
             <div class="fld"><label>利用許諾料（表示）</label><input id="w-fee_label" placeholder="電子書籍：売上の10％"></div>
+            <div class="fld"><label>課金モデル <span class="h">バッジ発行トリガー</span></label><select id="w-billing_type"><option value="">自動判定（料金表記から）</option><option value="PREPAID">前払い・定額（入金時に発行）</option><option value="POSTPAID">後払い・従量／電子書籍（締結時に発行）</option></select></div>
             <div class="fld"><label>公開状態</label><select id="w-publish_status"><option>DRAFT</option><option>PUBLISHED</option><option>UNPUBLISHED</option></select></div>
             <div class="fld"><label>対象媒体 <span class="h">カンマ区切り</span></label><input id="w-media" placeholder="書籍,電子書籍,商品販売"></div>
             <div class="fld"><label>クレジット表記</label><input id="w-credit_text" placeholder="指定の権利表記を記載"></div>
@@ -388,7 +389,7 @@ function loadDataSource(){ call("admin_getDataSourceConfig",[],function(c){ if(!
 function saveDataSource(){ var c={}; DSKEYS.forEach(function(k){ c[k]=$("ds-"+k).value; }); call("admin_saveDataSourceConfig",[c],function(){ toast("データソース設定を保存しました"); }); }
 
 // 作品マスタ
-var WFIELDS = ["work_id","work_name","publisher","category","review_timing","review_policy","fee_label","publish_status","media","ok_elements","no_elements","credit_text"];
+var WFIELDS = ["work_id","work_name","publisher","category","review_timing","review_policy","fee_label","billing_type","publish_status","media","ok_elements","no_elements","credit_text"];
 function loadWorksPane(){ loadDataSource(); reloadWorks(); }
 function reloadWorks(){ call("admin_listWorksMaster",[],renderWorks); }
 function renderWorks(rows){
@@ -412,9 +413,20 @@ function resetWorkForm(){ $("work-form-title").textContent="作品を追加"; WF
 function saveWork(){
   var w={}; WFIELDS.forEach(function(k){ var el=$("w-"+k); if(el) w[k]=el.value; });
   if(!w.work_name){ toast("作品名を入力してください", true); return; }
-  call("admin_saveWork",[w],function(id){ toast("作品を保存しました（"+id+"）"); resetWorkForm(); reloadWorks(); });
+  call("admin_saveWork",[w],function(id){ toast("作品を保存しました（"+id+"）"); resetWorkForm(); reloadWorks(); maybeConfirmXPost(id, w.publish_status); });
 }
-function togglePublish(id,status){ call("admin_setWorkPublish",[id,status],function(){ toast("公開状態を更新： "+status); reloadWorks(); }); }
+function togglePublish(id,status){ call("admin_setWorkPublish",[id,status],function(){ toast("公開状態を更新： "+status); reloadWorks(); if(status==="PUBLISHED") maybeConfirmXPost(id,"PUBLISHED"); }); }
+// データ更新時：自動投稿ON かつ設定済みなら「送信許可」ポップアップ→承認で投稿（サイレント送信はしない）
+function maybeConfirmXPost(workId, publishStatus){
+  if(publishStatus!=="PUBLISHED") return;
+  call("admin_getXPostPreview",[workId],function(pv){
+    pv=pv||{};
+    if(!pv.autopost || !pv.configured) return;
+    if(confirm("作品を更新しました。以下の内容でX（Twitter）へ投稿しますか？\n\n"+(pv.text||""))){
+      call("admin_postWorkToX",[workId],function(r){ r=r||{}; toast("Xへ投稿しました"+(r.tweet_id?("（"+r.tweet_id+"）"):"")); });
+    }
+  });
+}
 
 // 外部API（CloudSign / FormRun）
 function loadIntegration(){
@@ -455,8 +467,13 @@ function saveXConfig(){
   call("admin_saveXConfig",[c],function(){ toast("X連携設定を保存しました"); loadXConfig(); });
 }
 function postWorkToX(workId){
-  if(!confirm("この作品をX（Twitter）へ投稿しますか？")) return;
-  call("admin_postWorkToX",[workId],function(r){ r=r||{}; toast("Xへ投稿しました"+(r.tweet_id?("（"+r.tweet_id+"）"):"")); });
+  call("admin_getXPostPreview",[workId],function(pv){
+    pv=pv||{};
+    if(!pv.configured){ toast("X未設定：設定タブでAPIキーを登録してください", true); return; }
+    if(confirm("以下の内容でX（Twitter）に投稿します。よろしいですか？\n\n"+(pv.text||""))){
+      call("admin_postWorkToX",[workId],function(r){ r=r||{}; toast("Xへ投稿しました"+(r.tweet_id?("（"+r.tweet_id+"）"):"")); });
+    }
+  });
 }
 // 認証バッジ設定
 function loadBadgeConfig(){
@@ -702,6 +719,7 @@ var _mBadge={auto:true,template_id:""};
 MOCK.admin_getXConfig=function(){ return _mX; };
 MOCK.admin_saveXConfig=function(c){ _mX.api_key=c.api_key;_mX.access_token=c.access_token;_mX.autopost=c.autopost;_mX.template=c.template; if(c.api_secret)_mX.api_secret_set=true; if(c.access_secret)_mX.access_secret_set=true; return true; };
 MOCK.admin_postWorkToX=function(){ return {tweet_id:"1234567890", text:"(mock)"}; };
+MOCK.admin_getXPostPreview=function(){ return {text:String(_mX.template).replace(/{name}/g,"作品名").replace(/{publisher}/g,"出版社").replace(/{fee}/g,"売上の10％").replace(/{url}/g,"https://app/exec"), configured:!!(_mX.api_key||_mX.api_secret_set), autopost:_mX.autopost, published:true, already_posted:false}; };
 MOCK.admin_getBadgeConfig=function(){ return _mBadge; };
 MOCK.admin_saveBadgeConfig=function(c){ _mBadge.auto=c.auto;_mBadge.template_id=c.template_id; return true; };
 MOCK.admin_runAiReviews=function(){ return {processed:3,completed:3}; };
