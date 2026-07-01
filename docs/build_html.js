@@ -1,14 +1,17 @@
 /**
  * 業務フロー確認資料の Markdown を、ブラウザで開ける「完全オフライン」自己完結HTML
  * （marked と mermaid を内包＝ネット接続不要）に変換する。
- * 使い方: node docs/build_html.js
+ * 使い方: node docs/build_html.js [入力.md] [出力.html]
+ *   引数省略時は業務フロー確認資料を生成。docs内の相対名でも絶対パスでも可。
  *   ※ 再生成には marked / mermaid が必要: 一度だけ `npm i -D marked mermaid` を実行。
- * 正本は SPLL_業務フロー確認資料_v0.1.md。HTMLはそこから生成（単一ソース）。
+ * 正本は *.md。HTMLはそこから生成（単一ソース）。
  */
 const fs = require('fs');
 const path = require('path');
-const SRC = path.join(__dirname, 'SPLL_業務フロー確認資料_v0.1.md');
-const OUT = path.join(__dirname, 'SPLL_業務フロー確認資料.html');
+function resolveIn(arg, def){ if(!arg) return path.join(__dirname, def); return path.isAbsolute(arg) ? arg : path.join(process.cwd(), arg); }
+const SRC = resolveIn(process.argv[2], 'SPLL_業務フロー確認資料_v0.1.md');
+const OUT = process.argv[3] ? (path.isAbsolute(process.argv[3]) ? process.argv[3] : path.join(process.cwd(), process.argv[3]))
+                           : SRC.replace(/_v[\d.]+\.md$/, '.html').replace(/\.md$/, '.html');
 const md = fs.readFileSync(SRC, 'utf8');
 
 // marked / mermaid の UMD ビルドを読み込んで HTML に内包（オフラインで描画可能に）
@@ -22,6 +25,9 @@ function readLib(rel){
 const markedLib  = readLib('marked/lib/marked.umd.js');
 const mermaidLib = readLib('mermaid/dist/mermaid.min.js');
 
+const title = (((md.match(/^#\s+(.+)$/m) || [])[1]) || 'SPLL ドキュメント')
+  .replace(/[&<>]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c]; });
+
 // md は ``` を含むためテンプレートリテラルに入れず、文字列連結で <script> ブロックに埋め込む。
 const head = [
 '<!DOCTYPE html>',
@@ -29,7 +35,7 @@ const head = [
 '<head>',
 '<meta charset="UTF-8">',
 '<meta name="viewport" content="width=device-width, initial-scale=1.0">',
-'<title>SPLL 業務フロー確認資料</title>',
+'<title>' + title + '</title>',
 '<style>',
 '  :root{--ink:#211E2B;--line:#DAD7E2;--brand:#3D2F6B;--soft:#6A6577;--bg:#F7F6FA;}',
 '  *{box-sizing:border-box;}',

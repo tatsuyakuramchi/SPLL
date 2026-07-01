@@ -14,4 +14,4 @@ node_modules/
 *.log
 
 # docsのプレビュー画像（ビルド生成物）
-docs/_preview.png
+docs/_preview*.png
