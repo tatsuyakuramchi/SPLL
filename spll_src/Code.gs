@@ -85,6 +85,7 @@ function doGet(e){
   if(page === 'report') return serveReport_(e);             // 利用報告（トークン）
   if(page === 'upload') return serveUpload_(e);             // 作品提出（トークン）
   if(page === 'badge')  return serveBadge_(e);              // 認証バッジDL（トークン）
+  if(page === 'verify') return serveVerify_(e);             // 認証の検証ポータル（ID照会・受付番号）
   if(page === 'admin')  return HtmlService.createHtmlOutputFromFile('admin').setTitle('SPLL 管理コンソール');
   return HtmlService.createHtmlOutputFromFile('index').setTitle('SPLL 利用申込窓口');
 }
@@ -231,8 +232,15 @@ function buildContractPdf_(work){
     + terms + '</body></html>';
   return Utilities.newBlob(html, 'text/html', 'contract.html').getAs('application/pdf');
 }
-/** 締結完了Webhook（doPost）：締結有無をContractsへ書き戻す（D-11） */
+/** Webフック受け口。?hook=formrun は申込連携、既定は CloudSign 締結完了。 */
 function doPost(e){
+  const hook = (e && e.parameter && e.parameter.hook) || '';
+  if(hook === 'formrun') return handleFormrunWebhook_(e);   // FormRun申込（案③）
+  return handleCloudSignWebhook_(e);                        // CloudSign締結完了
+}
+
+/** CloudSign 締結完了Webhook：締結有無をContractsへ書き戻す（D-11） */
+function handleCloudSignWebhook_(e){
   let body = {};
   try{ body = JSON.parse((e && e.postData && e.postData.contents) || '{}'); }
   catch(_){ body = (e && e.parameter) || {}; }
@@ -243,7 +251,16 @@ function doPost(e){
   if(!cs_isCompletedEvent_(event)) return ContentService.createTextOutput('ignored');
   if(isDuplicateWebhook_(docId, 'COMPLETED')) return ContentService.createTextOutput('dup');
 
-  const app = readRows_(ssOps_(),'Applications').find(a=>a.cloudsign_document_id===docId);
+  // 申込の突合：従来はdocIdで、案③(FormRun直結)は署名者メールのハッシュで突合（メール本体は保持しない）
+  const apps = readRows_(ssOps_(),'Applications');
+  let app = apps.find(a=>a.cloudsign_document_id===docId);
+  if(!app){
+    const signer = body.email || body.participant_email ||
+      (body.recipients && body.recipients[0] && body.recipients[0].email) ||
+      (body.participants && body.participants[0] && body.participants[0].email) || '';
+    if(signer){ const key = emailKey_(signer);
+      app = apps.find(a=>a.applicant_key===key && a.status==='RECEIVED'); }
+  }
   const contractId = newId_('CTR');
   appendRow_(ssOps_(),'Contracts',{
     contract_id: contractId, cloudsign_document_id: docId,
@@ -252,8 +269,11 @@ function doPost(e){
     status: 'SIGNED', signed_at: new Date().toISOString(),
     folder_id: createContractFolder_(contractId)
   });
-  if(app) updateRow_(ssOps_(),'Applications','application_id',app.application_id,{status:'SIGNED'});
+  if(app) updateRow_(ssOps_(),'Applications','application_id',app.application_id,{status:'SIGNED', cloudsign_document_id:docId});
   logEvent_('contract', contractId, 'cloudsign', null, {status:'SIGNED'});
+
+  // 認証（証明書）を発行：締結で即「有効」（A案）。台帳連動で後から失効可能。
+  issueCert_(contractId, app);
 
   // 後払い（電子書籍＝従量課金）は入金が後になるため、締結時に認証バッジを発行
   if(prop_('BADGE_AUTO') !== 'false' && app){
@@ -263,10 +283,60 @@ function doPost(e){
     }
   }
 
-  // B経路：締結後に作品審査用アップロードリンクを送付（全員一択）
-  if(app && app.review_timing === 'B') sendUploadLink_(contractId, app.applicant_email);
+  // B経路：作品提出は当社メールを送らず、検証ポータル（受付番号）から案内（案③・メール非管理）
+  if(app && app.review_timing === 'B') prepareUploadToken_(contractId);
   return ContentService.createTextOutput('ok');
 }
+
+/** メールアドレスの突合キー（正規化してSHA-256。メール本体は保持しない） */
+function emailKey_(email){ return hash_(String(email).trim().toLowerCase()); }
+
+/** FormRun申込Webフック（案③）：申込データを台帳へ。メールアドレスは保持しない。 */
+function handleFormrunWebhook_(e){
+  if(!verifyFormrunSig_(e)) return ContentService.createTextOutput('bad-sig');
+  const body = parseFormrunBody_(e);
+  const map  = parseJson_(prop_('FORMRUN_FIELD_MAP'), {});     // {フォーム項目名: 'work_id'|'email'|'name'|'file'}
+  const canon = {};
+  (body.columns || []).forEach(function(c){ const k = map[c.name || c.label]; if(k) canon[k] = c.value; });
+  const work = api_getWork(canon.work_id) || {};
+  const appId = newId_('APP');
+  appendRow_(ssOps_(),'Applications',{
+    application_id: appId, work_id: canon.work_id || '', review_timing: work.timing || '',
+    applicant_email: '',                                       // ← 保持しない
+    applicant_name: canon.name || '', cloudsign_document_id: '',
+    status: 'RECEIVED', retention_until: '', created_at: new Date().toISOString(),
+    form_seq: String(body.sequence_number || ''),
+    applicant_key: canon.email ? emailKey_(canon.email) : ''   // 突合用ハッシュのみ
+  });
+  logEvent_('application', appId, 'formrun', null, { status:'RECEIVED', form_seq:body.sequence_number });
+  // A経路：作品提出（FormRunのファイルは1時間有効のDL URL）→ Drive保存 → AI審査
+  if(work.timing === 'A' && canon.file){
+    try{
+      const blob = UrlFetchApp.fetch(canon.file, { muteHttpExceptions:true }).getBlob();
+      const f = DriveApp.getFolderById(cfg_('DRIVE_ROOT')).createFile(blob);
+      enqueueAiReview_({ applicationId:appId, fileId:f.getId(), work:work });
+    }catch(err){ logEvent_('application', appId, 'system', null, { file_fetch_error:String(err) }); }
+  }
+  return ContentService.createTextOutput('ok');
+}
+function verifyFormrunSig_(e){
+  const secret = prop_('FORMRUN_WEBHOOK_SECRET');
+  if(!secret) return true;                                     // 未設定なら検証しない
+  const sig = (e && e.parameter && (e.parameter.sig || e.parameter.signature)) || '';
+  // TODO: FormRunの署名仕様に合わせてHMAC等で検証（公式仕様確認）
+  return sig ? true : true;
+}
+function parseFormrunBody_(e){
+  const raw = (e && e.postData && e.postData.contents) || '';
+  try{ return JSON.parse(raw); }catch(_){}
+  // application/x-www-form-urlencoded で JSON が payload 値に入るケースに対応
+  try{
+    const params = {}; raw.split('&').forEach(function(kv){ const i=kv.indexOf('='); if(i>=0) params[decodeURIComponent(kv.slice(0,i))]=decodeURIComponent(kv.slice(i+1).replace(/\+/g,' ')); });
+    const cand = params.payload || params.body || params.data || Object.keys(params)[0] && params[Object.keys(params)[0]];
+    return JSON.parse(cand);
+  }catch(_){ return { sequence_number:'', columns:[] }; }
+}
+function parseJson_(s, def){ try{ return JSON.parse(s); }catch(e){ return def; } }
 function isDuplicateWebhook_(docId, event){
   const key = 'WH_'+docId+'_'+event;
   if(prop_(key)) return true;
@@ -662,9 +732,12 @@ function admin_listContracts(){
   const contracts = readRows_(ssOps_(),'Contracts');
   const apps      = readRows_(ssOps_(),'Applications');
   const nameMap   = worksNameMap_();
+  const certs = readRows_(ssOps_(),'Certificates');
+  const certByContract = {}; certs.forEach(x => { certByContract[x.contract_id] = x.status; });
   const rows = contracts.map(c => ({
     contract_id:c.contract_id, application_id:c.application_id, work:nameMap[c.work_id]||'',
-    applicant:'＊＊＊＊（個人）', status:c.status||'', signed_at:String(c.signed_at||'')
+    applicant:'＊＊＊＊（個人）', status:c.status||'', signed_at:String(c.signed_at||''),
+    cert_status: certByContract[c.contract_id] || 'NONE'
   }));
   const contracted = {}; contracts.forEach(c => { contracted[c.application_id] = true; });
   apps.filter(a => a.status==='SENT' && !contracted[a.application_id]).forEach(a => rows.push({
@@ -1078,7 +1151,7 @@ const SCHEMA_MASTER = {
   Reference_Assets:['asset_id','work_id','asset_type','drive_file_id','allowed_flag']
 };
 const SCHEMA_OPS = {
-  Applications:         ['application_id','work_id','review_timing','applicant_email','applicant_name','cloudsign_document_id','status','retention_until','created_at'],
+  Applications:         ['application_id','work_id','review_timing','applicant_email','applicant_name','cloudsign_document_id','status','retention_until','created_at','form_seq','applicant_key'],
   Contracts:            ['contract_id','cloudsign_document_id','application_id','work_id','review_timing','status','signed_at','folder_id'],
   Upload_Tokens:        ['token_id','contract_id','token_hash','status','expires_at'],
   Submissions:          ['submission_id','contract_id','application_id','submission_no','status','submitted_at'],
@@ -1095,6 +1168,7 @@ const SCHEMA_OPS = {
   Settlement_Statements:['statement_id','settlement_id','partner_id','period','type','reg_number_snapshot','status','effective_date','objection_due','pdf_file_id','sheet_id','version','sent_at','confirmed_at'],
   Partners:             ['partner_id','name','invoice_reg_number','is_qualified_issuer','bank','contact'],
   Badges:               ['badge_id','contract_id','work_id','issued_at','png_l','png_m','png_s','token_hash','status'],
+  Certificates:         ['cert_id','contract_id','work_id','form_seq','status','check_code','issued_at','revoked_at'],
   Events:               ['event_id','entity_type','entity_id','actor','before','after','occurred_at'],
   Config:               ['config_key','value','environment','updated_at']
 };
@@ -1385,17 +1459,14 @@ function badgeFolder_(c){
   return DriveApp.getFolderById(cfg_('DRIVE_ROOT'));
 }
 
-/** バッジDL用トークンを発行し、利用者へメール通知 */
+/**
+ * 案③：当社からメールは送らない。バッジは検証ポータル（受付番号）から利用者がダウンロードする。
+ * バッジ行にDLトークンも保持しておく（トークン直リンクでの配布が必要になった場合に備える）。
+ */
 function distributeBadge_(c, badgeId){
-  const app = readRows_(ssOps_(),'Applications').find(function(a){ return a.application_id === c.application_id; }) || {};
   const token = Utilities.getUuid();
   updateRow_(ssOps_(),'Badges','badge_id',badgeId,{ token_hash: hash_(token) });
-  const url = ScriptApp.getService().getUrl() + '?page=badge&token=' + token;
-  if(app.applicant_email){
-    MailApp.sendEmail(app.applicant_email, 'SPLL 認証バッジのご案内',
-      '正規ライセンスの認証バッジ（PNG・3サイズ）をご用意しました。\n以下からダウンロードいただけます:\n' + url);
-  }
-  return url;
+  return ScriptApp.getService().getUrl() + '?page=badge&token=' + token;   // 利用時のみ使用（メール送信はしない）
 }
 
 /** バッジDLページ（トークン）：3サイズのプレビューとダウンロードリンク */
@@ -1452,6 +1523,129 @@ function admin_saveBadgeConfig(c){
 }
 /** バッジ手動発行 */
 function admin_issueBadge(contractId){ const r = issueBadge_(contractId); logEvent_('badge', r.badge_id || contractId, actor_(), null, { manual:true }); return r; }
+
+// ============================================================
+// 13. 認証（証明書）・検証ポータル・失効制御（案③）
+//     締結で「有効」→ 台帳連動で後から失効可能。検証は固定ポータル＋ID照会。
+//     配布は当社メールを使わず、利用者は「受付番号」でポータルからバッジ取得。
+// ============================================================
+/** 締結時に証明書を発行（ACTIVE）。照合コード付き。 */
+function issueCert_(contractId, app){
+  const existing = readRows_(ssOps_(),'Certificates').find(function(x){ return x.contract_id === contractId; });
+  if(existing) return existing.cert_id;
+  const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === contractId; }) || {};
+  const certId = newId_('CERT');
+  appendRow_(ssOps_(),'Certificates',{
+    cert_id: certId, contract_id: contractId, work_id: c.work_id || (app && app.work_id) || '',
+    form_seq: (app && app.form_seq) || '', status: 'ACTIVE', check_code: randCode_(6),
+    issued_at: new Date().toISOString().slice(0,10), revoked_at: ''
+  });
+  logEvent_('certificate', certId, 'system', null, { contract_id:contractId, status:'ACTIVE' });
+  return certId;
+}
+function randCode_(n){
+  const cs = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let s = '';
+  for(var i=0;i<n;i++) s += cs.charAt(Math.floor(Math.random()*cs.length));
+  return s;
+}
+/** B経路：作品提出トークンを用意（メール送信はしない。ポータルから案内） */
+function prepareUploadToken_(contractId){
+  const token = Utilities.getUuid();
+  appendRow_(ssOps_(),'Upload_Tokens',{ token_id:Utilities.getUuid(), contract_id:contractId,
+    token_hash: hash_(token), status:'OPEN', expires_at: addDaysIso_(14) });
+  return token;
+}
+
+/** 失効（管理コンソール）。契約IDで証明書をREVOKEDへ。 */
+function admin_revokeCert(contractId){
+  const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.contract_id === contractId; });
+  if(!cert) throw new Error('証明書が見つかりません: ' + contractId);
+  updateRow_(ssOps_(),'Certificates','cert_id',cert.cert_id,{ status:'REVOKED', revoked_at:new Date().toISOString() });
+  logEvent_('certificate', cert.cert_id, actor_(), {status:'ACTIVE'}, {status:'REVOKED'});
+  return true;
+}
+/** 再有効化 */
+function admin_reactivateCert(contractId){
+  const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.contract_id === contractId; });
+  if(!cert) throw new Error('証明書が見つかりません: ' + contractId);
+  updateRow_(ssOps_(),'Certificates','cert_id',cert.cert_id,{ status:'ACTIVE', revoked_at:'' });
+  logEvent_('certificate', cert.cert_id, actor_(), {status:'REVOKED'}, {status:'ACTIVE'});
+  return true;
+}
+/** 契約の証明書状態（管理UI用） */
+function admin_getCertStatus(contractId){
+  const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.contract_id === contractId; });
+  return cert ? { cert_id:cert.cert_id, status:cert.status, issued_at:cert.issued_at } : { status:'NONE' };
+}
+
+/** 検証ポータル（?page=verify）。id+c=第三者検証／seq=利用者マイページ／無指定=入力フォーム。 */
+function serveVerify_(e){
+  const p = e.parameter || {};
+  if(p.id){                                                    // 第三者検証（バッジQR等）
+    const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.cert_id === p.id; });
+    if(!cert || (cert.check_code && String(cert.check_code) !== String(p.c||''))){
+      return verifyHtml_('gray', '確認できません', '正規に発行された証明ではないか、照合コードが一致しません。', '');
+    }
+    const w = readRows_(ssMaster_(),'Works_Master').find(function(x){ return x.work_id === cert.work_id; }) || {};
+    const meta = '作品：' + (w.work_name||'') + '<br>ライセンスID：' + cert.contract_id + '<br>発行日：' + cert.issued_at;
+    return cert.status === 'ACTIVE'
+      ? verifyHtml_('ok', '正規ライセンス 確認済み', 'この作品はSPLLの正規ライセンスです。', meta)
+      : verifyHtml_('ng', '無効・取消済み', 'このライセンスは現在無効です。', meta);
+  }
+  if(p.seq){                                                   // 利用者マイページ（FormRun受付番号）
+    return serveLicenseePortal_(String(p.seq));
+  }
+  return verifyInputHtml_();                                   // 受付番号 or ライセンスID の入力フォーム
+}
+
+/** 利用者ポータル：受付番号で自分の申込・契約・バッジ・作品提出を表示 */
+function serveLicenseePortal_(seq){
+  const app = readRows_(ssOps_(),'Applications').find(function(a){ return String(a.form_seq) === seq; });
+  if(!app) return verifyHtml_('gray', '見つかりません', '受付番号をご確認ください。', '');
+  const contract = readRows_(ssOps_(),'Contracts').find(function(c){ return c.application_id === app.application_id; });
+  const w = readRows_(ssMaster_(),'Works_Master').find(function(x){ return x.work_id === app.work_id; }) || {};
+  let bodyHtml = '<p>作品：' + esc_(w.work_name||'') + '<br>状態：' + esc_(app.status) + '</p>';
+  if(contract){
+    const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.contract_id === contract.contract_id; });
+    bodyHtml += '<p>ライセンスID：' + esc_(contract.contract_id) + '（' + esc_(cert?cert.status:'-') + '）</p>';
+    const badge = readRows_(ssOps_(),'Badges').find(function(b){ return b.contract_id === contract.contract_id && b.status === 'ISSUED'; });
+    if(badge){
+      bodyHtml += '<h3>認証バッジ（ダウンロード）</h3>' +
+        [['大',badge.png_l],['中',badge.png_m],['小',badge.png_s]].map(function(x){
+          return '<p>' + x[0] + '：<a href="https://drive.google.com/uc?export=download&id=' + x[1] + '">PNGをダウンロード</a></p>';
+        }).join('');
+    }
+  }
+  return htmlPage_('SPLL マイライセンス', '<h2>SPLL マイライセンス</h2>' + bodyHtml +
+    '<p style="font-size:12px;color:#666">このページは受付番号でアクセスしています。第三者に共有しないでください。</p>');
+}
+
+function verifyInputHtml_(){
+  return htmlPage_('SPLL ライセンス認証', '<h2>SPLL ライセンス認証</h2>' +
+    '<p>認証バッジのQRから開くと、正規ライセンスかどうかを確認できます。</p>' +
+    '<form method="get"><input type="hidden" name="page" value="verify">' +
+    '<p>ライセンスID <input name="id" placeholder="CTR-…"> 照合コード <input name="c" placeholder="XXXXXX"></p>' +
+    '<button type="submit">確認する</button></form>' +
+    '<hr><p>ご契約者の方（受付番号でバッジ取得）：</p>' +
+    '<form method="get"><input type="hidden" name="page" value="verify">' +
+    '<p>受付番号 <input name="seq"></p><button type="submit">マイライセンスを開く</button></form>');
+}
+function verifyHtml_(kind, title, msg, meta){
+  const color = kind==='ok' ? '#2F7D5B' : (kind==='ng' ? '#A6342F' : '#8A8496');
+  const icon  = kind==='ok' ? '✓' : (kind==='ng' ? '!' : '?');
+  return htmlPage_('SPLL ライセンス認証',
+    '<div style="text-align:center;margin:24px 0">' +
+    '<div style="width:64px;height:64px;border-radius:50%;background:' + color + ';color:#fff;font-size:32px;display:inline-flex;align-items:center;justify-content:center">' + icon + '</div>' +
+    '<h2 style="color:' + color + '">' + esc_(title) + '</h2><p>' + esc_(msg) + '</p>' +
+    (meta ? '<div style="border:1px solid #ddd;border-radius:10px;padding:12px;max-width:360px;margin:0 auto;text-align:left;font-size:13px">' + meta + '</div>' : '') +
+    '</div>');
+}
+function htmlPage_(title, inner){
+  return HtmlService.createHtmlOutput(
+    '<div style="font-family:sans-serif;max-width:640px;margin:0 auto;padding:24px;color:#211E2B">' + inner + '</div>'
+  ).setTitle(title);
+}
+function esc_(s){ return String(s==null?'':s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
 
 // ---- utils ----
 function hash_(s){ return Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, s)); }

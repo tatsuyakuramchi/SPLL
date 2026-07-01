@@ -180,46 +180,41 @@ sequenceDiagram
 | 6 | CloudSign | 締結通知 | 自動 | Contracts(SIGNED) |  |
 | 7 | AI審査 | 高リスクは却下 | 自動 | Applications(REJECTED, 1年後削除) |  |
 
-### 3.2 B経路（契約後審査）
+### 3.2 B経路（契約後審査）※メールは当社で管理しない構成（案③）
+
+**FormRun→CloudSign は直結**（当社はメールアドレスを保持しない）。同時に **FormRun Webhook でGASにも申込データ**を送り、台帳を完全に埋めます。締結はCloudSignのWebhookでGASへ通知。
 
 ```mermaid
 sequenceDiagram
   autonumber
   actor U as 利用者
   participant FR as FormRun
-  participant G as GAS
   participant CS as CloudSign
-  participant DB as 業務台帳
+  participant G as GAS(業務台帳)
   participant AI as AI審査(Gemini)
   actor OF as 事務局(審査/法務)
   U->>FR: 作品選択・同意・申込
-  FR->>G: 申込連携(createApplication_)
-  G->>DB: Applications(RECEIVED→SENT)
-  G->>CS: 契約書を送信
-  CS-->>U: 契約リンク
+  FR->>CS: 契約書を自動送信（直結・メールは当社非管理）
+  FR-->>G: Webhookで申込データ（作品ID等／メールはハッシュのみ）
+  CS-->>U: CloudSignから契約案内
   U->>CS: 締結
-  CS->>G: 締結Webhook(doPost)
-  G->>DB: Contracts(SIGNED)
-  G-->>U: 作品提出リンク(トークン)を送付
-  U->>G: 作品アップロード
-  G->>DB: Submissions / Submission_Files
+  CS->>G: 締結Webhook → Contracts(SIGNED)＋認証(ACTIVE)
+  Note over U,G: 当社からメールは送らない。作品提出/バッジは検証ポータル（受付番号）から取得
+  U->>G: ポータルで作品提出
   G->>AI: AI審査ジョブ登録
   AI->>DB: AI_Findings・総合結果
-  OF->>DB: 人手判断(承認/是正要求/上申)
-  alt 高リスク
-    AI->>DB: Compliance_Alerts 起票
-    OF-->>U: 是正要求
-  end
+  OF->>G: 人手判断(承認/是正要求/上申)
 ```
 
 | # | レーン | 作業 | 自動/人手 | 記録先 | 現行運用／確認・修正 |
 |---|---|---|---|---|---|
 | 1 | 利用者 | 申込（FormRun） | 手 | — |  |
-| 2 | GAS | 申込受付・契約送信 | 自動 | Applications(SENT) |  |
-| 3 | 利用者 | 締結 | 手 | — |  |
-| 4 | CloudSign→GAS | 締結通知・提出案内送付 | 自動 | Contracts(SIGNED) / Upload_Tokens |  |
-| 5 | 利用者 | 作品提出 | 手 | Submissions / Submission_Files |  |
-| 6 | AI審査 | 一次スクリーニング | 自動 | AI_Review_Jobs / AI_Findings |  |
+| 2 | FormRun→CloudSign | 契約書を直結で自動送信（当社はメール非管理） | 自動 | — |  |
+| 3 | FormRun→GAS | Webhookで申込データを台帳へ（メールはハッシュのみ保持） | 自動 | Applications(RECEIVED) |  |
+| 4 | 利用者 | 締結 | 手 | — |  |
+| 5 | CloudSign→GAS | 締結通知（メールハッシュで申込突合）→契約＋認証発行 | 自動 | Contracts(SIGNED) / Certificates(ACTIVE) |  |
+| 6 | 利用者 | ポータル（受付番号）で作品提出 | 手 | Submissions / Submission_Files |  |
+| 7 | AI審査 | 一次スクリーニング | 自動 | AI_Review_Jobs / AI_Findings |  |
 | 7 | 事務局 | 最終判断・是正要求・上申 | 手 | Human_Reviews / Compliance_Alerts |  |
 
 ---
@@ -309,11 +304,11 @@ sequenceDiagram
   else 後払い・従量（電子書籍）
     Note over SYS,DB: 締結時に発行（入金は後払いのため）
   end
-  SYS->>SYS: バッジを組版（作品名・ライセンスID・発行日・クレジット）
+  SYS->>SYS: バッジを組版（作品名・ライセンスID・発行日・クレジット・検証QR）
   SYS->>DR: PNG 3サイズ（大/中/小）を保存
-  SYS->>DB: Badges に発行記録・DLトークン
-  SYS-->>U: DLページのURLをメール通知
-  U->>DR: バッジPNGをダウンロード
+  SYS->>DB: Badges に発行記録
+  Note over SYS,U: 当社はメールを送らない。利用者は検証ポータル（受付番号）から取得
+  U->>DR: ポータルでバッジPNGをダウンロード
 ```
 
 | # | レーン | 作業 | 自動/人手 | 記録先 | 現行運用／確認・修正 |
@@ -328,6 +323,33 @@ sequenceDiagram
 - **バッジのデザイン**（意匠・ロゴ）と**掲載情報**（作品名・ライセンスID・発行日・クレジット文・QRの要否）
 - **3サイズの用途**（例：大＝告知バナー／中＝商品ページ／小＝奥付・SNSアイコン）
 - **改変可否・表示ルール**（規約でのバッジ使用条件）
+
+## 5.6 認証の検証・失効（固定ポータル）★新規
+
+バッジは**静的な画像**なので、第三者が「本物か・今も有効か」を確認できるよう**検証ポータル**を用意します。
+締結時に発行した認証（証明書）は**台帳連動**で、事務局が**いつでも失効／再有効**にできます。
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor TP as 第三者(購入者/イベント)
+  participant V as 検証ポータル
+  participant DB as 業務台帳(Certificates)
+  actor OF as 事務局
+  TP->>V: バッジのQR/URL＋照合コードでアクセス
+  V->>DB: ライセンスID/コードを照会
+  alt 有効
+    V-->>TP: ✔ 正規ライセンス（作品・ID・発行日）
+  else 失効・取消
+    V-->>TP: ✖ 無効
+  end
+  OF->>DB: 必要時に「失効／再有効」を操作（即反映）
+```
+
+- **利用者**：ログイン不要。**受付番号**でポータルを開き、バッジをダウンロード（当社メール不要）。
+- **第三者**：バッジのQR→ポータルで**有効/無効**を確認。
+- **事務局**：管理コンソール「契約管理」から**認証を失効／再有効**（検証ページに即反映）。
+- **要確認**：照合コードの要否・桁数、失効の運用ルール（未入金時に失効するか 等）。
 
 ---
 
@@ -389,6 +411,7 @@ sequenceDiagram
 | マスタ | 作品マスタ・料率・同意文/規約の更新 | 事務局/法務 | 随時 |  |
 | 告知 ★ | X投稿文面の確認・**送信承認**（データ更新時のポップアップ） | 事務局/広報 | 随時 |  |
 | バッジ ★ | バッジ発行の確認・再発行（必要時） | 事務局 | 随時 |  |
+| 認証 ★ | 認証の**失効／再有効**（違反・解除時 等） | 事務局/法務 | 随時 |  |
 
 ---
 
@@ -427,6 +450,7 @@ sequenceDiagram
 | C-12 | 同意文・規約 | 個人情報同意文／規約テンプレートの法務確定 |  | 未（DRAFT） |
 | C-13 ★ | X告知 | 投稿アカウント（要APIキー登録） ※方式は決定：自動提示＋承認送信・固定テンプレ |  | 一部決定 |
 | C-14 ★ | 認証バッジ | デザイン/掲載情報・3サイズ用途・使用条件 ※トリガーは決定：入金確認（電子書籍は締結時） |  | 一部決定 |
+| C-15 ★ | メール非管理・検証 | 方針決定：FormRun→CloudSign直結＋Webhook、当社はメール非保持、受付番号ポータル配布、締結で認証「有効」・失効可。要確認＝照合コード仕様／CloudSign Webhookが署名者メールを含むか／FormRun連携プラン |  | 一部決定 |
 
 ---
 

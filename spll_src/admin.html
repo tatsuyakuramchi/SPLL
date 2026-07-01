@@ -144,7 +144,7 @@
     <p class="sub">FormRun申込→CloudSign API送信→締結の状態を一覧。締結有無はCloudSignのWebhookでSheetsへ自動書き戻し。</p>
     <div class="panel">
       <div class="ph"><h3>契約一覧</h3><span class="hint">Applications / Contracts より</span></div>
-      <table><thead><tr><th>契約ID</th><th>申込ID</th><th>作品</th><th>契約者</th><th>締結状態</th><th>締結日</th><th>操作</th></tr></thead><tbody id="contract-tbody"></tbody></table>
+      <table><thead><tr><th>契約ID</th><th>申込ID</th><th>作品</th><th>契約者</th><th>締結状態</th><th>認証</th><th>締結日</th><th>操作</th></tr></thead><tbody id="contract-tbody"></tbody></table>
     </div>
     <div class="note">締結状態の遷移（送信済→締結済／辞退／取消）はCloudSign Webhook（COMPLETED等）またはAPI照合バッチのみが更新します。手動での締結化はできません。</div>
   </section>
@@ -583,7 +583,7 @@ function humanReview(id,result){
 function loadContract(){
   call("admin_listContracts",[],function(rows){
     var tb=$("contract-tbody"); tb.innerHTML=""; rows=rows||[];
-    if(!rows.length){ emptyRow(tb,7,"契約がありません"); return; }
+    if(!rows.length){ emptyRow(tb,8,"契約がありません"); return; }
     rows.forEach(function(c){
       var cp=contractPill(c.status);
       var tr=document.createElement("tr");
@@ -592,12 +592,15 @@ function loadContract(){
       tr.appendChild(td(esc(c.work)));
       tr.appendChild(td(esc(c.applicant)));
       tr.appendChild(td(pill(cp)));
+      var cs=String(c.cert_status||"NONE");
+      var certPill = cs==="ACTIVE"?{cls:"pass",label:"有効"}:(cs==="REVOKED"?{cls:"fail",label:"失効"}:{cls:"wait",label:"—"});
+      tr.appendChild(td(pill(certPill)));
       tr.appendChild(td('<span class="id">'+esc(c.signed_at||"—")+'</span>'));
       var act=document.createElement("td"); act.className="actions";
-      if(String(c.status)==="SIGNED" && c.contract_id && c.contract_id!=="—"){
-        act.appendChild(mkBtn("提出案内送付","btn",function(){
-          if(confirm("作品提出リンクを契約者へ送付しますか？")) call("admin_sendUploadLink",[c.contract_id],function(){ toast("提出案内を送付しました"); });
-        }));
+      if(cs==="ACTIVE"){
+        act.appendChild(mkBtn("認証を失効","btn d",function(){ if(confirm("この認証を失効しますか？（検証ページが「無効」表示になります）")) call("admin_revokeCert",[c.contract_id],function(){ toast("認証を失効しました"); loadContract(); }); }));
+      } else if(cs==="REVOKED"){
+        act.appendChild(mkBtn("再有効化","btn",function(){ if(confirm("この認証を再有効化しますか？")) call("admin_reactivateCert",[c.contract_id],function(){ toast("認証を再有効化しました"); loadContract(); }); }));
       } else {
         act.appendChild(mkBtn("CloudSign確認","btn",function(){ toast("CloudSign管理画面でご確認ください"); }));
       }
@@ -697,11 +700,13 @@ MOCK.admin_reviewQueue=function(){ return [
 ]; };
 MOCK.admin_setHumanReview=function(){ return true; };
 MOCK.admin_listContracts=function(){ return [
-  {contract_id:"—",application_id:"APP-202606-0050",work:"光砕のリヴァルチャー",applicant:"＊＊＊＊（個人）",status:"送信済・締結待ち",signed_at:""},
-  {contract_id:"CTR-202606-0017",application_id:"APP-202606-0048",work:"新クトゥルフ神話TRPG",applicant:"＊＊＊＊（個人）",status:"SIGNED",signed_at:"2026-06-26"},
-  {contract_id:"CTR-202606-0011",application_id:"APP-202606-0040",work:"インセイン",applicant:"＊＊＊＊（個人）",status:"SIGNED",signed_at:"2026-06-20"}
+  {contract_id:"—",application_id:"APP-202606-0050",work:"光砕のリヴァルチャー",applicant:"＊＊＊＊（個人）",status:"送信済・締結待ち",signed_at:"",cert_status:"NONE"},
+  {contract_id:"CTR-202606-0017",application_id:"APP-202606-0048",work:"新クトゥルフ神話TRPG",applicant:"＊＊＊＊（個人）",status:"SIGNED",signed_at:"2026-06-26",cert_status:"ACTIVE"},
+  {contract_id:"CTR-202606-0011",application_id:"APP-202606-0040",work:"インセイン",applicant:"＊＊＊＊（個人）",status:"SIGNED",signed_at:"2026-06-20",cert_status:"REVOKED"}
 ]; };
 MOCK.admin_sendUploadLink=function(){ return true; };
+MOCK.admin_revokeCert=function(){ return true; };
+MOCK.admin_reactivateCert=function(){ return true; };
 MOCK.admin_listPayments=function(){ return [
   {invoice_id:"INV-202606-0001",contract_id:"CTR-202606-0017",work:"新クトゥルフ神話TRPG",amount:"売上の10％",status:"入金待ち",paid_at:""},
   {invoice_id:"INV-202606-0002",contract_id:"CTR-202606-0011",work:"インセイン",amount:"16,500円",status:"入金済",paid_at:"2026-06-24"}
