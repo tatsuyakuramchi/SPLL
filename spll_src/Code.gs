@@ -1273,6 +1273,13 @@ function setup_seedSamples_(){
   }
 }
 
+/**
+ * 作り直し：既存IDを無視して SS_MASTER / SS_OPS / DRIVE_ROOT を新規に作成し直す。
+ * 本番データが無い前提。Apps Scriptエディタで setup_reset を選んで Run。
+ * ※ 旧スプレッドシート/フォルダはDriveに残るため、不要なら手動でゴミ箱へ。
+ */
+function setup_reset(){ return setup_bootstrap({ force:true }); }
+
 /** 現在の接続先IDを確認（エディタ実行用）。 */
 function setup_status(){
   const s = { SS_MASTER:prop_('SS_MASTER')||'(未設定)', SS_OPS:prop_('SS_OPS')||'(未設定)',
