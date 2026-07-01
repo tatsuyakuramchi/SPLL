@@ -173,6 +173,7 @@
       <div class="subtab" data-p="works">作品マスタ</div>
       <div class="subtab" data-p="cloudsign">CloudSign API</div>
       <div class="subtab" data-p="formrun">FormRun</div>
+      <div class="subtab" data-p="xbadge">X・認証バッジ</div>
     </div>
 
     <!-- LEGAL -->
@@ -273,6 +274,35 @@
         <div class="pfoot"><button class="save" onclick="saveFormRun()">FormRun設定を保存</button></div>
       </div>
     </div>
+
+    <!-- X ・ BADGE -->
+    <div class="setpane" id="p-xbadge">
+      <div class="panel">
+        <div class="ph"><h3>X（Twitter）連携</h3><span class="hint">ScriptProperties（secretはマスク）</span></div>
+        <div class="pbody">
+          <p class="setnote">作品を「公開(PUBLISHED)」にした時にX（Twitter）へ告知投稿します。API v2 / OAuth1.0a のキーを登録してください。secretは保存時のみ入力。</p>
+          <div class="grid2">
+            <div class="fld"><label>API Key <span class="h">X_API_KEY</span></label><input id="x-api_key"></div>
+            <div class="fld"><label>API Secret <span class="h">X_API_SECRET</span></label><input id="x-api_secret" type="password"></div>
+            <div class="fld"><label>Access Token <span class="h">X_ACCESS_TOKEN</span></label><input id="x-access_token"></div>
+            <div class="fld"><label>Access Secret <span class="h">X_ACCESS_SECRET</span></label><input id="x-access_secret" type="password"></div>
+          </div>
+          <label class="chk"><input type="checkbox" id="x-autopost"> 公開時に自動投稿する</label>
+          <div class="fld" style="margin-top:10px"><label>投稿テンプレート <span class="h">差込: {name} 作品名 / {publisher} 出版社 / {fee} 許諾料 / {url} 申込URL</span></label><textarea id="x-template" class="code"></textarea></div>
+        </div>
+        <div class="pfoot"><button class="save" onclick="saveXConfig()">X連携設定を保存</button></div>
+      </div>
+      <div class="panel">
+        <div class="ph"><h3>認証バッジ（クレジット表記）</h3><span class="hint">ScriptProperties</span></div>
+        <div class="pbody">
+          <p class="setnote">入金確認（入金済）の後に、認証バッジを PNG 3サイズ（大/中/小）で自動生成し、トークン付きDLページを利用者へメール通知します。テンプレートSlides ID を指定すると差込（{{work_name}}/{{license_id}}/{{issued_at}}/{{credit}}）で生成、未指定なら暫定デザインを自動組版します。</p>
+          <label class="chk"><input type="checkbox" id="bd-auto"> 入金確認で自動発行する</label>
+          <div class="fld" style="margin-top:10px"><label>バッジ用 Slides テンプレートID <span class="h">BADGE_TEMPLATE_ID（任意）</span></label><input id="bd-template_id" placeholder="（未指定＝暫定デザインで自動生成）"></div>
+        </div>
+        <div class="pfoot"><button class="save" onclick="saveBadgeConfig()">バッジ設定を保存</button></div>
+      </div>
+      <div class="note">Xの秘密情報・バッジ設定はGASのScriptPropertiesに保存され、画面には再表示されません（設定済みか否かのみ表示）。</div>
+    </div>
   </section>
 </main>
 
@@ -346,7 +376,7 @@ var MOCK = {
 
 // ===== 設定ロード =====
 var settingsLoaded = false;
-function loadSettings(){ if(settingsLoaded) return; settingsLoaded=true; loadLegal(); loadWorksPane(); loadIntegration(); }
+function loadSettings(){ if(settingsLoaded) return; settingsLoaded=true; loadLegal(); loadWorksPane(); loadIntegration(); loadXConfig(); loadBadgeConfig(); }
 
 // 同意文・規約
 function loadLegal(){ call("admin_getLegalTexts",[],function(l){ if(!l) return; $("set-privacy").value=l.privacy||""; $("set-terms").value=l.termsTemplate||""; }); }
@@ -373,7 +403,8 @@ function renderWorks(rows){
     var td=document.createElement("td"); td.className="actions";
     var bEdit=document.createElement("button"); bEdit.className="btn"; bEdit.textContent="編集"; bEdit.onclick=function(){ editWork(w); };
     var bPub=document.createElement("button"); bPub.className="btn"; bPub.textContent=pub?"非公開に":"公開する"; bPub.onclick=function(){ togglePublish(w.work_id, pub?"UNPUBLISHED":"PUBLISHED"); };
-    td.appendChild(bEdit); td.appendChild(bPub); tr.appendChild(td); tb.appendChild(tr);
+    var bX=document.createElement("button"); bX.className="btn"; bX.textContent="Xへ投稿"; bX.onclick=function(){ postWorkToX(w.work_id); };
+    td.appendChild(bEdit); td.appendChild(bPub); td.appendChild(bX); tr.appendChild(td); tb.appendChild(tr);
   });
 }
 function editWork(w){ $("work-form-title").textContent="作品を編集： "+(w.work_name||w.work_id); WFIELDS.forEach(function(k){ var el=$("w-"+k); if(el) el.value=(w[k]==null?"":w[k]); }); window.scrollTo(0,document.body.scrollHeight); }
@@ -407,6 +438,32 @@ function saveFormRun(){
   var c={form_url:$("fr-form_url").value, field_map:$("fr-field_map").value};
   var s=$("fr-webhook_secret").value; if(s) c.webhook_secret=s;
   call("admin_saveFormRunConfig",[c],function(){ toast("FormRun設定を保存しました"); loadIntegration(); });
+}
+// X（Twitter）連携
+function loadXConfig(){
+  call("admin_getXConfig",[],function(c){ if(!c) return;
+    $("x-api_key").value=c.api_key||""; $("x-access_token").value=c.access_token||"";
+    $("x-autopost").checked=!!c.autopost; $("x-template").value=c.template||"";
+    $("x-api_secret").value=""; $("x-api_secret").placeholder=c.api_secret_set?"設定済み（変更時のみ入力）":"未設定";
+    $("x-access_secret").value=""; $("x-access_secret").placeholder=c.access_secret_set?"設定済み（変更時のみ入力）":"未設定";
+  });
+}
+function saveXConfig(){
+  var c={api_key:$("x-api_key").value, access_token:$("x-access_token").value, autopost:$("x-autopost").checked, template:$("x-template").value};
+  var s1=$("x-api_secret").value; if(s1) c.api_secret=s1;
+  var s2=$("x-access_secret").value; if(s2) c.access_secret=s2;
+  call("admin_saveXConfig",[c],function(){ toast("X連携設定を保存しました"); loadXConfig(); });
+}
+function postWorkToX(workId){
+  if(!confirm("この作品をX（Twitter）へ投稿しますか？")) return;
+  call("admin_postWorkToX",[workId],function(r){ r=r||{}; toast("Xへ投稿しました"+(r.tweet_id?("（"+r.tweet_id+"）"):"")); });
+}
+// 認証バッジ設定
+function loadBadgeConfig(){
+  call("admin_getBadgeConfig",[],function(c){ if(!c) return; $("bd-auto").checked=!!c.auto; $("bd-template_id").value=c.template_id||""; });
+}
+function saveBadgeConfig(){
+  call("admin_saveBadgeConfig",[{auto:$("bd-auto").checked, template_id:$("bd-template_id").value}],function(){ toast("バッジ設定を保存しました"); });
 }
 function testCloudSign(){
   var el=$("cs-test-result"); el.style.color="var(--soft)"; el.textContent="接続テスト中…";
@@ -640,6 +697,13 @@ MOCK.admin_listSettlements=function(){ return [
 ]; };
 MOCK.admin_approveStatement=function(){ return true; };
 MOCK.admin_cloudSignTest=function(){ return {ok:true,sandbox:_mInt.cloudsign.sandbox,base:_mInt.cloudsign.sandbox?"https://api-sandbox.cloudsign.jp":"https://api.cloudsign.jp",token_prefix:"sbx_ab…"}; };
+var _mX={api_key:"",api_secret_set:false,access_token:"",access_secret_set:false,autopost:true,template:"【SPLL 対象作品】{name}（{publisher}）\n二次創作の有料頒布ライセンスのお申込みを受付中です。 #SPLL #TRPG\n{url}"};
+var _mBadge={auto:true,template_id:""};
+MOCK.admin_getXConfig=function(){ return _mX; };
+MOCK.admin_saveXConfig=function(c){ _mX.api_key=c.api_key;_mX.access_token=c.access_token;_mX.autopost=c.autopost;_mX.template=c.template; if(c.api_secret)_mX.api_secret_set=true; if(c.access_secret)_mX.access_secret_set=true; return true; };
+MOCK.admin_postWorkToX=function(){ return {tweet_id:"1234567890", text:"(mock)"}; };
+MOCK.admin_getBadgeConfig=function(){ return _mBadge; };
+MOCK.admin_saveBadgeConfig=function(c){ _mBadge.auto=c.auto;_mBadge.template_id=c.template_id; return true; };
 MOCK.admin_runAiReviews=function(){ return {processed:3,completed:3}; };
 MOCK.admin_generateStatements=function(){ return {period:"2026H1",reports:5,generated:2,statements:[]}; };
 MOCK.admin_sendApprovedStatements=function(){ return {sent:1}; };

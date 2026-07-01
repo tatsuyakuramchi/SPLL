@@ -84,6 +84,7 @@ function doGet(e){
   const page = (e && e.parameter && e.parameter.page) || 'index';
   if(page === 'report') return serveReport_(e);             // 利用報告（トークン）
   if(page === 'upload') return serveUpload_(e);             // 作品提出（トークン）
+  if(page === 'badge')  return serveBadge_(e);              // 認証バッジDL（トークン）
   if(page === 'admin')  return HtmlService.createHtmlOutputFromFile('admin').setTitle('SPLL 管理コンソール');
   return HtmlService.createHtmlOutputFromFile('index').setTitle('SPLL 利用申込窓口');
 }
@@ -701,6 +702,10 @@ function admin_recordPayment(contractId, invoiceId, amount, paidAt, recordedBy){
     amount:amount, paid_at:paidAt, status:'入金済', recorded_by:recordedBy });
   if(invoiceId) updateRow_(ssOps_(),'Invoices','invoice_id',invoiceId,{status:'入金済'});
   logEvent_('payment', contractId, recordedBy, null, {amount:amount, paid_at:paidAt});
+  // 入金確認後：認証バッジを自動発行（設定OFFや失敗でも入金記録は確定させる）
+  if(prop_('BADGE_AUTO') !== 'false'){
+    try{ issueBadge_(contractId); }catch(e){ logEvent_('badge', contractId, 'system', null, { issue_error:String(e) }); }
+  }
   return true;
 }
 
@@ -978,6 +983,7 @@ function admin_saveWork(work){
     appendRow_(ssMaster_(), 'Works_Master', row);
   }
   logEvent_('work', row.work_id, actor_(), null, { saved: true, publish_status: row.publish_status });
+  if(row.publish_status === 'PUBLISHED') x_maybeAutoPostOnPublish_(row.work_id);   // 公開時にX告知
   return row.work_id;
 }
 
@@ -985,6 +991,7 @@ function admin_saveWork(work){
 function admin_setWorkPublish(workId, status){
   updateRow_(ssMaster_(), 'Works_Master', 'work_id', workId, { publish_status: status });
   logEvent_('work', workId, actor_(), null, { publish_status: status });
+  if(status === 'PUBLISHED') x_maybeAutoPostOnPublish_(workId);   // 公開時にX告知
   return true;
 }
 
@@ -1077,6 +1084,7 @@ const SCHEMA_OPS = {
   Settlement_Details:   ['settlement_detail_id','settlement_id','contract_id','rate_snapshot','amount'],
   Settlement_Statements:['statement_id','settlement_id','partner_id','period','type','reg_number_snapshot','status','effective_date','objection_due','pdf_file_id','sheet_id','version','sent_at','confirmed_at'],
   Partners:             ['partner_id','name','invoice_reg_number','is_qualified_issuer','bank','contact'],
+  Badges:               ['badge_id','contract_id','work_id','issued_at','png_l','png_m','png_s','token_hash','status'],
   Events:               ['event_id','entity_type','entity_id','actor','before','after','occurred_at'],
   Config:               ['config_key','value','environment','updated_at']
 };
@@ -1187,6 +1195,226 @@ function setup_status(){
     DRIVE_ROOT:prop_('DRIVE_ROOT')||'(未設定)' };
   Logger.log(JSON.stringify(s)); return s;
 }
+
+// ============================================================
+// 11. X（Twitter）連携：作品公開時の告知投稿
+//     資格情報は ScriptProperties（X_API_KEY 等）。投稿は X API v2 /2/tweets（OAuth1.0a）。
+// ============================================================
+const X_DEFAULT_TEMPLATE =
+  '【SPLL 対象作品】{name}（{publisher}）\n二次創作の有料頒布ライセンスのお申込みを受付中です。 #SPLL #TRPG\n{url}';
+
+function x_isConfigured_(){
+  return !!(prop_('X_API_KEY') && prop_('X_API_SECRET') && prop_('X_ACCESS_TOKEN') && prop_('X_ACCESS_SECRET'));
+}
+function x_autopost_(){ return prop_('X_AUTOPOST') === 'true'; }
+
+/** 投稿文の組み立て（作品情報を差込） */
+function x_buildPostText_(work){
+  const tmpl = getConfig_('X_POST_TEMPLATE', X_DEFAULT_TEMPLATE);
+  let url = ''; try{ url = ScriptApp.getService().getUrl() || ''; }catch(e){}
+  return tmpl
+    .replace(/{name}/g, work.work_name || work.name || '')
+    .replace(/{publisher}/g, work.publisher || work.pub || '')
+    .replace(/{fee}/g, work.fee_label || work.fee || '')
+    .replace(/{url}/g, url);
+}
+
+/** X API v2 にツイート送信（OAuth1.0a 署名） */
+function x_postTweet_(text){
+  if(!x_isConfigured_()) throw new Error('X未設定：管理コンソール「設定」でAPIキーを登録してください');
+  const url = 'https://api.twitter.com/2/tweets';
+  const oauth = {
+    oauth_consumer_key: prop_('X_API_KEY'),
+    oauth_token:        prop_('X_ACCESS_TOKEN'),
+    oauth_signature_method: 'HMAC-SHA1',
+    oauth_timestamp:    String(Math.floor(Date.now() / 1000)),
+    oauth_nonce:        Utilities.getUuid().replace(/-/g, ''),
+    oauth_version:      '1.0'
+  };
+  // v2のJSONボディは署名対象に含めない（oauth_*パラメータのみ）
+  oauth.oauth_signature = x_oauth1Signature_('POST', url, oauth, prop_('X_API_SECRET'), prop_('X_ACCESS_SECRET'));
+  const header = 'OAuth ' + Object.keys(oauth).sort().map(function(k){ return x_enc_(k) + '="' + x_enc_(oauth[k]) + '"'; }).join(', ');
+  const res = UrlFetchApp.fetch(url, { method:'post', contentType:'application/json',
+    headers:{ Authorization: header }, payload: JSON.stringify({ text: text }), muteHttpExceptions:true });
+  const code = res.getResponseCode();
+  if(code < 200 || code >= 300) throw new Error('X API HTTP ' + code + ': ' + res.getContentText());
+  return JSON.parse(res.getContentText());
+}
+function x_enc_(s){ return encodeURIComponent(String(s)).replace(/[!*'()]/g, function(c){ return '%' + c.charCodeAt(0).toString(16).toUpperCase(); }); }
+function x_oauth1Signature_(method, url, oauthParams, consumerSecret, tokenSecret){
+  const pstr = Object.keys(oauthParams).sort().map(function(k){ return x_enc_(k) + '=' + x_enc_(oauthParams[k]); }).join('&');
+  const base = [method.toUpperCase(), x_enc_(url), x_enc_(pstr)].join('&');
+  const key  = x_enc_(consumerSecret) + '&' + x_enc_(tokenSecret);
+  return Utilities.base64Encode(Utilities.computeHmacSignature(Utilities.MacAlgorithm.HMAC_SHA_1, base, key));
+}
+
+/** 作品をXへ投稿（管理コンソール・手動/自動から呼ぶ）。冪等（作品ごと1回）。 */
+function admin_postWorkToX(workId){
+  const w = readRows_(ssMaster_(),'Works_Master').find(function(x){ return x.work_id === workId; });
+  if(!w) throw new Error('作品が見つかりません: ' + workId);
+  const text = x_buildPostText_(w);
+  const res  = x_postTweet_(text);
+  const tid  = (res && res.data && res.data.id) || '';
+  PropertiesService.getScriptProperties().setProperty('XP_' + workId, tid || 'posted');
+  logEvent_('work', workId, actor_(), null, { x_posted:true, tweet_id:tid });
+  return { tweet_id: tid, text: text };
+}
+/** 公開時の自動投稿（設定ONかつ未投稿のときのみ）。失敗しても業務は止めない。 */
+function x_maybeAutoPostOnPublish_(workId){
+  if(!x_autopost_() || !x_isConfigured_()) return;
+  if(prop_('XP_' + workId)) return;                         // 既投稿はスキップ
+  try{ admin_postWorkToX(workId); }
+  catch(e){ logEvent_('work', workId, 'system', null, { x_autopost_error:String(e) }); }
+}
+
+// ============================================================
+// 12. 認証バッジ（クレジット表記）：入金確認後にPNG3サイズを発行・配布
+//     Google Slidesで1枚を組版→サムネイル(LARGE/MEDIUM/SMALL)をPNG化→Drive保存→トークンDLページ＋メール。
+// ============================================================
+const BADGE_SIZES = [{ key:'L', size:'LARGE' }, { key:'M', size:'MEDIUM' }, { key:'S', size:'SMALL' }];
+
+/** バッジ発行（契約単位・冪等）。BADGE_TEMPLATE_IDがあればテンプレ差込、無ければ自動組版。 */
+function issueBadge_(contractId){
+  const existing = readRows_(ssOps_(),'Badges').find(function(b){ return b.contract_id === contractId && b.status === 'ISSUED'; });
+  if(existing) return { badge_id: existing.badge_id, reused:true };
+
+  const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === contractId; });
+  if(!c) throw new Error('契約が見つかりません: ' + contractId);
+  const w = readRows_(ssMaster_(),'Works_Master').find(function(x){ return x.work_id === c.work_id; }) || {};
+  const badgeId  = newId_('BDG');
+  const issuedAt = new Date().toISOString().slice(0,10);
+
+  const presId = buildBadgeSlide_(badgeId, w, c, issuedAt);
+  const folder = badgeFolder_(c);
+  const files = BADGE_SIZES.map(function(s){
+    const blob = slideThumbnailPng_(presId, s.size).setName('SPLL_badge_' + badgeId + '_' + s.key + '.png');
+    const f = folder.createFile(blob);
+    try{ f.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); }catch(e){}
+    return { size:s.key, file_id:f.getId() };
+  });
+  try{ DriveApp.getFileById(presId).setTrashed(true); }catch(e){}   // 一時Slidesは破棄
+
+  appendRow_(ssOps_(),'Badges', { badge_id:badgeId, contract_id:contractId, work_id:c.work_id,
+    issued_at:issuedAt, png_l:files[0].file_id, png_m:files[1].file_id, png_s:files[2].file_id,
+    token_hash:'', status:'ISSUED' });
+  distributeBadge_(c, badgeId);
+  logEvent_('badge', badgeId, 'system', null, { contract_id:contractId, files:files });
+  return { badge_id:badgeId, files:files };
+}
+
+/** バッジ1枚をSlidesで組版し presentationId を返す */
+function buildBadgeSlide_(badgeId, w, c, issuedAt){
+  const templateId = prop_('BADGE_TEMPLATE_ID');
+  if(templateId){
+    const copy = DriveApp.getFileById(templateId).makeCopy('SPLL_badge_' + badgeId);
+    const pres = SlidesApp.openById(copy.getId());
+    pres.replaceAllText('{{work_name}}', w.work_name || '');
+    pres.replaceAllText('{{license_id}}', c.contract_id || '');
+    pres.replaceAllText('{{issued_at}}', issuedAt);
+    pres.replaceAllText('{{credit}}', w.credit_text || '');
+    pres.saveAndClose();
+    return pres.getId();
+  }
+  // テンプレ未設定：暫定デザインを自動組版
+  const pres  = SlidesApp.create('SPLL_badge_' + badgeId);
+  const slide = pres.getSlides()[0];
+  slide.getBackground().setSolidFill('#3D2F6B');
+  var t;
+  t = slide.insertTextBox('SPLL 正規ライセンス', 36, 40, 648, 60);
+  t.getText().getTextStyle().setForegroundColor('#FFFFFF').setBold(true).setFontSize(28);
+  t = slide.insertTextBox(w.work_name || '', 36, 120, 648, 70);
+  t.getText().getTextStyle().setForegroundColor('#F4EBD8').setBold(true).setFontSize(24);
+  t = slide.insertTextBox('ライセンスID: ' + (c.contract_id || '') + '\n発行日: ' + issuedAt, 36, 205, 648, 70);
+  t.getText().getTextStyle().setForegroundColor('#D7CFEC').setFontSize(14);
+  t = slide.insertTextBox(w.credit_text || '', 36, 290, 648, 60);
+  t.getText().getTextStyle().setForegroundColor('#EDEAF4').setFontSize(12);
+  pres.saveAndClose();
+  return pres.getId();
+}
+
+/** Slides REST の getThumbnail でPNG化（size: LARGE/MEDIUM/SMALL） */
+function slideThumbnailPng_(presId, size){
+  const pageId = SlidesApp.openById(presId).getSlides()[0].getObjectId();
+  const url = 'https://slides.googleapis.com/v1/presentations/' + presId + '/pages/' + pageId +
+    '/thumbnail?thumbnailProperties.thumbnailSize=' + size + '&thumbnailProperties.mimeType=PNG';
+  const meta = UrlFetchApp.fetch(url, { headers:{ Authorization:'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions:true });
+  if(meta.getResponseCode() >= 300) throw new Error('Slides thumbnail HTTP ' + meta.getResponseCode() + ': ' + meta.getContentText());
+  const contentUrl = JSON.parse(meta.getContentText()).contentUrl;
+  return UrlFetchApp.fetch(contentUrl, { muteHttpExceptions:true }).getBlob();
+}
+
+function badgeFolder_(c){
+  try{ if(c.folder_id) return DriveApp.getFolderById(c.folder_id); }catch(e){}
+  return DriveApp.getFolderById(cfg_('DRIVE_ROOT'));
+}
+
+/** バッジDL用トークンを発行し、利用者へメール通知 */
+function distributeBadge_(c, badgeId){
+  const app = readRows_(ssOps_(),'Applications').find(function(a){ return a.application_id === c.application_id; }) || {};
+  const token = Utilities.getUuid();
+  updateRow_(ssOps_(),'Badges','badge_id',badgeId,{ token_hash: hash_(token) });
+  const url = ScriptApp.getService().getUrl() + '?page=badge&token=' + token;
+  if(app.applicant_email){
+    MailApp.sendEmail(app.applicant_email, 'SPLL 認証バッジのご案内',
+      '正規ライセンスの認証バッジ（PNG・3サイズ）をご用意しました。\n以下からダウンロードいただけます:\n' + url);
+  }
+  return url;
+}
+
+/** バッジDLページ（トークン）：3サイズのプレビューとダウンロードリンク */
+function serveBadge_(e){
+  const token = (e.parameter && e.parameter.token) || '';
+  const b = readRows_(ssOps_(),'Badges').find(function(x){ return x.token_hash === hash_(token) && String(x.status) === 'ISSUED'; });
+  if(!b) return HtmlService.createHtmlOutput('<p style="font-family:sans-serif">リンクが無効です。</p>').setTitle('SPLL 認証バッジ');
+  const w = readRows_(ssMaster_(),'Works_Master').find(function(x){ return x.work_id === b.work_id; }) || {};
+  const rows = [['大 (L)', b.png_l], ['中 (M)', b.png_m], ['小 (S)', b.png_s]].map(function(p){
+    const view = 'https://drive.google.com/uc?id=' + p[1];
+    const dl   = 'https://drive.google.com/uc?export=download&id=' + p[1];
+    return '<div style="margin:18px 0"><div style="font-weight:600;margin-bottom:6px">' + p[0] + '</div>' +
+      '<img src="' + view + '" style="max-width:100%;border:1px solid #ccc;border-radius:8px"><br>' +
+      '<a href="' + dl + '" style="display:inline-block;margin-top:6px">PNGをダウンロード</a></div>';
+  }).join('');
+  const html = '<div style="font-family:sans-serif;max-width:720px;margin:0 auto;padding:24px">' +
+    '<h2>SPLL 認証バッジ</h2><p>' + (w.work_name || '') + ' ／ ライセンスID: ' + b.contract_id +
+    ' ／ 発行日: ' + b.issued_at + '</p>' + rows +
+    '<p style="font-size:12px;color:#666">クレジット表記としてご利用ください。表示位置・改変の可否は利用規約に従います。</p></div>';
+  return HtmlService.createHtmlOutput(html).setTitle('SPLL 認証バッジ');
+}
+
+// ---- 11/12 管理コンソール設定・手動操作 ----
+function admin_getXConfig(){
+  return {
+    api_key:          prop_('X_API_KEY') || '',
+    api_secret_set:   !!prop_('X_API_SECRET'),
+    access_token:     prop_('X_ACCESS_TOKEN') || '',
+    access_secret_set:!!prop_('X_ACCESS_SECRET'),
+    autopost:         prop_('X_AUTOPOST') === 'true',
+    template:         getConfig_('X_POST_TEMPLATE', X_DEFAULT_TEMPLATE)
+  };
+}
+function admin_saveXConfig(c){
+  const sp = PropertiesService.getScriptProperties();
+  if(c.api_key      !== undefined) sp.setProperty('X_API_KEY', String(c.api_key));
+  if(c.api_secret)                 sp.setProperty('X_API_SECRET', String(c.api_secret));
+  if(c.access_token !== undefined) sp.setProperty('X_ACCESS_TOKEN', String(c.access_token));
+  if(c.access_secret)              sp.setProperty('X_ACCESS_SECRET', String(c.access_secret));
+  if(c.autopost     !== undefined) sp.setProperty('X_AUTOPOST', c.autopost ? 'true' : 'false');
+  if(c.template     !== undefined) setConfig_('X_POST_TEMPLATE', String(c.template));
+  logEvent_('config', 'X', actor_(), null, { saved:true });
+  return true;
+}
+function admin_getBadgeConfig(){
+  return { auto: prop_('BADGE_AUTO') !== 'false', template_id: prop_('BADGE_TEMPLATE_ID') || '' };
+}
+function admin_saveBadgeConfig(c){
+  const sp = PropertiesService.getScriptProperties();
+  if(c.auto        !== undefined) sp.setProperty('BADGE_AUTO', c.auto ? 'true' : 'false');
+  if(c.template_id !== undefined) sp.setProperty('BADGE_TEMPLATE_ID', String(c.template_id));
+  logEvent_('config', 'BADGE', actor_(), null, { saved:true });
+  return true;
+}
+/** バッジ手動発行 */
+function admin_issueBadge(contractId){ const r = issueBadge_(contractId); logEvent_('badge', r.badge_id || contractId, actor_(), null, { manual:true }); return r; }
 
 // ---- utils ----
 function hash_(s){ return Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, s)); }
