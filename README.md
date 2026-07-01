@@ -19,6 +19,10 @@ SPLL/
 ├── .gitignore
 ├── .clasp.json.template      # コピーして .clasp.json を作成し scriptId を記入（rootDir=spll_src）
 ├── .claspignore              # push 対象を spll_src 内の GAS ソースに限定
+├── docs/                      # 業務フロー確認資料（事業部すり合わせ用）
+│   ├── SPLL_業務フロー確認資料_v0.1.md   # 正本（GitHubでスイムレーン図が描画）
+│   ├── SPLL_業務フロー確認資料.html      # 配布用・完全オフラインの自己完結HTML
+│   └── build_html.js                     # md→html 生成（要 npm i -D marked mermaid）
 └── spll_src/                  # clasp の push 対象（rootDir）
     ├── appsscript.json        # マニフェスト（OAuthスコープ・webapp設定）
     ├── Code.gs                # サーバーサイド（3プロジェクト分を集約した参照実装）
