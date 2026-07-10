@@ -86,7 +86,7 @@ function doGet(e){
   if(page === 'upload') return serveUpload_(e);             // 作品提出（トークン）
   if(page === 'badge')  return serveBadge_(e);              // 認証バッジDL（トークン）
   if(page === 'verify') return serveVerify_(e);             // 認証の検証ポータル（ID照会・受付番号）
-  if(page === 'admin')  return HtmlService.createHtmlOutputFromFile('admin').setTitle('SPLL 管理コンソール');
+  if(page === 'admin')  return serveAdmin_(e);              // 管理コンソール（任意で許可リスト制御）
   return HtmlService.createHtmlOutputFromFile('index').setTitle('SPLL 利用申込窓口');
 }
 
@@ -116,6 +116,62 @@ function api_getLegalTexts(){
 /** 公開：申込導線の設定（クラウドサインフォームURL）。application_ref を引き継ぐ。 */
 function api_getApplyConfig(){
   return { formUrl: prop_('FORMRUN_FORM_URL') || '', refParam: prop_('FORM_REF_PARAM') || 'application_ref' };
+}
+
+// ---- ログインユーザーの役割（管理者判定）：管理画面スイッチ用 ----
+/** 管理者メールの許可リスト（ADMIN_EMAILS：カンマ/空白区切り・小文字比較） */
+function adminEmails_(){
+  return String(prop_('ADMIN_EMAILS') || '').split(/[,\s]+/).map(function(s){ return s.trim().toLowerCase(); }).filter(Boolean);
+}
+function isAdminEmail_(email){
+  email = String(email || '').toLowerCase();
+  if(!email) return false;
+  return adminEmails_().indexOf(email) >= 0;
+}
+/** 現在のログインユーザーの役割。identified=false は匿名アクセス（メール取得不可）を意味する。 */
+function api_getViewerRole(){
+  var email = ''; try{ email = Session.getActiveUser().getEmail() || ''; }catch(e){}
+  var listed = adminEmails_().length > 0;
+  var adminUrl = '?page=admin'; try{ adminUrl = ScriptApp.getService().getUrl() + '?page=admin'; }catch(e){}
+  var homeUrl = ''; try{ homeUrl = ScriptApp.getService().getUrl(); }catch(e){}
+  return {
+    email: email,
+    identified: !!email,                 // 匿名デプロイでは空になる
+    isAdmin: isAdminEmail_(email),
+    bootstrap: !listed,                   // 管理者未登録（初期セットアップ状態）
+    adminUrl: adminUrl,
+    homeUrl: homeUrl
+  };
+}
+
+/**
+ * 管理コンソールの配信。ADMIN_ENFORCE=true かつ 閲覧者を識別できる場合のみ、
+ * 許可リスト外を拒否する（匿名デプロイでは識別不可のため素通り）。
+ */
+function serveAdmin_(e){
+  if(prop_('ADMIN_ENFORCE') === 'true'){
+    var email = ''; try{ email = Session.getActiveUser().getEmail() || ''; }catch(_){}
+    if(email && !isAdminEmail_(email)){
+      return htmlPage_('SPLL 管理コンソール',
+        '<h2>アクセス権限がありません</h2><p>このアカウント（' + esc_(email) + '）は管理者として登録されていません。</p>' +
+        '<p style="font-size:12px;color:#6A6577">管理者アカウントでログインし直すか、事務局にお問い合わせください。</p>');
+    }
+  }
+  return HtmlService.createHtmlOutputFromFile('admin').setTitle('SPLL 管理コンソール');
+}
+
+/** 管理者アクセス設定の取得（許可リスト・強制ON/OFF・現在の閲覧者） */
+function admin_getAdminAccess(){
+  var viewer = ''; try{ viewer = Session.getActiveUser().getEmail() || ''; }catch(e){}
+  return { emails: prop_('ADMIN_EMAILS') || '', enforce: prop_('ADMIN_ENFORCE') === 'true', viewer: viewer };
+}
+/** 管理者アクセス設定の保存（emails：カンマ/改行区切り、enforce：真偽） */
+function admin_saveAdminAccess(c){
+  var sp = PropertiesService.getScriptProperties();
+  if(c.emails  !== undefined) sp.setProperty('ADMIN_EMAILS', String(c.emails).replace(/\n/g, ','));
+  if(c.enforce !== undefined) sp.setProperty('ADMIN_ENFORCE', c.enforce ? 'true' : 'false');
+  logEvent_('config', 'ADMIN_ACCESS', actor_(), null, { saved: true, enforce: !!c.enforce });
+  return true;
 }
 
 // ============================================================

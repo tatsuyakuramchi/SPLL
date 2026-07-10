@@ -149,6 +149,7 @@
     <nav class="hnav">
       <button onclick="show('home')">ホーム</button>
       <button onclick="show('search')">作品をさがす</button>
+      <button id="adminSwitch" style="display:none;color:var(--brass);font-weight:700;" onclick="gotoAdmin()">管理コンソール →</button>
     </nav>
   </div>
 </header>
@@ -476,8 +477,21 @@ function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","
 
 document.addEventListener("change",e=>{if(/g1|g2|g3/.test(e.target.className))updateGates();});
 document.getElementById("submit").onclick=submitApplication;
+
+// ログインユーザーが管理者なら「管理コンソール」ボタンを表示（匿名アクセスでは非表示）
+var ADMIN_URL="?page=admin";
+function loadViewerRole(){
+  if(!hasGas) return;
+  google.script.run.withSuccessHandler(function(r){
+    if(r && r.adminUrl) ADMIN_URL=r.adminUrl;
+    if(r && r.isAdmin) document.getElementById("adminSwitch").style.display="";
+  }).api_getViewerRole();
+}
+function gotoAdmin(){ window.top.location.href=ADMIN_URL; }
+
 loadLegal();
 loadWorks();
+loadViewerRole();
 </script>
 </body>
 </html>

@@ -96,7 +96,10 @@
 <body>
 <header><div class="hwrap">
   <div class="brand"><div class="logo">SP</div><div><div class="t">SPLL 事務局 管理コンソール</div><div class="s">Admin · GAS Web App</div></div></div>
-  <div class="who">事務局・法務／経理　|　社内GWS限定</div>
+  <div class="who">
+    <span id="viewer"></span>
+    <button id="toPortal" onclick="gotoPortal()" style="margin-left:12px;background:none;border:1px solid #6B5E91;color:#EDEAF4;border-radius:7px;padding:6px 12px;font-size:12px;cursor:pointer;font-family:inherit;">← 申込窓口へ</button>
+  </div>
 </div></header>
 
 <div class="tabs"><div class="twrap">
@@ -174,6 +177,7 @@
       <div class="subtab" data-p="cloudsign">CloudSign API</div>
       <div class="subtab" data-p="formrun">FormRun</div>
       <div class="subtab" data-p="xbadge">X・認証バッジ</div>
+      <div class="subtab" data-p="access">管理者・権限</div>
     </div>
 
     <!-- LEGAL -->
@@ -296,13 +300,32 @@
       <div class="panel">
         <div class="ph"><h3>認証バッジ（クレジット表記）</h3><span class="hint">ScriptProperties</span></div>
         <div class="pbody">
-          <p class="setnote">入金確認（入金済）の後に、認証バッジを PNG 3サイズ（大/中/小）で自動生成し、トークン付きDLページを利用者へメール通知します。テンプレートSlides ID を指定すると差込（{{work_name}}/{{license_id}}/{{issued_at}}/{{credit}}）で生成、未指定なら暫定デザインを自動組版します。</p>
-          <label class="chk"><input type="checkbox" id="bd-auto"> 入金確認で自動発行する</label>
+          <p class="setnote">契約締結時（B経路固定）に、認証バッジを PNG 3サイズ（大/中/小）で自動生成し、検証ポータル／提出リンクから利用者が取得できます（当社からのメール送信はしません）。テンプレートSlides ID を指定すると差込（{{work_name}}/{{license_id}}/{{issued_at}}/{{credit}}）で生成、未指定なら暫定デザインを自動組版します。</p>
+          <label class="chk"><input type="checkbox" id="bd-auto"> 締結時に自動発行する</label>
           <div class="fld" style="margin-top:10px"><label>バッジ用 Slides テンプレートID <span class="h">BADGE_TEMPLATE_ID（任意）</span></label><input id="bd-template_id" placeholder="（未指定＝暫定デザインで自動生成）"></div>
         </div>
         <div class="pfoot"><button class="save" onclick="saveBadgeConfig()">バッジ設定を保存</button></div>
       </div>
       <div class="note">Xの秘密情報・バッジ設定はGASのScriptPropertiesに保存され、画面には再表示されません（設定済みか否かのみ表示）。</div>
+    </div>
+
+    <!-- ADMIN ACCESS -->
+    <div class="setpane" id="p-access">
+      <div class="panel">
+        <div class="ph"><h3>管理者（許可リスト）</h3><span class="hint">ScriptProperties: ADMIN_EMAILS</span></div>
+        <div class="pbody">
+          <p class="setnote">ここに登録したGoogleアカウント（メール）のログインユーザーには、公開申込窓口のヘッダーに「管理コンソール →」ボタンが表示され、ワンクリックでこの画面へ切り替えできます。カンマまたは改行区切りで複数登録できます。</p>
+          <div class="fld"><label>管理者メールアドレス <span class="h">例）hanako@example.com, taro@example.com</span></label><textarea id="ac-emails" class="code" placeholder="admin1@example.com&#10;admin2@example.com"></textarea></div>
+          <label class="chk" style="margin-top:8px"><input type="checkbox" id="ac-enforce"> 管理コンソールへのアクセスを許可リストに限定する（ADMIN_ENFORCE）</label>
+          <p class="setnote" style="margin-top:8px">現在の閲覧アカウント：<b id="ac-viewer">—</b></p>
+        </div>
+        <div class="pfoot"><button class="save" onclick="saveAdminAccess()">管理者設定を保存</button></div>
+      </div>
+      <div class="note">
+        <b>デプロイに関する注意：</b> 「管理コンソール →」ボタンは<b>ログインユーザーを識別できる場合のみ</b>表示されます。
+        現在のデプロイ（アクセス権：全員・匿名）ではログインユーザーを識別できないため、ボタンは表示されず、アクセス限定（ADMIN_ENFORCE）も効きません。
+        識別を有効にするには、GASのデプロイ設定で<b>アクセスできるユーザーを「Googleアカウントを持つ全員」または「同じドメイン内」</b>に変更してください（申込者にもGoogleログインを求める点にご注意ください）。
+      </div>
     </div>
   </section>
 </main>
@@ -377,7 +400,7 @@ var MOCK = {
 
 // ===== 設定ロード =====
 var settingsLoaded = false;
-function loadSettings(){ if(settingsLoaded) return; settingsLoaded=true; loadLegal(); loadWorksPane(); loadIntegration(); loadXConfig(); loadBadgeConfig(); }
+function loadSettings(){ if(settingsLoaded) return; settingsLoaded=true; loadLegal(); loadWorksPane(); loadIntegration(); loadXConfig(); loadBadgeConfig(); loadAdminAccess(); }
 
 // 同意文・規約
 function loadLegal(){ call("admin_getLegalTexts",[],function(l){ if(!l) return; $("set-privacy").value=l.privacy||""; $("set-terms").value=l.termsTemplate||""; }); }
@@ -481,6 +504,15 @@ function loadBadgeConfig(){
 }
 function saveBadgeConfig(){
   call("admin_saveBadgeConfig",[{auto:$("bd-auto").checked, template_id:$("bd-template_id").value}],function(){ toast("バッジ設定を保存しました"); });
+}
+function loadAdminAccess(){
+  call("admin_getAdminAccess",[],function(c){ c=c||{};
+    $("ac-emails").value=c.emails||""; $("ac-enforce").checked=!!c.enforce;
+    $("ac-viewer").textContent=c.viewer||"（匿名アクセス：識別できません）";
+  });
+}
+function saveAdminAccess(){
+  call("admin_saveAdminAccess",[{emails:$("ac-emails").value, enforce:$("ac-enforce").checked}],function(){ toast("管理者設定を保存しました"); });
 }
 function testCloudSign(){
   var el=$("cs-test-result"); el.style.color="var(--soft)"; el.textContent="接続テスト中…";
@@ -740,8 +772,23 @@ MOCK.admin_saveBadgeConfig=function(c){ _mBadge.auto=c.auto;_mBadge.template_id=
 MOCK.admin_runAiReviews=function(){ return {processed:3,completed:3}; };
 MOCK.admin_generateStatements=function(){ return {period:"2026H1",reports:5,generated:2,statements:[]}; };
 MOCK.admin_sendApprovedStatements=function(){ return {sent:1}; };
+var _mAccess={emails:"",enforce:false,viewer:"admin@example.com（デモ）"};
+MOCK.admin_getAdminAccess=function(){ return _mAccess; };
+MOCK.admin_saveAdminAccess=function(c){ _mAccess.emails=c.emails; _mAccess.enforce=!!c.enforce; return true; };
+MOCK.api_getViewerRole=function(){ return {email:_mAccess.viewer,identified:true,isAdmin:true,bootstrap:!_mAccess.emails,adminUrl:"?page=admin",homeUrl:"?"}; };
+
+// ===== 画面スイッチ（申込窓口へ）＆ 閲覧者表示 =====
+var PORTAL_URL="?";
+function gotoPortal(){ window.top.location.href=PORTAL_URL; }
+function loadViewer(){
+  call("api_getViewerRole",[],function(r){ r=r||{};
+    if(r.homeUrl) PORTAL_URL=r.homeUrl;
+    var v=$("viewer"); if(v) v.textContent=r.email ? ("👤 "+r.email) : "社内GWS限定";
+  });
+}
 
 // 初期表示（ダッシュボード）
+loadViewer();
 loadDashboard();
 </script>
 </body>
