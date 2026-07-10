@@ -320,7 +320,11 @@
             <div class="fld"><label>対象原作の最大数 <span class="h">FORM_MAX_WORKS（契約書テンプレートの原作枠数）</span></label><input id="fr-max_works" type="number" min="1" max="20" placeholder="5"></div>
             <div class="fld"><label>Webhook Secret <span class="h">FORMRUN_WEBHOOK_SECRET（任意）</span></label><input id="fr-webhook_secret" type="password"></div>
           </div>
-          <div class="fld"><label>hidden項目マッピング <span class="h">FORM_HIDDEN_MAP（JSON・正規キー→hidden項目キー）</span></label><textarea id="fr-hidden_map" class="code" placeholder='{"application_ref":"_field_aaaa","work_id_1":"_field_bbbb","work_title_1":"_field_cccc","work_id_2":"_field_dddd","work_title_2":"_field_eeee"}'></textarea></div>
+          <div class="fld">
+            <label>hidden項目マッピング <span class="h">FORM_HIDDEN_MAP（JSON・正規キー→hidden項目キー）</span></label>
+            <textarea id="fr-hidden_map" class="code" placeholder='{"application_ref":"_field_aaaa","work_id_1":"_field_bbbb","work_title_1":"_field_cccc", …}'></textarea>
+            <div style="margin-top:6px"><button class="btn" type="button" onclick="insertHiddenMapSkeleton()">最大数ぶんのひな形を挿入</button> <span class="h">application_ref＋原作×N＋別紙2 の全キーを生成。各値に formrun の <span class="mono">_field_xxxx</span> を入力してください。</span></div>
+          </div>
           <div class="fld"><label>Webhook用フィールドマッピング <span class="h">FORMRUN_FIELD_MAP（JSON・フォーム項目名→正規キー・任意）</span></label><textarea id="fr-field_map" class="code" placeholder='{"申込参照番号":"application_ref"}'></textarea></div>
         </div>
         <div class="pfoot"><button class="save" onclick="saveFormRun()">連携設定を保存</button></div>
@@ -561,6 +565,16 @@ function saveCloudSign(){
   var c={client_id:$("cs-client_id").value, template_id:$("cs-template_id").value, callback_url:$("cs-callback_url").value, sandbox:$("cs-sandbox").checked};
   var s=$("cs-secret").value; if(s) c.secret=s;
   call("admin_saveCloudSignConfig",[c],function(){ toast("CloudSign設定を保存しました"); loadIntegration(); });
+}
+function insertHiddenMapSkeleton(){
+  var n=parseInt($("fr-max_works").value||"5",10)||5;
+  var o={application_ref:""};
+  for(var i=1;i<=n;i++){ o["work_id_"+i]=""; o["work_title_"+i]=""; }
+  ["usage_category","fee_model","fee_amount_or_rate","licensed_uses","payment_due","reporting_requirement","report_due","threshold_or_cap","reprint_rule","special_terms"].forEach(function(k){ o[k]=""; });
+  var cur=$("fr-hidden_map").value.trim();
+  if(cur && !confirm("現在のマッピング内容を置き換えますか？")) return;
+  $("fr-hidden_map").value=JSON.stringify(o,null,2);
+  toast("ひな形を挿入しました（各値に formrun の _field_xxxx を入力）");
 }
 function saveFormRun(){
   var hm=$("fr-hidden_map").value.trim();

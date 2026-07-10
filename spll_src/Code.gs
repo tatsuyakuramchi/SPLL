@@ -1593,6 +1593,7 @@ function setup_bootstrap(opts){
   if(!getConfig_('LEGAL_TERMS_TEMPLATE','')) setConfig_('LEGAL_TERMS_TEMPLATE', DEFAULT_TERMS_TEMPLATE);
   if(!getConfig_('DEFAULT_ROYALTY_RATE','')) setConfig_('DEFAULT_ROYALTY_RATE','0.10');
   if(!getConfig_('HANDLING_FEE_RATE',''))    setConfig_('HANDLING_FEE_RATE',   '0.30');
+  if(!prop_('FORM_MAX_WORKS'))               sp.setProperty('FORM_MAX_WORKS', '5');   // 契約書テンプレートの原作枠（当面5）
 
   // 5) サンプル投入（既定ON・既存があればスキップ）
   if(opts.seed !== false) setup_seedSamples_();
