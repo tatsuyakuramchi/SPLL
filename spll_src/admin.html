@@ -251,32 +251,42 @@
       <div class="panel">
         <div class="ph"><h3>CloudSign API 設定</h3><span class="hint">ScriptProperties（secretはマスク）</span></div>
         <div class="pbody">
-          <p class="setnote">電子契約の送信・締結Webhookに使用します。Client Secret は保存時のみ入力してください（空欄なら現在値を据え置き）。</p>
+          <p class="setnote">締結Webhookの受信（書類タイトルの取得API・突合フォールバック）と、清算計算書のCloudSign送信に使用します。<b>申込契約の作成・送信はクラウドサインフォーム側</b>が行うため、GASからは送信しません。Client Secret は保存時のみ入力してください（空欄なら現在値を据え置き）。</p>
           <div class="grid2">
             <div class="fld"><label>Client ID <span class="h">CLOUDSIGN_CLIENT_ID</span></label><input id="cs-client_id"></div>
             <div class="fld"><label>Client Secret <span class="h">CLOUDSIGN_SECRET</span></label><input id="cs-secret" type="password"></div>
-            <div class="fld"><label>テンプレートID <span class="h">CLOUDSIGN_TEMPLATE_ID</span></label><input id="cs-template_id"></div>
-            <div class="fld"><label>Webhook(Callback) URL <span class="h">CLOUDSIGN_CALLBACK_URL</span></label><input id="cs-callback_url" placeholder="GAS② の doPost URL"></div>
+            <div class="fld"><label>テンプレートID <span class="h">CLOUDSIGN_TEMPLATE_ID（任意・清算送信用の予備）</span></label><input id="cs-template_id" placeholder="（申込契約はフォーム側テンプレートを使用）"></div>
+            <div class="fld"><label>Webhook(Callback) URL <span class="h">CLOUDSIGN_CALLBACK_URL</span></label><input id="cs-callback_url" placeholder="GAS② の doPost URL（?hookなし＝締結完了）"></div>
           </div>
           <label class="chk"><input type="checkbox" id="cs-sandbox" checked> サンドボックス環境を使用する（試験運用・既定でON）</label>
           <div id="cs-test-result" class="setnote" style="margin-top:10px;"></div>
         </div>
         <div class="pfoot"><button class="btn" onclick="testCloudSign()">接続テスト</button><button class="save" onclick="saveCloudSign()">CloudSign設定を保存</button></div>
       </div>
-      <div class="note">秘密情報はGASの ScriptProperties に保存され、画面には再表示されません（設定済みかどうかのみ表示）。試験運用のためサンドボックス（api-sandbox.cloudsign.jp）を既定で使用します。本番に切替える場合のみチェックを外してください。</div>
+      <div class="note">締結Webhookのペイロードは <span class="mono">documentID / status(2=締結完了) / userID / email / text</span> のみで、フォーム入力値は含まれません。<b>application_ref は契約書タイトルに含める</b>ことで突合します（取れない場合は書類取得APIでタイトルを引くフォールバックあり）。秘密情報は ScriptProperties に保存され画面には再表示されません。試験運用のためサンドボックスを既定で使用します。</div>
     </div>
 
-    <!-- FORMRUN -->
+    <!-- FORMRUN / クラウドサインフォーム -->
     <div class="setpane" id="p-formrun">
       <div class="panel">
-        <div class="ph"><h3>FormRun 設定</h3><span class="hint">ScriptProperties（secretはマスク）</span></div>
+        <div class="ph"><h3>クラウドサインフォーム（powered by formrun）連携</h3><span class="hint">ScriptProperties（secretはマスク）</span></div>
         <div class="pbody">
-          <p class="setnote">申込フォーム（FormRun）と <span class="mono">createApplication_</span> の連携設定。Webhook Secret は保存時のみ入力してください。</p>
-          <div class="fld"><label>フォームURL <span class="h">FORMRUN_FORM_URL</span></label><input id="fr-form_url" placeholder="https://form.run/@…"></div>
-          <div class="fld"><label>Webhook Secret <span class="h">FORMRUN_WEBHOOK_SECRET</span></label><input id="fr-webhook_secret" type="password"></div>
-          <div class="fld"><label>フィールドマッピング <span class="h">FORMRUN_FIELD_MAP（JSON）</span></label><textarea id="fr-field_map" class="code" placeholder='{"作品ID":"work_id","メールアドレス":"email","お名前":"name","提出ファイル":"file_id"}'></textarea></div>
+          <p class="setnote">公開ポータルで発行した <b>application_ref</b> を、クラウドサインフォームの<b>hidden項目</b>に引き継ぎ、申込→締結を突合します。Webhook Secret は保存時のみ入力してください。</p>
+          <div class="fld"><label>フォームURL <span class="h">FORMRUN_FORM_URL</span></label><input id="fr-form_url" placeholder="https://form.run/@… または クラウドサインフォームのURL"></div>
+          <div class="fld"><label>application_ref 引き継ぎパラメータ <span class="h">FORM_REF_PARAM（formrunのhidden項目キー）</span></label><input id="fr-ref_param" placeholder="_field_xxxxxxxx"></div>
+          <div class="fld"><label>Webhook Secret <span class="h">FORMRUN_WEBHOOK_SECRET（任意）</span></label><input id="fr-webhook_secret" type="password"></div>
+          <div class="fld"><label>フィールドマッピング <span class="h">FORMRUN_FIELD_MAP（JSON・フォーム項目名→正規キー）</span></label><textarea id="fr-field_map" class="code" placeholder='{"申込参照番号":"application_ref"}'></textarea></div>
         </div>
-        <div class="pfoot"><button class="save" onclick="saveFormRun()">FormRun設定を保存</button></div>
+        <div class="pfoot"><button class="save" onclick="saveFormRun()">連携設定を保存</button></div>
+      </div>
+      <div class="note">
+        <b>連携の要点（クラウドサインフォームの仕様に基づく）：</b>
+        <ol style="margin:6px 0 0;padding-left:18px;font-size:12px;line-height:1.7;">
+          <li>フォームに<b>hidden項目</b>を1つ追加し、そのキー（<span class="mono">_field_xxxx</span>）を上の「引き継ぎパラメータ」に登録。公開ポータルは <span class="mono">フォームURL?_field_xxxx=REF-…</span> で遷移します。</li>
+          <li>締結の突合のため、<b>契約書テンプレートのタイトル</b>に application_ref を差し込む設定にしてください（CloudSignの締結Webhookはフォーム入力値を含まず、<b>タイトルのみ</b>で突合できます）。</li>
+          <li>formrunのWebhook（<b>送信専用・PROFESSIONALプラン</b>）を GAS② の <span class="mono">doPost?hook=formrun</span> に向けると、申込を「締結待ち」へ前進できます（任意）。</li>
+          <li>クラウドサインフォームの利用には、CloudSignの<b>API利用可能プラン＋API利用申込＋クラウドサインFORM申込</b>が必要です。</li>
+        </ol>
       </div>
     </div>
 
@@ -384,7 +394,7 @@ var _mWorks = [
 var _mDS = {SS_MASTER:"",SS_OPS:"",DRIVE_ROOT:"",GCP_PROJECT:"",GCP_REGION:"",GEMINI_MODEL:"",
   defaults:{SS_MASTER:"PUT_WORKS_MASTER_SPREADSHEET_ID",SS_OPS:"PUT_OPS_SPREADSHEET_ID",DRIVE_ROOT:"PUT_SHARED_DRIVE_FOLDER_ID",GCP_PROJECT:"PUT_GCP_PROJECT_ID",GCP_REGION:"us-central1",GEMINI_MODEL:"gemini-2.5-flash"}};
 var _mInt = {cloudsign:{client_id:"",secret_set:false,template_id:"",callback_url:"",sandbox:true},
-  formrun:{form_url:"",webhook_secret_set:false,field_map:""}};
+  formrun:{form_url:"",webhook_secret_set:false,field_map:"",ref_param:""}};
 var MOCK = {
   admin_getLegalTexts:function(){ return _mLegal; },
   admin_saveLegalTexts:function(p,t){ _mLegal.privacy=p; _mLegal.termsTemplate=t; return true; },
@@ -395,7 +405,7 @@ var MOCK = {
   admin_saveDataSourceConfig:function(c){ for(var k in c) _mDS[k]=c[k]; return true; },
   admin_getIntegrationConfig:function(){ return _mInt; },
   admin_saveCloudSignConfig:function(c){ _mInt.cloudsign.client_id=c.client_id; _mInt.cloudsign.template_id=c.template_id; _mInt.cloudsign.callback_url=c.callback_url; _mInt.cloudsign.sandbox=c.sandbox; if(c.secret) _mInt.cloudsign.secret_set=true; return true; },
-  admin_saveFormRunConfig:function(c){ _mInt.formrun.form_url=c.form_url; _mInt.formrun.field_map=c.field_map; if(c.webhook_secret) _mInt.formrun.webhook_secret_set=true; return true; }
+  admin_saveFormRunConfig:function(c){ _mInt.formrun.form_url=c.form_url; _mInt.formrun.field_map=c.field_map; _mInt.formrun.ref_param=c.ref_param; if(c.webhook_secret) _mInt.formrun.webhook_secret_set=true; return true; }
 };
 
 // ===== 設定ロード =====
@@ -460,7 +470,7 @@ function loadIntegration(){
     $("cs-callback_url").value=cs.callback_url||""; $("cs-sandbox").checked=!!cs.sandbox;
     $("cs-secret").value=""; $("cs-secret").placeholder=cs.secret_set?"設定済み（変更時のみ入力）":"未設定";
     var fr=c.formrun||{};
-    $("fr-form_url").value=fr.form_url||""; $("fr-field_map").value=fr.field_map||"";
+    $("fr-form_url").value=fr.form_url||""; $("fr-field_map").value=fr.field_map||""; $("fr-ref_param").value=fr.ref_param||"";
     $("fr-webhook_secret").value=""; $("fr-webhook_secret").placeholder=fr.webhook_secret_set?"設定済み（変更時のみ入力）":"未設定";
   });
 }
@@ -470,9 +480,9 @@ function saveCloudSign(){
   call("admin_saveCloudSignConfig",[c],function(){ toast("CloudSign設定を保存しました"); loadIntegration(); });
 }
 function saveFormRun(){
-  var c={form_url:$("fr-form_url").value, field_map:$("fr-field_map").value};
+  var c={form_url:$("fr-form_url").value, field_map:$("fr-field_map").value, ref_param:$("fr-ref_param").value};
   var s=$("fr-webhook_secret").value; if(s) c.webhook_secret=s;
-  call("admin_saveFormRunConfig",[c],function(){ toast("FormRun設定を保存しました"); loadIntegration(); });
+  call("admin_saveFormRunConfig",[c],function(){ toast("連携設定を保存しました"); loadIntegration(); });
 }
 // X（Twitter）連携
 function loadXConfig(){

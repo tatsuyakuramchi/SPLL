@@ -297,12 +297,25 @@ function handleCloudSignWebhook_(e){
   return ContentService.createTextOutput('ok');
 }
 
-/** Webフックから application_ref を取り出す（CloudSign仕様差を吸収。要公式確認） */
+/**
+ * Webフックから application_ref を取り出す。
+ * CloudSign締結Webhookのペイロードは { documentID, status, userID, email, text } のみで、
+ * フォーム入力値は含まれない。application_ref は契約書タイトル（text 内 "COMPLETED : <タイトル> sent by …"）
+ * に埋め込む運用とし、まず text から抽出。取れなければ書類取得APIでタイトルを引いてフォールバック。
+ */
 function extractApplicationRef_(body, e){
-  return body.application_ref || body.reference || body.external_id ||
+  var ref = body.application_ref || body.reference || body.external_id ||
     (body.metadata && body.metadata.application_ref) ||
     (e && e.parameter && e.parameter.ref) ||
-    refFromText_(body.title) || refFromText_(body.subject) || '';
+    refFromText_(body.text) || refFromText_(body.title) || refFromText_(body.subject) || '';
+  if(ref) return ref;
+  // フォールバック：CloudSign API で書類タイトルを取得して application_ref を抽出
+  var docId = body.documentID || body.document_id || body.id || (e && e.parameter && e.parameter.documentID);
+  if(docId && prop_('CLOUDSIGN_CLIENT_ID')){
+    try{ var doc = cs_fetch_('GET', '/documents/' + docId, null, {}); ref = refFromText_(doc && (doc.title || doc.name)) || ''; }
+    catch(_){ /* 取得不能時は空 */ }
+  }
+  return ref || '';
 }
 function refFromText_(s){ const m = String(s||'').match(/REF-\d{6}-\d{4}/); return m ? m[0] : ''; }
 
@@ -344,10 +357,14 @@ function isDuplicateWebhook_(docId, event){
   if(prop_(key)) return true;
   PropertiesService.getScriptProperties().setProperty(key,'1'); return false;
 }
-/** CloudSignの「締結完了」相当イベントか（※ステータス値は公式仕様で要確認） */
+/**
+ * CloudSignの「締結完了」イベントか。
+ * 公式仕様：Webhookの status は 1=先方確認中 / 2=締結完了 / 3=取消・却下。
+ * 締結完了は status===2（または text/イベント名の "COMPLETED"）。※ 3は取消なので締結ではない。
+ */
 function cs_isCompletedEvent_(s){
   s = String(s);
-  return s==='COMPLETED' || s==='completed' || s==='signed' || s==='SIGNED' || s==='3';
+  return s==='2' || s==='COMPLETED' || s==='completed' || s==='signed' || s==='SIGNED';
 }
 
 // ============================================================
@@ -1231,7 +1248,8 @@ function admin_getIntegrationConfig(){
     formrun: {
       form_url:           prop_('FORMRUN_FORM_URL')   || '',
       webhook_secret_set: !!prop_('FORMRUN_WEBHOOK_SECRET'),
-      field_map:          prop_('FORMRUN_FIELD_MAP')  || ''
+      field_map:          prop_('FORMRUN_FIELD_MAP')  || '',
+      ref_param:          prop_('FORM_REF_PARAM')     || ''   // application_ref を引き継ぐhidden項目キー（例：_field_xxxxxx）
     }
   };
 }
@@ -1252,6 +1270,7 @@ function admin_saveFormRunConfig(c){
   if(c.form_url       !== undefined) sp.setProperty('FORMRUN_FORM_URL',  String(c.form_url));
   if(c.webhook_secret)               sp.setProperty('FORMRUN_WEBHOOK_SECRET', String(c.webhook_secret));
   if(c.field_map      !== undefined) sp.setProperty('FORMRUN_FIELD_MAP', String(c.field_map));
+  if(c.ref_param      !== undefined) sp.setProperty('FORM_REF_PARAM',    String(c.ref_param));
   logEvent_('config', 'FORMRUN', actor_(), null, { saved: true });
   return true;
 }
