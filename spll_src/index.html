@@ -188,7 +188,7 @@
   <section class="view" id="v-search">
     <div class="shead">
       <span class="eyebrow">原作をさがす</span>
-      <h1>利用する原作を選ぶ（複数選択可）</h1>
+      <h1>利用する原作を選ぶ<span id="maxHint">（複数選択可・最大5件）</span></h1>
       <div class="sheetnote">原作データは原作マスタ（スプレッドシート）から取得 ／ 下記はサンプル表示</div>
     </div>
     <div class="searchbar"><input id="q" placeholder="原作名・パブリッシャで検索" oninput="renderGrid()"></div>
@@ -325,15 +325,17 @@ function workById(id){ return WORKS.find(w=>w.id===id); }
 function renderGrid(){
   const q=(document.getElementById("q").value||"").trim();
   const g=document.getElementById("grid"); g.innerHTML="";
+  const atMax = cart.length>=APPLY.maxWorks;
   WORKS.filter(w=>!q||(w.name+w.pub+(w.cat||"")).includes(q)).forEach(w=>{
     const on=inCart(w.id);
+    const block = !on && atMax;
     const el=document.createElement("div"); el.className="card"+(on?" sel":"");
     el.innerHTML=`<div class="cardtop"><span class="cat">${esc(w.cat||"")}</span></div>
       <div class="cardbody"><h3>${esc(w.name)}</h3><div class="pub">${esc(w.pub||"")}</div><div class="wid mono">${esc(w.id)}</div>
       <div class="fee">${esc(w.fee||"")}</div>
       <div class="cardacts">
         <button class="det" onclick="showDetail('${w.id}')">詳細</button>
-        <button class="add${on?" on":""}" onclick="toggleCart('${w.id}')">${on?"✓ 追加済み":"＋ 利用原作に追加"}</button>
+        <button class="add${on?" on":""}" ${block?'disabled style="opacity:.45;cursor:not-allowed"':''} onclick="toggleCart('${w.id}')">${on?"✓ 追加済み":(block?"上限に達しました":"＋ 利用原作に追加")}</button>
       </div></div>`;
     g.appendChild(el);
   });
@@ -343,7 +345,11 @@ function renderGrid(){
 
 function toggleCart(id){
   const i=cart.indexOf(id);
-  if(i>=0) cart.splice(i,1); else cart.push(id);
+  if(i>=0){ cart.splice(i,1); }
+  else {
+    if(cart.length>=APPLY.maxWorks){ alert("対象原作は最大"+APPLY.maxWorks+"件までです。"); return; }
+    cart.push(id);
+  }
   renderGrid();
 }
 
@@ -365,7 +371,7 @@ function showDetail(id){
     <div class="sbrow"><div class="sbk">審査ポリシー</div><div class="sbv mono" style="font-size:12px;">${esc(w.policy||"")}</div></div>`;
   const btn=document.getElementById("toAdd");
   btn.textContent=on?"✓ 追加済み（原作一覧へ）":"この原作を利用原作に追加 →";
-  btn.onclick=()=>{ if(!inCart(id)) cart.push(id); show("search"); };
+  btn.onclick=()=>{ if(!inCart(id)){ if(cart.length>=APPLY.maxWorks){ alert("対象原作は最大"+APPLY.maxWorks+"件までです。"); return; } cart.push(id); } show("search"); };
   show("detail");
 }
 
@@ -387,7 +393,7 @@ const DEFAULT_TERMS_TEMPLATE=`
 <h4>第7条（準拠法・管轄）</h4><ol><li>日本法に準拠し、当社所在地を管轄する裁判所を専属的合意管轄とします。</li></ol>`;
 
 let LEGAL = { privacy: DEFAULT_PRIVACY, termsTemplate: DEFAULT_TERMS_TEMPLATE };
-let APPLY = { formUrl:"", refParam:"application_ref" };
+let APPLY = { formUrl:"", refParam:"application_ref", hiddenMap:{}, maxWorks:5 };
 
 function loadLegal(){
   if(hasGas){
@@ -395,8 +401,29 @@ function loadLegal(){
       if(l && l.privacy) LEGAL.privacy=l.privacy;
       if(l && l.termsTemplate) LEGAL.termsTemplate=l.termsTemplate;
     }).api_getLegalTexts();
-    google.script.run.withSuccessHandler(c=>{ if(c){ APPLY.formUrl=c.formUrl||""; APPLY.refParam=c.refParam||"application_ref"; } }).api_getApplyConfig();
+    google.script.run.withSuccessHandler(c=>{ if(c){
+      APPLY.formUrl=c.formUrl||""; APPLY.refParam=c.refParam||"application_ref";
+      APPLY.hiddenMap=c.hiddenMap||{}; APPLY.maxWorks=c.maxWorks||5;
+      updateMaxHint();
+    } }).api_getApplyConfig();
   }
+}
+function updateMaxHint(){ const el=document.getElementById("maxHint"); if(el) el.textContent="（複数選択可・最大"+APPLY.maxWorks+"件）"; }
+
+/** クラウドサインフォームへの遷移URL：application_ref と 対象原作(work_id/title×N) を hidden項目で引き継ぐ */
+function buildFormUrl(ref){
+  const base=APPLY.formUrl; if(!base) return "";
+  const map=APPLY.hiddenMap||{};
+  const params=[];
+  const add=(k,v)=>{ if(k) params.push(encodeURIComponent(k)+"="+encodeURIComponent(v||"")); };
+  add(map.application_ref||APPLY.refParam, ref);
+  for(let i=0;i<APPLY.maxWorks;i++){
+    const w=cart[i]?workById(cart[i]):null;
+    if(map["work_id_"+(i+1)])    add(map["work_id_"+(i+1)],    w?w.id:"");
+    if(map["work_title_"+(i+1)]) add(map["work_title_"+(i+1)], w?w.name:"");
+  }
+  const sep=base.indexOf("?")>=0?"&":"?";
+  return base+sep+params.join("&");
 }
 
 /** 選択原作一覧を規約末尾に差込んだHTMLを生成 */
@@ -459,10 +486,9 @@ function onCreated(res){
   document.getElementById("doneMsg").innerHTML=
     "続けてクラウドサインフォームで申込者情報・同意を入力し、CloudSignで契約を締結してください。<br>この参照番号（application_ref）で申込と契約が紐付きます。控えとして保管してください。";
   const toForm=document.getElementById("toForm");
-  const base=APPLY.formUrl;
-  if(base){
-    const sep=base.indexOf("?")>=0?"&":"?";
-    toForm.onclick=()=>{ window.open(base+sep+encodeURIComponent(APPLY.refParam)+"="+encodeURIComponent(ref),"_blank"); };
+  const url=buildFormUrl(ref);
+  if(url){
+    toForm.onclick=()=>{ window.open(url,"_blank"); };
     toForm.style.display="";
   } else {
     toForm.style.display="none";

@@ -113,10 +113,20 @@ function api_getLegalTexts(){
   };
 }
 
-/** 公開：申込導線の設定（クラウドサインフォームURL）。application_ref を引き継ぐ。 */
+/**
+ * 公開：申込導線の設定（クラウドサインフォームURL）。
+ * application_ref と 対象原作（work_id_1..N / work_title_1..N）を hidden項目で引き継ぐ。
+ * hiddenMap は「正規キー → formrunのhidden項目キー(_field_xxxx)」の対応表（設定で編集）。
+ */
 function api_getApplyConfig(){
-  return { formUrl: prop_('FORMRUN_FORM_URL') || '', refParam: prop_('FORM_REF_PARAM') || 'application_ref' };
+  return {
+    formUrl:   prop_('FORMRUN_FORM_URL') || '',
+    refParam:  prop_('FORM_REF_PARAM')   || 'application_ref',   // 後方互換（hiddenMap未設定時）
+    hiddenMap: parseJson_(prop_('FORM_HIDDEN_MAP'), {}),
+    maxWorks:  parseInt(prop_('FORM_MAX_WORKS') || '5', 10) || 5
+  };
 }
+function formMaxWorks_(){ return parseInt(prop_('FORM_MAX_WORKS') || '5', 10) || 5; }
 
 // ---- ログインユーザーの役割（管理者判定）：管理画面スイッチ用 ----
 /** 管理者メールの許可リスト（ADMIN_EMAILS：カンマ/空白区切り・小文字比較） */
@@ -251,8 +261,10 @@ function doPost(e){
  * 突合キーは application_ref（メールハッシュ突合は廃止）。
  */
 function web_createApplication(workIds){
-  const ids = (workIds || []).filter(Boolean);
+  const ids = (workIds || []).filter(Boolean).filter(function(v,i,a){ return a.indexOf(v)===i; });   // 重複除去
   if(!ids.length) throw new Error('原作が選択されていません');
+  const maxW = formMaxWorks_();
+  if(ids.length > maxW) throw new Error('対象原作は最大' + maxW + '件までです（契約書テンプレートの制約）');
   const appId = newId_('APP');
   const ref   = newId_('REF');
   appendRow_(ssOps_(),'Applications',{ application_id:appId, application_ref:ref,
@@ -1319,7 +1331,9 @@ function admin_getIntegrationConfig(){
       form_url:           prop_('FORMRUN_FORM_URL')   || '',
       webhook_secret_set: !!prop_('FORMRUN_WEBHOOK_SECRET'),
       field_map:          prop_('FORMRUN_FIELD_MAP')  || '',
-      ref_param:          prop_('FORM_REF_PARAM')     || ''   // application_ref を引き継ぐhidden項目キー（例：_field_xxxxxx）
+      ref_param:          prop_('FORM_REF_PARAM')     || '',   // application_ref を引き継ぐhidden項目キー（例：_field_xxxxxx）
+      hidden_map:         prop_('FORM_HIDDEN_MAP')    || '',   // 正規キー→hidden項目キー（JSON。application_ref/work_id_1../work_title_1..）
+      max_works:          prop_('FORM_MAX_WORKS')     || '5'   // 契約書テンプレートの対象原作枠数
     }
   };
 }
@@ -1341,6 +1355,8 @@ function admin_saveFormRunConfig(c){
   if(c.webhook_secret)               sp.setProperty('FORMRUN_WEBHOOK_SECRET', String(c.webhook_secret));
   if(c.field_map      !== undefined) sp.setProperty('FORMRUN_FIELD_MAP', String(c.field_map));
   if(c.ref_param      !== undefined) sp.setProperty('FORM_REF_PARAM',    String(c.ref_param));
+  if(c.hidden_map     !== undefined) sp.setProperty('FORM_HIDDEN_MAP',   String(c.hidden_map));
+  if(c.max_works      !== undefined) sp.setProperty('FORM_MAX_WORKS',    String(parseInt(c.max_works,10) || 5));
   logEvent_('config', 'FORMRUN', actor_(), null, { saved: true });
   return true;
 }
