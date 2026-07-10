@@ -144,12 +144,21 @@
   <!-- CONTRACT -->
   <section class="view" id="v-contract">
     <h2>契約管理</h2>
-    <p class="sub">FormRun申込→CloudSign API送信→締結の状態を一覧。締結有無はCloudSignのWebhookでSheetsへ自動書き戻し。</p>
+    <p class="sub">クラウドサインフォーム→CloudSign締結の状態を一覧。締結有無はCloudSignのWebhookでSheetsへ自動書き戻し（application_refで申込に突合）。</p>
+
+    <div class="panel" id="unlinked-panel" style="display:none;border-color:var(--brass);">
+      <div class="ph"><h3>⚠️ 未紐付けの締結（要・手動紐付け）</h3><span class="hint">application_ref で申込に突合できなかった締結</span></div>
+      <div class="pbody">
+        <p class="setnote">契約書タイトルに application_ref が載っていない等で自動突合できなかった締結です。書類タイトルを手掛かりに、正しい申込を選んで紐付けてください。紐付けると対象原作の固定・認証・バッジ・提出トークンが発行されます。</p>
+        <table><thead><tr><th>契約ID</th><th>書類タイトル</th><th>CloudSign書類ID</th><th>締結日</th><th>申込に紐付け</th></tr></thead><tbody id="unlinked-tbody"></tbody></table>
+      </div>
+    </div>
+
     <div class="panel">
       <div class="ph"><h3>契約一覧</h3><span class="hint">Applications / Contracts より</span></div>
       <table><thead><tr><th>契約ID</th><th>申込ID</th><th>対象原作</th><th>契約者</th><th>締結状態</th><th>認証</th><th>締結日</th><th>操作</th></tr></thead><tbody id="contract-tbody"></tbody></table>
     </div>
-    <div class="note">締結状態の遷移（送信済→締結済／辞退／取消）はCloudSign Webhook（COMPLETED等）またはAPI照合バッチのみが更新します。手動での締結化はできません。</div>
+    <div class="note">締結の書き戻しはCloudSign Webhook（status=2 締結完了）のみが行います。自動突合できない締結は「未紐付け」として記録され、上のパネルから手動で申込に紐付けます（誤って別申込の原作を固定しないため、紐付けまで認証等の発行は保留されます）。</div>
   </section>
 
   <!-- PAY -->
@@ -628,8 +637,42 @@ function showUploadLink(contractId, res){
   window.prompt("契約 "+contractId+" の作品提出リンク（利用者へ共有。当社からのメール送信は行いません）：", url);
 }
 
+// ---- 未紐付け締結の手動紐付け ----
+var _linkable=[];   // 候補申込のキャッシュ（select描画用）
+function loadUnlinked(){
+  call("admin_listLinkableApplications",[],function(apps){ _linkable=apps||[];
+    call("admin_listUnlinkedContracts",[],function(rows){ rows=rows||[];
+      var panel=$("unlinked-panel"), tb=$("unlinked-tbody"); tb.innerHTML="";
+      if(!rows.length){ panel.style.display="none"; return; }
+      panel.style.display="";
+      var opts='<option value="">申込を選択…</option>'+_linkable.map(function(a){
+        return '<option value="'+esc(a.application_id)+'">'+esc(a.application_ref||a.application_id)+'／'+esc(a.works||"(原作なし)")+'（'+esc(a.status)+'）</option>';
+      }).join("");
+      rows.forEach(function(c){
+        var tr=document.createElement("tr");
+        tr.appendChild(td('<span class="id">'+esc(c.contract_id)+'</span>'));
+        tr.appendChild(td(esc(c.title||"（タイトル不明）")));
+        tr.appendChild(td('<span class="id">'+esc(c.cloudsign_document_id||"—")+'</span>'));
+        tr.appendChild(td('<span class="id">'+esc(c.signed_at||"—")+'</span>'));
+        var pick=document.createElement("td");
+        var sel=document.createElement("select"); sel.innerHTML=opts;
+        sel.style.cssText="border:1px solid var(--line);border-radius:7px;padding:6px 8px;font-size:12px;max-width:230px;";
+        var btn=mkBtn("紐付け","btn p",function(){ doLink(c.contract_id, sel.value); });
+        pick.appendChild(sel); pick.appendChild(btn);
+        tr.appendChild(pick); tb.appendChild(tr);
+      });
+    });
+  });
+}
+function doLink(contractId, applicationId){
+  if(!applicationId){ toast("紐付ける申込を選択してください", true); return; }
+  if(!confirm("契約 "+contractId+" を申込 "+applicationId+" に紐付けます。\n対象原作の固定・認証・バッジ・提出トークンが発行されます。よろしいですか？")) return;
+  call("admin_linkContract",[contractId, applicationId],function(){ toast("申込に紐付けました"); loadContract(); loadDashboard(); });
+}
+
 // ---- 契約一覧 ----
 function loadContract(){
+  loadUnlinked();
   call("admin_listContracts",[],function(rows){
     var tb=$("contract-tbody"); tb.innerHTML=""; rows=rows||[];
     if(!rows.length){ emptyRow(tb,8,"契約がありません"); return; }
@@ -757,6 +800,14 @@ MOCK.admin_listContracts=function(){ return [
   {contract_id:"CTR-202606-0011",application_id:"APP-202606-0040",application_ref:"REF-202606-0040",work:"インセイン",applicant:"＊＊＊＊（個人）",status:"SIGNED",signed_at:"2026-06-20",cert_status:"REVOKED"}
 ]; };
 MOCK.admin_sendUploadLink=function(){ return { url:"https://script.example/exec?page=upload&t=mock-token-xxxx", token:"mock-token-xxxx" }; };
+MOCK.admin_listUnlinkedContracts=function(){ return [
+  {contract_id:"CTR-202607-0031",cloudsign_document_id:"DOC-abc123",title:"SPLL利用許諾契約（タイトルにref無し）",application_ref:"",signed_at:"2026-07-08"}
+]; };
+MOCK.admin_listLinkableApplications=function(){ return [
+  {application_id:"APP-202607-0055",application_ref:"REF-202607-0055",status:"CONTRACT_PENDING",works:"新クトゥルフ神話TRPG、インセイン",created_at:"2026-07-07"},
+  {application_id:"APP-202607-0058",application_ref:"REF-202607-0058",status:"FORM_PENDING",works:"ソード・ワールド2.5",created_at:"2026-07-08"}
+]; };
+MOCK.admin_linkContract=function(){ return true; };
 MOCK.admin_revokeCert=function(){ return true; };
 MOCK.admin_reactivateCert=function(){ return true; };
 MOCK.admin_listPayments=function(){ return [

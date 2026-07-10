@@ -277,24 +277,48 @@ function handleCloudSignWebhook_(e){
   if(isDuplicateWebhook_(docId, 'COMPLETED')) return ContentService.createTextOutput('dup');
 
   const app = ref ? readRows_(ssOps_(),'Applications').find(function(a){ return a.application_ref === ref; }) : null;
+  const linked = !!app;
   const contractId = newId_('CTR');
   appendRow_(ssOps_(),'Contracts',{ contract_id:contractId, cloudsign_document_id:docId,
-    application_id: app ? app.application_id : '', application_ref: ref || '',
-    status:'SIGNED', signed_at:new Date().toISOString(), folder_id:createContractFolder_(contractId) });
+    cloudsign_title: extractDocTitle_(body), application_id: app ? app.application_id : '', application_ref: ref || '',
+    status:'SIGNED', link_status: linked ? 'LINKED' : 'UNLINKED',
+    signed_at:new Date().toISOString(), folder_id:createContractFolder_(contractId) });
 
-  // 契約対象原作を Application_Works からスナップショット（法務証跡）
-  if(app){
-    readRows_(ssOps_(),'Application_Works').filter(function(x){ return x.application_id === app.application_id; })
-      .forEach(function(x){ appendRow_(ssOps_(),'Contract_Works',{ contract_work_id:newId_('CW'), contract_id:contractId, work_id:x.work_id }); });
+  if(linked){
+    // 突合成功：対象原作スナップショット→申込SIGNED→認証・バッジ・提出トークン
+    snapshotContractWorks_(contractId, app.application_id);
     updateRow_(ssOps_(),'Applications','application_id',app.application_id,{ status:'SIGNED' });
+    logEvent_('contract', contractId, 'cloudsign', null, { status:'SIGNED', link_status:'LINKED', application_ref:ref });
+    finishContractLinkage_(contractId);
+    return ContentService.createTextOutput('ok');
   }
-  logEvent_('contract', contractId, 'cloudsign', null, { status:'SIGNED', application_ref:ref });
+  // 突合不能（ref無し／該当申込なし）：締結は記録するが、認証・バッジ・提出トークンは
+  // 手動紐付け（admin_linkContract）まで保留する。誤って別申込の原作を固定しないため。
+  logEvent_('contract', contractId, 'cloudsign', null,
+    { status:'SIGNED', link_status:'UNLINKED', reason:(ref ? 'app-not-found' : 'no-ref'), application_ref:ref||'', doc_title:extractDocTitle_(body) });
+  return ContentService.createTextOutput('ok-unlinked');
+}
 
-  // 認証を発行（締結で ACTIVE）＋ 認証バッジ ＋ 作品提出トークン（メールは送らない）
+/** 締結Webフックの text（"COMPLETED : <契約書タイトル> sent by …"）等から書類タイトルを取り出す */
+function extractDocTitle_(body){
+  if(body && body.title) return String(body.title);
+  const m = String((body && body.text) || '').match(/:\s*(.+?)\s+sent by/i);
+  return m ? m[1].trim() : String((body && body.text) || '');
+}
+
+/** Application_Works → Contract_Works へスナップショット（既にあれば追加しない） */
+function snapshotContractWorks_(contractId, applicationId){
+  const already = readRows_(ssOps_(),'Contract_Works').some(function(x){ return x.contract_id === contractId; });
+  if(already) return;
+  readRows_(ssOps_(),'Application_Works').filter(function(x){ return x.application_id === applicationId; })
+    .forEach(function(x){ appendRow_(ssOps_(),'Contract_Works',{ contract_work_id:newId_('CW'), contract_id:contractId, work_id:x.work_id }); });
+}
+
+/** 締結後の発行処理（認証ACTIVE＋バッジ＋提出トークン）。冪等。紐付け完了時に呼ぶ。 */
+function finishContractLinkage_(contractId){
   issueCert_(contractId);
   if(prop_('BADGE_AUTO') !== 'false'){ try{ issueBadge_(contractId); }catch(e){ logEvent_('badge', contractId, 'system', null, { issue_error:String(e) }); } }
   prepareSubmissionToken_(contractId);
-  return ContentService.createTextOutput('ok');
 }
 
 /**
@@ -309,11 +333,11 @@ function extractApplicationRef_(body, e){
     (e && e.parameter && e.parameter.ref) ||
     refFromText_(body.text) || refFromText_(body.title) || refFromText_(body.subject) || '';
   if(ref) return ref;
-  // フォールバック：CloudSign API で書類タイトルを取得して application_ref を抽出
+  // フォールバック：CloudSign API で書類を取得し、タイトル・入力フィールド・参加者名まで走査して抽出
   var docId = body.documentID || body.document_id || body.id || (e && e.parameter && e.parameter.documentID);
   if(docId && prop_('CLOUDSIGN_CLIENT_ID')){
-    try{ var doc = cs_fetch_('GET', '/documents/' + docId, null, {}); ref = refFromText_(doc && (doc.title || doc.name)) || ''; }
-    catch(_){ /* 取得不能時は空 */ }
+    try{ var doc = cs_fetch_('GET', '/documents/' + docId, null, {}); ref = refFromText_(JSON.stringify(doc)) || ''; }
+    catch(_){ /* 取得不能時は空 → 未紐付けとして記録し手動紐付けに委ねる */ }
   }
   return ref || '';
 }
@@ -877,6 +901,52 @@ function admin_sendUploadLink(contractId){
   return { url:url, token:token };
 }
 
+// ---- 未紐付け締結の手動紐付け（ref突合できない場合のフォールバック） ----
+/** 申込に突合できなかった締結（UNLINKED）の一覧。書類タイトルで判別できるようにする。 */
+function admin_listUnlinkedContracts(){
+  return readRows_(ssOps_(),'Contracts')
+    .filter(function(c){ return c.status==='SIGNED' && !c.application_id; })
+    .map(function(c){ return {
+      contract_id: c.contract_id, cloudsign_document_id: c.cloudsign_document_id||'',
+      title: c.cloudsign_title||'', application_ref: c.application_ref||'', signed_at: String(c.signed_at||'')
+    }; });
+}
+/** 手動紐付けの候補となる申込（未締結・未紐付け）。対象原作名つき。 */
+function admin_listLinkableApplications(){
+  const linked = {}; readRows_(ssOps_(),'Contracts').forEach(function(c){ if(c.application_id) linked[c.application_id] = true; });
+  const nameMap = worksNameMap_();
+  const appWorks = {}; readRows_(ssOps_(),'Application_Works').forEach(function(x){
+    (appWorks[x.application_id] = appWorks[x.application_id] || []).push(nameMap[x.work_id] || x.work_id); });
+  return readRows_(ssOps_(),'Applications')
+    .filter(function(a){ return a.status !== 'SIGNED' && !linked[a.application_id]; })
+    .map(function(a){ return {
+      application_id: a.application_id, application_ref: a.application_ref||'', status: a.status||'',
+      works: (appWorks[a.application_id]||[]).join('、'), created_at: String(a.created_at||'')
+    }; });
+}
+/**
+ * 未紐付け締結を申込へ手動紐付け。対象原作を固定し、認証・バッジ・提出トークンを発行（冪等）。
+ * ref突合が使えない運用（契約書タイトルにref差込不可等）の最終手段。
+ */
+function admin_linkContract(contractId, applicationId){
+  const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === contractId; });
+  if(!c) throw new Error('契約が見つかりません: ' + contractId);
+  if(c.application_id) throw new Error('この契約は既に申込 ' + c.application_id + ' に紐付いています');
+  const app = readRows_(ssOps_(),'Applications').find(function(x){ return x.application_id === applicationId; });
+  if(!app) throw new Error('申込が見つかりません: ' + applicationId);
+  const dup = readRows_(ssOps_(),'Contracts').find(function(x){ return x.application_id === applicationId; });
+  if(dup) throw new Error('この申込は既に契約 ' + dup.contract_id + ' に紐付いています');
+
+  updateRow_(ssOps_(),'Contracts','contract_id',contractId,
+    { application_id: applicationId, application_ref: app.application_ref || '', link_status: 'LINKED' });
+  snapshotContractWorks_(contractId, applicationId);
+  updateRow_(ssOps_(),'Applications','application_id',applicationId,{ status:'SIGNED' });
+  finishContractLinkage_(contractId);
+  logEvent_('contract', contractId, actor_(), { link_status:'UNLINKED' },
+    { link_status:'LINKED', application_id:applicationId, application_ref:app.application_ref||'' });
+  return true;
+}
+
 /** 入金管理：請求(Invoices)に入金(Payments)状況・作品名を結合 */
 function admin_listPayments(){
   const invoices  = readRows_(ssOps_(),'Invoices');
@@ -1290,7 +1360,8 @@ const SCHEMA_OPS = {
   Applications:         ['application_id','application_ref','status','created_at'],
   Application_Works:    ['application_work_id','application_id','work_id'],
   // 契約：締結時に対象原作を Contract_Works へスナップショット（法務証跡）
-  Contracts:            ['contract_id','cloudsign_document_id','application_id','application_ref','status','signed_at','folder_id'],
+  //   link_status: LINKED（申込突合済）/ UNLINKED（未突合＝手動紐付け待ち）
+  Contracts:            ['contract_id','cloudsign_document_id','cloudsign_title','application_id','application_ref','status','link_status','signed_at','folder_id'],
   Contract_Works:       ['contract_work_id','contract_id','work_id'],
   // 提出：トークンでアクセス、版(Version)で再提出管理
   Submission_Access:    ['token_id','contract_id','token_hash','status','expires_at','max_uploads'],
