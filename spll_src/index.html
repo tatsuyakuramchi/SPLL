@@ -212,12 +212,20 @@
       <div class="step" data-s="3"><span class="n">4</span> 申込</div>
     </div>
 
-    <!-- step 0: confirm selection -->
+    <!-- step 0: confirm selection + usage/fee -->
     <div class="wstep" id="ws0">
       <h2 class="wtitle">選択中の原作</h2>
       <p class="wsub">これらの原作を1つの契約で包括的に利用許諾します。追加・削除は「原作をさがす」から行えます。</p>
       <ul class="sellist" id="selList"></ul>
-      <div class="navbar"><button class="prev" onclick="show('search')">原作を追加する</button><button class="next" id="n0" onclick="goStep(1)">この内容で申込へ進む →</button></div>
+
+      <h2 class="wtitle" style="font-size:18px;margin-top:22px;">利用目的をえらぶ</h2>
+      <p class="wsub">利用目的により利用料条件（契約書の別紙2）が決まります。下の内容が契約に反映されます。</p>
+      <select id="usageSel" onchange="onUsageChange()" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:12px 13px;font-size:14px;font-family:inherit;background:var(--surface);">
+        <option value="">利用目的を選択してください…</option>
+      </select>
+      <div id="feePreview" style="margin-top:14px;"></div>
+
+      <div class="navbar"><button class="prev" onclick="show('search')">原作を追加する</button><button class="next" id="n0" disabled onclick="goStep(1)">この内容で申込へ進む →</button></div>
     </div>
 
     <!-- step 1: privacy -->
@@ -306,6 +314,60 @@ let WORKS = SAMPLE_WORKS;
 let cart = [];         // selected work ids
 let current = null;    // detail view work id
 let step = 0;
+let USAGE_OPTIONS = [];   // 利用目的の選択肢
+let selectedUsage = "";   // 選択中の利用目的
+let TERMS = null;         // 計算済みの別紙2条件
+
+// スタンドアロン時の料金表ミラー（本番は api_getUsageOptions / api_previewFeeTerms を使用）
+const SAMPLE_FEE = [
+  {usage_category:"書籍",fee_model:"PER_WORK",fee_value:16500,fee_label:"16,500円／原作",licensed_uses:"複製・頒布",payment_due:"契約締結後の請求書発行日から30日以内",reporting_requirement:"定額のため利用報告は原則不要",report_due:"－",threshold_or_cap:"－",reprint_rule:"増刷時も追加料金なし（要お申し出）",special_terms:""},
+  {usage_category:"電子出版物",fee_model:"RATE",fee_value:0.10,fee_label:"売上の10％",licensed_uses:"複製・公衆送信",payment_due:"半期ごとの計算書発効後",reporting_requirement:"半期ごとに販売実績を報告",report_due:"各半期終了後1ヶ月以内",threshold_or_cap:"－",reprint_rule:"－",special_terms:""},
+  {usage_category:"商品販売",fee_model:"PER_WORK",fee_value:16500,fee_label:"16,500円／原作",licensed_uses:"複製・頒布・販売",payment_due:"契約締結後の請求書発行日から30日以内",reporting_requirement:"定額のため利用報告は原則不要",report_due:"－",threshold_or_cap:"頒布数の上限は設けない",reprint_rule:"追加製造も追加料金なし（要お申し出）",special_terms:""},
+  {usage_category:"サブスクリプション",fee_model:"RATE",fee_value:0.10,fee_label:"売上の10％",licensed_uses:"公衆送信（継続的提供）",payment_due:"半期ごとの計算書発効後",reporting_requirement:"半期ごとに売上を報告",report_due:"各半期終了後1ヶ月以内",threshold_or_cap:"－",reprint_rule:"－",special_terms:""},
+  {usage_category:"イベント",fee_model:"FLAT",fee_value:0,fee_label:"無償（イベント頒布・要事前申告）",licensed_uses:"頒布・上演",payment_due:"－",reporting_requirement:"頒布実績を事後報告",report_due:"イベント終了後1ヶ月以内",threshold_or_cap:"－",reprint_rule:"－",special_terms:"営利目的の恒常販売には別区分が適用されます"},
+  {usage_category:"その他",fee_model:"RATE",fee_value:0.10,fee_label:"売上の10％（個別協議）",licensed_uses:"別途協議",payment_due:"個別協議",reporting_requirement:"個別協議",report_due:"個別協議",threshold_or_cap:"個別協議",reprint_rule:"個別協議",special_terms:"内容により事務局と個別に条件を定めます"}
+];
+function yen(v){ return String(Math.round(v||0)).replace(/\B(?=(\d{3})+(?!\d))/g,",")+"円"; }
+function computeFeeLocal(cat,n){
+  const r=SAMPLE_FEE.find(x=>x.usage_category===cat); if(!r) return {found:false,fee_amount_or_rate:"（未設定）"};
+  n=Math.max(1,n||1); const m=r.fee_model; const v=r.fee_value; let rate=null,amount=null,text=r.fee_label||"";
+  if(m==="RATE"){ rate=v; if(!text) text="売上の"+(v*100)+"％"; }
+  else if(m==="PER_WORK"){ amount=Math.round(v)*n; text=(r.fee_label||yen(v)+"／原作")+" × "+n+"件 ＝ "+yen(amount); }
+  else { amount=Math.round(v); if(!text) text=yen(amount); }
+  return {found:true,usage_category:cat,fee_model:m,rate:rate,amount:amount,fee_amount_or_rate:text,
+    licensed_uses:r.licensed_uses,payment_due:r.payment_due,reporting_requirement:r.reporting_requirement,
+    report_due:r.report_due,threshold_or_cap:r.threshold_or_cap,reprint_rule:r.reprint_rule,special_terms:r.special_terms};
+}
+function loadUsageOptions(){
+  const fallback=()=>SAMPLE_FEE.map(f=>({category:f.usage_category,fee_label:f.fee_label}));
+  if(hasGas){
+    google.script.run.withSuccessHandler(o=>{ USAGE_OPTIONS=(o&&o.length)?o:fallback(); populateUsageSelect(); })
+      .withFailureHandler(()=>{ USAGE_OPTIONS=fallback(); populateUsageSelect(); }).api_getUsageOptions();
+  } else { USAGE_OPTIONS=fallback(); populateUsageSelect(); }
+}
+function populateUsageSelect(){
+  const sel=document.getElementById("usageSel"); if(!sel) return; const cur=sel.value;
+  sel.innerHTML='<option value="">利用目的を選択してください…</option>'+USAGE_OPTIONS.map(o=>'<option value="'+esc(o.category)+'">'+esc(o.category)+(o.fee_label?"（"+esc(o.fee_label)+"）":"")+'</option>').join("");
+  if(cur) sel.value=cur;
+}
+function onUsageChange(){
+  selectedUsage=document.getElementById("usageSel").value;
+  if(!selectedUsage){ TERMS=null; document.getElementById("feePreview").innerHTML=""; updateN0(); return; }
+  const n=cart.length;
+  if(hasGas){
+    google.script.run.withSuccessHandler(t=>{ TERMS=t; renderFeePreview(t); updateN0(); })
+      .withFailureHandler(()=>{ TERMS=computeFeeLocal(selectedUsage,n); renderFeePreview(TERMS); updateN0(); })
+      .api_previewFeeTerms(selectedUsage,n);
+  } else { TERMS=computeFeeLocal(selectedUsage,n); renderFeePreview(TERMS); updateN0(); }
+}
+function renderFeePreview(t){
+  const box=document.getElementById("feePreview"); if(!box) return;
+  if(!t||t.found===false){ box.innerHTML=""; return; }
+  const rows=[["利用区分",t.usage_category],["許諾対象利用",t.licensed_uses],["利用許諾料",t.fee_amount_or_rate],["支払時期",t.payment_due],["利用報告",t.reporting_requirement],["報告期限",t.report_due],["販売・提供上限等",t.threshold_or_cap],["追加製造・増刷",t.reprint_rule],["特記事項",t.special_terms]];
+  box.innerHTML='<div class="statblock"><div class="sbhead" style="padding:12px 16px"><div class="cat">別紙2</div><h2 style="font-size:16px;margin:4px 0 0">利用条件・利用料条件</h2></div>'+
+    rows.filter(r=>r[1]).map(r=>'<div class="sbrow"><div class="sbk">'+esc(r[0])+'</div><div class="sbv">'+esc(r[1])+'</div></div>').join("")+'</div>';
+}
+function updateN0(){ const b=document.getElementById("n0"); if(b) b.disabled=!(cart.length>0 && selectedUsage); }
 
 const hasGas = (typeof google!=="undefined" && google.script && google.script.run);
 
@@ -422,20 +484,34 @@ function buildFormUrl(ref){
     if(map["work_id_"+(i+1)])    add(map["work_id_"+(i+1)],    w?w.id:"");
     if(map["work_title_"+(i+1)]) add(map["work_title_"+(i+1)], w?w.name:"");
   }
+  // 別紙2（利用料条件）を hidden項目で引き継ぐ
+  if(TERMS){
+    ["usage_category","fee_model","fee_amount_or_rate","licensed_uses","payment_due","reporting_requirement","report_due","threshold_or_cap","reprint_rule","special_terms"]
+      .forEach(k=>{ if(map[k]) add(map[k], TERMS[k]!=null?String(TERMS[k]):""); });
+  }
   const sep=base.indexOf("?")>=0?"&":"?";
   return base+sep+params.join("&");
 }
 
 /** 選択原作一覧を規約末尾に差込んだHTMLを生成 */
 function termsHTML(){
-  const list = cart.map((id,i)=>{const w=workById(id); return `<li>${esc(w.name)}（${esc(w.pub||"")}）／ ${esc(w.fee||"")}</li>`;}).join("");
-  const appendix = `<h4>別表：対象原作一覧</h4><ol>${list}</ol>`;
-  return (LEGAL.termsTemplate||"") + appendix;
+  const list = cart.map((id,i)=>{const w=workById(id); return `<li>${esc(w.name)}（${esc(w.pub||"")}）</li>`;}).join("");
+  const appendix = `<h4>別紙1：対象原作一覧</h4><ol>${list}</ol>`;
+  let fee = "";
+  if(TERMS && TERMS.found!==false){
+    fee = `<h4>別紙2：利用条件・利用料条件</h4><ol>`+
+      `<li>利用区分：${esc(TERMS.usage_category||"")}</li>`+
+      `<li>利用許諾料：${esc(TERMS.fee_amount_or_rate||"")}</li>`+
+      `<li>支払時期：${esc(TERMS.payment_due||"")}</li>`+
+      `<li>利用報告：${esc(TERMS.reporting_requirement||"")}</li></ol>`;
+  }
+  return (LEGAL.termsTemplate||"") + appendix + fee;
 }
 
 function openApply(){
   if(!cart.length){ show("search"); return; }
   step=0; renderSelList();
+  populateUsageSelect(); document.getElementById("usageSel").value=selectedUsage||""; onUsageChange();
   document.getElementById("privacyText").innerHTML=LEGAL.privacy;
   document.getElementById("termsText").innerHTML=termsHTML();
   document.querySelectorAll(".g1,.g2,.g3").forEach(c=>c.checked=false);
@@ -450,7 +526,7 @@ function renderSelList(){
       <button class="rm" onclick="removeFromCart('${id}')">削除</button>`;
     ul.appendChild(li);
   });
-  document.getElementById("n0").disabled = cart.length===0;
+  updateN0(); if(selectedUsage) onUsageChange();
 }
 function removeFromCart(id){ const i=cart.indexOf(id); if(i>=0)cart.splice(i,1); renderCart(); if(!cart.length){ show("search"); return;} renderSelList(); document.getElementById("termsText").innerHTML=termsHTML(); }
 
@@ -473,7 +549,7 @@ function submitApplication(){
     google.script.run
       .withSuccessHandler(res=>onCreated(res))
       .withFailureHandler(err=>{ btn.disabled=false; btn.textContent="申込を作成してクラウドサインへ進む →"; alert("申込の作成に失敗しました：\n"+(err&&err.message||err)); })
-      .web_createApplication(ids);
+      .web_createApplication(ids, selectedUsage);
   } else {
     // standalone mock
     const ym=new Date(); const mm=(""+ym.getFullYear()+String(ym.getMonth()+1).padStart(2,"0")).slice(2);
@@ -518,6 +594,7 @@ function gotoAdmin(){ window.top.location.href=ADMIN_URL; }
 loadLegal();
 loadWorks();
 loadViewerRole();
+loadUsageOptions();
 </script>
 </body>
 </html>

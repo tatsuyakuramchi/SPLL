@@ -128,6 +128,60 @@ function api_getApplyConfig(){
 }
 function formMaxWorks_(){ return parseInt(prop_('FORM_MAX_WORKS') || '5', 10) || 5; }
 
+// ============================================================
+// 利用料条件（別紙2）：利用目的ごとの一律ルールを事前設定し、申込時に自動計算・反映
+// ============================================================
+/** 料金表（有効行のみ） */
+function feeRows_(){ return readRows_(ssMaster_(),'Fee_Schedule').filter(function(r){ return String(r.active) !== 'false' && r.usage_category; }); }
+/** 利用目的に対応する料金ルール（無ければ null） */
+function feeRuleFor_(usageCategory){
+  return feeRows_().find(function(r){ return String(r.usage_category) === String(usageCategory); }) || null;
+}
+/** 公開：利用目的の選択肢（申込フォーム用） */
+function api_getUsageOptions(){
+  return feeRows_().map(function(r){ return { category:r.usage_category, fee_model:r.fee_model, fee_label:r.fee_label || '' }; });
+}
+/**
+ * 利用目的（と原作数）から別紙2の各条件を計算して返す。反映はこの結果を用いる。
+ *  RATE=売上連動（率のみ・金額は後日利用報告で確定）／FLAT=定額（契約単位）／PER_WORK=原作数比例。
+ */
+function computeFeeTerms_(usageCategory, workCount){
+  const n = Math.max(1, parseInt(workCount || 1, 10) || 1);
+  const r = feeRuleFor_(usageCategory);
+  if(!r){
+    return { usage_category:usageCategory||'', fee_model:'', rate:null, amount:null,
+      fee_amount_or_rate:'（利用目的が未設定です）', licensed_uses:'', payment_due:'', reporting_requirement:'',
+      report_due:'', threshold_or_cap:'', reprint_rule:'', special_terms:'', found:false };
+  }
+  const model = String(r.fee_model || 'RATE').toUpperCase();
+  const val = num_(r.fee_value);
+  let rate = null, amount = null, feeText = r.fee_label || '';
+  if(model === 'RATE'){
+    rate = val;
+    if(!feeText) feeText = '売上の' + Math.round(val * 1000) / 10 + '％';
+  }else if(model === 'PER_WORK'){
+    amount = Math.round(val) * n;
+    feeText = (r.fee_label || (yen_(val) + '／原作')) + ' × ' + n + '件 ＝ ' + yen_(amount);
+  }else{ // FLAT
+    amount = Math.round(val);
+    if(!feeText) feeText = yen_(amount);
+  }
+  return {
+    usage_category: r.usage_category, fee_model: model, rate: rate, amount: amount,
+    fee_amount_or_rate: feeText, licensed_uses: r.licensed_uses || '', payment_due: r.payment_due || '',
+    reporting_requirement: r.reporting_requirement || '', report_due: r.report_due || '',
+    threshold_or_cap: r.threshold_or_cap || '', reprint_rule: r.reprint_rule || '', special_terms: r.special_terms || '',
+    found: true
+  };
+}
+/** 公開：別紙2プレビュー（申込フォームで利用目的選択時に表示） */
+function api_previewFeeTerms(usageCategory, workCount){ return computeFeeTerms_(usageCategory, workCount); }
+/** 金額を三桁区切り＋「円」で整形（ICO非依存） */
+function yen_(v){
+  const s = String(Math.round(num_(v)));
+  return s.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '円';
+}
+
 // ---- ログインユーザーの役割（管理者判定）：管理画面スイッチ用 ----
 /** 管理者メールの許可リスト（ADMIN_EMAILS：カンマ/空白区切り・小文字比較） */
 function adminEmails_(){
@@ -260,19 +314,19 @@ function doPost(e){
  * Applications ＋ Application_Works を登録して application_ref を返す。
  * 突合キーは application_ref（メールハッシュ突合は廃止）。
  */
-function web_createApplication(workIds){
+function web_createApplication(workIds, usageCategory){
   const ids = (workIds || []).filter(Boolean).filter(function(v,i,a){ return a.indexOf(v)===i; });   // 重複除去
   if(!ids.length) throw new Error('原作が選択されていません');
   const maxW = formMaxWorks_();
   if(ids.length > maxW) throw new Error('対象原作は最大' + maxW + '件までです（契約書テンプレートの制約）');
   const appId = newId_('APP');
   const ref   = newId_('REF');
-  appendRow_(ssOps_(),'Applications',{ application_id:appId, application_ref:ref,
+  appendRow_(ssOps_(),'Applications',{ application_id:appId, application_ref:ref, usage_category:usageCategory||'',
     status:'APPLICATION_CREATED', created_at:new Date().toISOString() });
   ids.forEach(function(wid){ appendRow_(ssOps_(),'Application_Works',{
     application_work_id:newId_('AW'), application_id:appId, work_id:wid }); });
   updateRow_(ssOps_(),'Applications','application_id',appId,{ status:'FORM_PENDING' });
-  logEvent_('application', appId, 'portal', null, { application_ref:ref, works:ids.length });
+  logEvent_('application', appId, 'portal', null, { application_ref:ref, works:ids.length, usage_category:usageCategory||'' });
   return { application_id:appId, application_ref:ref };
 }
 
@@ -297,8 +351,9 @@ function handleCloudSignWebhook_(e){
     signed_at:new Date().toISOString(), folder_id:createContractFolder_(contractId) });
 
   if(linked){
-    // 突合成功：対象原作スナップショット→申込SIGNED→認証・バッジ・提出トークン
+    // 突合成功：対象原作・利用料条件スナップショット→申込SIGNED→認証・バッジ・提出トークン
     snapshotContractWorks_(contractId, app.application_id);
+    snapshotContractTerms_(contractId, app);
     updateRow_(ssOps_(),'Applications','application_id',app.application_id,{ status:'SIGNED' });
     logEvent_('contract', contractId, 'cloudsign', null, { status:'SIGNED', link_status:'LINKED', application_ref:ref });
     finishContractLinkage_(contractId);
@@ -324,6 +379,16 @@ function snapshotContractWorks_(contractId, applicationId){
   if(already) return;
   readRows_(ssOps_(),'Application_Works').filter(function(x){ return x.application_id === applicationId; })
     .forEach(function(x){ appendRow_(ssOps_(),'Contract_Works',{ contract_work_id:newId_('CW'), contract_id:contractId, work_id:x.work_id }); });
+}
+
+/** 締結時点の利用目的と別紙2条件を契約へスナップショット（法務証跡）。料金表の後日変更に影響されない。 */
+function snapshotContractTerms_(contractId, app){
+  const usage = (app && app.usage_category) || '';
+  const workCount = readRows_(ssOps_(),'Contract_Works').filter(function(x){ return x.contract_id === contractId; }).length || 1;
+  const terms = computeFeeTerms_(usage, workCount);
+  updateRow_(ssOps_(),'Contracts','contract_id',contractId,
+    { usage_category: usage, terms_snapshot: JSON.stringify(terms) });
+  return terms;
 }
 
 /** 締結後の発行処理（認証ACTIVE＋バッジ＋提出トークン）。冪等。紐付け完了時に呼ぶ。 */
@@ -952,6 +1017,7 @@ function admin_linkContract(contractId, applicationId){
   updateRow_(ssOps_(),'Contracts','contract_id',contractId,
     { application_id: applicationId, application_ref: app.application_ref || '', link_status: 'LINKED' });
   snapshotContractWorks_(contractId, applicationId);
+  snapshotContractTerms_(contractId, app);
   updateRow_(ssOps_(),'Applications','application_id',applicationId,{ status:'SIGNED' });
   finishContractLinkage_(contractId);
   logEvent_('contract', contractId, actor_(), { link_status:'UNLINKED' },
@@ -1048,12 +1114,21 @@ function batch_generateStatements(period){
   const workById = {}; readRows_(ssMaster_(),'Works_Master').forEach(w => { workById[w.work_id] = w; });
   const partners = readRows_(ssOps_(),'Partners');
 
-  const royaltyRate  = num_(getConfig_('DEFAULT_ROYALTY_RATE', '0.10'));   // 契約単位の既定ロイヤリティ率
+  const defaultRate  = num_(getConfig_('DEFAULT_ROYALTY_RATE', '0.10'));   // 既定ロイヤリティ率（フォールバック）
   const handlingRate = num_(getConfig_('HANDLING_FEE_RATE',   '0.30'));    // 事務手数料率
+  // 契約ごとの売上連動率（締結時の別紙2スナップショット）。RATE以外・未設定は既定率にフォールバック。
+  const ctrRate = {};
+  readRows_(ssOps_(),'Contracts').forEach(function(c){
+    let rate = null;
+    if(c.terms_snapshot){ try{ const t = JSON.parse(c.terms_snapshot);
+      if(t && String(t.fee_model).toUpperCase()==='RATE' && t.rate!=null && t.rate!=='') rate = num_(t.rate); }catch(e){} }
+    ctrRate[c.contract_id] = rate;
+  });
 
   const byPartner = {};  // partner_id -> { partner, details:[], total }
   reports.forEach(r => {
     const net = num_(r.net_sales);
+    const royaltyRate  = (ctrRate[r.contract_id] != null) ? ctrRate[r.contract_id] : defaultRate;
     const licenseFee   = Math.round(net * royaltyRate);
     const partnerShare = Math.round(licenseFee * (1 - handlingRate));
     // 契約対象原作のパートナー群へ均等配分（原作ごとの別料金は設けない）
@@ -1286,6 +1361,22 @@ function admin_saveWork(work){
   return row.work_id;   // X投稿は保存後にクライアント側で送信許可ポップアップ→admin_postWorkToX
 }
 
+// ---- 利用料条件（別紙2）の料金表：事務局が編集 ----
+const FEE_FIELDS = ['usage_category','fee_model','fee_value','fee_label','licensed_uses','payment_due','reporting_requirement','report_due','threshold_or_cap','reprint_rule','special_terms','active'];
+/** 料金表全件（無効行も含む・管理用） */
+function admin_getFeeSchedule(){ return readRows_(ssMaster_(),'Fee_Schedule'); }
+/** 料金表の1行を追加・更新（usage_category 一致でupsert） */
+function admin_saveFeeRow(row){
+  const r = {}; FEE_FIELDS.forEach(function(k){ if(row[k] !== undefined) r[k] = row[k]; });
+  if(!r.usage_category) throw new Error('利用目的（usage_category）は必須です');
+  if(r.active === undefined) r.active = 'true';
+  if(!updateRow_(ssMaster_(),'Fee_Schedule','usage_category', r.usage_category, r)){
+    appendRow_(ssMaster_(),'Fee_Schedule', r);
+  }
+  logEvent_('config','FEE_SCHEDULE',actor_(),null,{ usage_category:r.usage_category, fee_model:r.fee_model });
+  return true;
+}
+
 /** 公開状態の切替（PUBLISHED / DRAFT / UNPUBLISHED 等） */
 function admin_setWorkPublish(workId, status){
   updateRow_(ssMaster_(), 'Works_Master', 'work_id', workId, { publish_status: status });
@@ -1369,15 +1460,21 @@ function admin_saveFormRunConfig(c){
 const SCHEMA_MASTER = {
   Works_Master:    ['work_id','work_name','publisher','category','publish_status','review_timing','review_policy','fee_label','media','ok_elements','no_elements','credit_text','allocation_scheme_id','royalty_rate','partner_id','billing_type'],
   Review_Rules:    ['rule_id','work_id','category','rule_text','severity','effective_from','effective_to'],
-  Reference_Assets:['asset_id','work_id','asset_type','drive_file_id','allowed_flag']
+  Reference_Assets:['asset_id','work_id','asset_type','drive_file_id','allowed_flag'],
+  // 利用料条件（別紙2）の一律ルール。利用目的(usage_category)ごとに計算方式を持つ（事務局が編集）。
+  //   fee_model: RATE=売上連動 / FLAT=定額(契約単位) / PER_WORK=原作数比例
+  //   fee_value: RATEは率(0.10=10%)、FLAT/PER_WORKは金額(円)
+  Fee_Schedule:    ['usage_category','fee_model','fee_value','fee_label','licensed_uses','payment_due','reporting_requirement','report_due','threshold_or_cap','reprint_rule','special_terms','active']
 };
 const SCHEMA_OPS = {
   // 申込：複数原作は中間テーブル Application_Works で管理（B経路固定・A/B分岐なし）
-  Applications:         ['application_id','application_ref','status','created_at'],
+  //   usage_category：申込時に選ぶ利用目的（別紙2の料金計算キー）
+  Applications:         ['application_id','application_ref','usage_category','status','created_at'],
   Application_Works:    ['application_work_id','application_id','work_id'],
   // 契約：締結時に対象原作を Contract_Works へスナップショット（法務証跡）
   //   link_status: LINKED（申込突合済）/ UNLINKED（未突合＝手動紐付け待ち）
-  Contracts:            ['contract_id','cloudsign_document_id','cloudsign_title','application_id','application_ref','status','link_status','signed_at','folder_id'],
+  //   usage_category／terms_snapshot：締結時点の利用目的と別紙2条件を固定（法務証跡）
+  Contracts:            ['contract_id','cloudsign_document_id','cloudsign_title','application_id','application_ref','usage_category','terms_snapshot','status','link_status','signed_at','folder_id'],
   Contract_Works:       ['contract_work_id','contract_id','work_id'],
   // 提出：トークンでアクセス、版(Version)で再提出管理
   Submission_Access:    ['token_id','contract_id','token_hash','status','expires_at','max_uploads'],
@@ -1411,6 +1508,27 @@ const SAMPLE_WORKS_SEED = [
 const SAMPLE_PARTNERS_SEED = [
   {partner_id:'PRT-DRACO', name:'どらこにあん', invoice_reg_number:'T0000000000000', is_qualified_issuer:'true', bank:'', contact:''},
   {partner_id:'PRT-ARK',   name:'アークライト', invoice_reg_number:'T0000000000000', is_qualified_issuer:'true', bank:'', contact:''}
+];
+// 利用料条件（別紙2）の一律ルール初期値。金額・率・文言は事務局が設定画面で編集可能なプレースホルダ。
+const SAMPLE_FEE_SCHEDULE_SEED = [
+  {usage_category:'書籍', fee_model:'PER_WORK', fee_value:'16500', fee_label:'16,500円／原作',
+   licensed_uses:'複製・頒布', payment_due:'契約締結後の請求書発行日から30日以内', reporting_requirement:'定額のため利用報告は原則不要',
+   report_due:'－', threshold_or_cap:'－', reprint_rule:'増刷時も追加料金なし（要お申し出）', special_terms:'', active:'true'},
+  {usage_category:'電子出版物', fee_model:'RATE', fee_value:'0.10', fee_label:'売上の10％',
+   licensed_uses:'複製・公衆送信', payment_due:'半期ごとの計算書発効後', reporting_requirement:'半期ごとに販売実績を報告',
+   report_due:'各半期終了後1ヶ月以内', threshold_or_cap:'－', reprint_rule:'－', special_terms:'', active:'true'},
+  {usage_category:'商品販売', fee_model:'PER_WORK', fee_value:'16500', fee_label:'16,500円／原作',
+   licensed_uses:'複製・頒布・販売', payment_due:'契約締結後の請求書発行日から30日以内', reporting_requirement:'定額のため利用報告は原則不要',
+   report_due:'－', threshold_or_cap:'頒布数の上限は設けない', reprint_rule:'追加製造も追加料金なし（要お申し出）', special_terms:'', active:'true'},
+  {usage_category:'サブスクリプション', fee_model:'RATE', fee_value:'0.10', fee_label:'売上の10％',
+   licensed_uses:'公衆送信（継続的提供）', payment_due:'半期ごとの計算書発効後', reporting_requirement:'半期ごとに売上を報告',
+   report_due:'各半期終了後1ヶ月以内', threshold_or_cap:'－', reprint_rule:'－', special_terms:'', active:'true'},
+  {usage_category:'イベント', fee_model:'FLAT', fee_value:'0', fee_label:'無償（イベント頒布・要事前申告）',
+   licensed_uses:'頒布・上演', payment_due:'－', reporting_requirement:'頒布実績を事後報告',
+   report_due:'イベント終了後1ヶ月以内', threshold_or_cap:'－', reprint_rule:'－', special_terms:'営利目的の恒常販売には別区分が適用されます', active:'true'},
+  {usage_category:'その他', fee_model:'RATE', fee_value:'0.10', fee_label:'売上の10％（個別協議）',
+   licensed_uses:'別途協議', payment_due:'個別協議', reporting_requirement:'個別協議',
+   report_due:'個別協議', threshold_or_cap:'個別協議', reprint_rule:'個別協議', special_terms:'内容により事務局と個別に条件を定めます', active:'true'}
 ];
 
 /** シートをスキーマ通りに用意（ヘッダ設定・先頭行固定・既定シート削除）。既存ヘッダは上書きしない。 */
@@ -1500,6 +1618,9 @@ function setup_seedSamples_(){
   }
   if(readRows_(ssOps_(),'Partners').length === 0){
     SAMPLE_PARTNERS_SEED.forEach(p => appendRow_(ssOps_(),'Partners', p));
+  }
+  if(readRows_(ssMaster_(),'Fee_Schedule').length === 0){
+    SAMPLE_FEE_SCHEDULE_SEED.forEach(f => appendRow_(ssMaster_(),'Fee_Schedule', f));
   }
 }
 
