@@ -12,7 +12,7 @@
     --ink:#211E2B;--paper:#F2F1F5;--surface:#FFFFFF;
     --brand:#3D2F6B;--brand2:#6B4FB0;--brass:#A87B2E;--brass-bg:#F4EBD8;
     --ok:#2F7D5B;--ok-bg:#E2F0E9;--warn:#A6342F;--warn-bg:#F3DEDC;
-    --line:#DAD7E2;--soft:#6A6577;--A:#2F7D5B;--B:#3D2F6B;
+    --line:#DAD7E2;--soft:#6A6577;
   }
   *{box-sizing:border-box;}
   body{margin:0;background:var(--paper);color:var(--ink);font-family:"IBM Plex Sans JP",system-ui,sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased;}
@@ -30,7 +30,7 @@
   .hnav button{background:none;border:none;color:#C9C1E0;cursor:pointer;font-size:13px;padding:0;}
   .hnav button:hover{color:#fff;}
 
-  main{max-width:1040px;margin:0 auto;padding:0 22px 90px;}
+  main{max-width:1040px;margin:0 auto;padding:0 22px 120px;}
   .view{display:none;}
   .view.active{display:block;animation:fade .25s ease;}
   @keyframes fade{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}
@@ -63,23 +63,29 @@
   .sheetnote{font-size:11px;color:var(--soft);font-family:"IBM Plex Mono";background:var(--brass-bg);border-radius:6px;padding:7px 11px;display:inline-block;margin-top:10px;}
   .searchbar{display:flex;gap:10px;margin:18px 0 12px;flex-wrap:wrap;}
   .searchbar input{flex:1;min-width:220px;border:1px solid var(--line);border-radius:9px;padding:11px 14px;font-size:14px;font-family:inherit;}
-  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;}
-  .chip{font-size:12px;border:1px solid var(--line);background:var(--surface);border-radius:20px;padding:6px 13px;cursor:pointer;color:var(--soft);font-weight:500;}
-  .chip.on{background:var(--ink);color:#fff;border-color:var(--ink);}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;}
-  .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;cursor:pointer;transition:.15s;display:flex;flex-direction:column;}
-  .card:hover{border-color:var(--brand2);transform:translateY(-2px);box-shadow:0 6px 20px rgba(61,47,107,.08);}
-  .cardtop{height:80px;background:linear-gradient(135deg,var(--brand),var(--ink));display:flex;align-items:flex-end;padding:10px 12px;position:relative;}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;transition:.15s;display:flex;flex-direction:column;}
+  .card.sel{border-color:var(--ok);box-shadow:0 0 0 2px var(--ok-bg);}
+  .cardtop{height:70px;background:linear-gradient(135deg,var(--brand),var(--ink));display:flex;align-items:flex-end;padding:10px 12px;position:relative;}
   .cardtop .cat{font-family:"IBM Plex Mono";font-size:9px;color:#CFC6E6;letter-spacing:.1em;text-transform:uppercase;}
-  .badge{position:absolute;top:10px;right:10px;font-family:"IBM Plex Mono";font-size:9px;font-weight:600;padding:3px 8px;border-radius:20px;}
-  .badge.A{background:var(--ok-bg);color:var(--A);}
-  .badge.B{background:#E7E2F2;color:var(--B);}
   .cardbody{padding:13px 14px 15px;flex:1;display:flex;flex-direction:column;}
   .cardbody h3{font-family:"Zen Kaku Gothic New";font-weight:700;font-size:15.5px;margin:0 0 3px;}
   .cardbody .pub{font-size:11px;color:var(--soft);margin-bottom:7px;}
   .cardbody .wid{font-family:"IBM Plex Mono";font-size:9.5px;color:#A39DB2;margin-bottom:9px;}
-  .cardfoot{display:flex;justify-content:space-between;align-items:center;margin-top:auto;font-size:12px;padding-top:10px;}
-  .fee{font-weight:700;}.go{color:var(--brand2);font-weight:600;}
+  .cardbody .fee{font-weight:700;font-size:12.5px;margin-bottom:10px;}
+  .cardacts{display:flex;gap:8px;margin-top:auto;}
+  .cardacts button{flex:1;border-radius:8px;padding:9px 8px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--brand);}
+  .cardacts .det{background:#F7F6FA;color:var(--soft);flex:0 0 auto;}
+  .cardacts .add{background:var(--brand);color:#fff;border-color:var(--brand);}
+  .cardacts .add.on{background:var(--ok);border-color:var(--ok);}
+
+  /* ===== CART BAR ===== */
+  .cartbar{position:fixed;left:0;right:0;bottom:0;background:var(--ink);color:#fff;z-index:30;transform:translateY(120%);transition:.25s;box-shadow:0 -4px 20px rgba(0,0,0,.2);}
+  .cartbar.show{transform:none;}
+  .cartinner{max-width:1040px;margin:0 auto;padding:13px 22px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;}
+  .cartinner .cnt{font-size:13px;}.cartinner .cnt b{font-family:"Zen Kaku Gothic New";font-size:18px;color:var(--brass);}
+  .cartinner .names{font-size:11px;color:#B9B1D0;}
+  .cartinner button{background:var(--brass);color:#231a07;border:none;border-radius:9px;padding:11px 20px;font-weight:700;font-size:14px;cursor:pointer;font-family:"Zen Kaku Gothic New";}
 
   /* ===== DETAIL ===== */
   .statblock{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;}
@@ -87,19 +93,13 @@
   .sbhead .cat{font-family:"IBM Plex Mono";font-size:10px;color:#CFC6E6;letter-spacing:.12em;text-transform:uppercase;}
   .sbhead h2{font-family:"Zen Kaku Gothic New";font-weight:900;font-size:23px;margin:6px 0 3px;}
   .sbhead .pub{font-size:12px;color:#C9C1E0;}.sbhead .wid{font-family:"IBM Plex Mono";font-size:11px;color:#A99FC4;margin-top:3px;}
-  .sbhead .tbadge{position:absolute;top:18px;right:22px;font-family:"IBM Plex Mono";font-size:10px;font-weight:600;padding:5px 11px;border-radius:20px;}
-  .sbhead .tbadge.A{background:var(--ok-bg);color:var(--A);}.sbhead .tbadge.B{background:#E7E2F2;color:var(--B);}
   .sbrow{display:grid;grid-template-columns:130px 1fr;border-top:1px solid var(--line);}
   .sbk{background:#F7F6FA;padding:12px 16px;font-size:12px;font-weight:600;color:var(--brand);border-right:1px solid var(--line);font-family:"Zen Kaku Gothic New";}
   .sbv{padding:12px 16px;font-size:13px;}
   .tags{display:flex;gap:6px;flex-wrap:wrap;}.tag{font-size:11px;border-radius:5px;padding:2px 8px;}
   .tag.ok{background:var(--ok-bg);color:var(--ok);}.tag.no{background:var(--warn-bg);color:var(--warn);}
-  .timingnote{margin-top:14px;border-radius:10px;padding:13px 15px;font-size:12.5px;}
-  .timingnote.A{background:var(--ok-bg);border-left:4px solid var(--A);}
-  .timingnote.B{background:#EDE9F6;border-left:4px solid var(--B);}
-  .timingnote b{font-family:"Zen Kaku Gothic New";}
 
-  /* ===== STEPPER / WIZARD ===== */
+  /* ===== CONFIRM / CONSENT ===== */
   .stepper{display:flex;gap:6px;margin:22px 0 18px;}
   .step{flex:1;text-align:center;font-size:11px;color:var(--soft);padding-bottom:8px;border-bottom:3px solid var(--line);font-weight:600;}
   .step.on{color:var(--brand);border-color:var(--brand);}
@@ -108,6 +108,11 @@
   .wtitle{font-family:"Zen Kaku Gothic New";font-weight:900;font-size:21px;margin:0 0 4px;display:flex;align-items:center;gap:10px;}
   .draftflag{font-family:"IBM Plex Mono";font-size:9px;font-weight:600;color:var(--brass);background:var(--brass-bg);padding:2px 7px;border-radius:4px;letter-spacing:.04em;}
   .wsub{font-size:13px;color:var(--soft);margin:0 0 16px;}
+  .sellist{list-style:none;padding:0;margin:0 0 6px;}
+  .sellist li{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:8px;}
+  .sellist .nm{font-family:"Zen Kaku Gothic New";font-weight:700;font-size:14px;}
+  .sellist .sub{font-size:11px;color:var(--soft);}
+  .sellist .rm{background:none;border:none;color:var(--warn);font-size:12px;cursor:pointer;}
   .legaltext{font-size:12.5px;color:#332F40;max-height:300px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:15px 16px;background:#FBFAFD;line-height:1.7;}
   .legaltext h4{font-family:"Zen Kaku Gothic New";font-size:13px;margin:14px 0 5px;color:var(--brand);}
   .legaltext h4:first-child{margin-top:0;}
@@ -120,20 +125,14 @@
   .must{font-family:"IBM Plex Mono";font-size:9px;color:var(--warn);font-weight:600;margin-left:6px;}
   .oath{background:var(--brass-bg);border-color:#E4D3A8;}
   .warnnote{font-size:11px;color:var(--warn);margin-top:10px;background:var(--warn-bg);border-radius:7px;padding:9px 11px;}
-  .upload{border:2px dashed var(--line);border-radius:10px;padding:22px;text-align:center;color:var(--soft);font-size:13px;background:#FBFAFD;margin-bottom:4px;}
-  .upload .ic{font-size:22px;}
-  .routebanner{border-radius:10px;padding:13px 15px;margin-bottom:16px;font-size:13px;}
-  .routebanner.A{background:var(--ok-bg);border:1px solid #B4D8C7;}
-  .routebanner.B{background:#EDE9F6;border:1px solid #CFC4EC;}
-  .routebanner .rt{font-family:"Zen Kaku Gothic New";font-weight:700;}
   .navbar{display:flex;justify-content:space-between;gap:12px;margin-top:20px;padding-top:16px;border-top:1px solid var(--line);}
   .next{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:13px 24px;font-size:15px;font-weight:700;cursor:pointer;font-family:"Zen Kaku Gothic New";}
   .next:hover{background:var(--brand2);}
   .next:disabled{background:#C7C3D2;cursor:not-allowed;}
   .prev{background:none;border:1px solid var(--line);border-radius:9px;padding:13px 20px;font-size:14px;cursor:pointer;color:var(--soft);}
-  .gatehint{font-size:11px;color:var(--soft);align-self:center;}
-  .done{text-align:center;padding:40px 20px;}
+  .done{text-align:center;padding:36px 20px;}
   .done .big{font-family:"Zen Kaku Gothic New";font-weight:900;font-size:22px;color:var(--ok);margin-bottom:10px;}
+  .refbox{display:inline-block;background:var(--brass-bg);border:1px solid #E4D3A8;border-radius:9px;padding:12px 18px;margin:12px 0;font-family:"IBM Plex Mono";font-size:16px;font-weight:600;color:var(--brand);}
 
   footer{border-top:1px solid var(--line);background:var(--surface);}
   .fwrap{max-width:1040px;margin:0 auto;padding:20px 22px;font-size:11px;color:var(--soft);display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;}
@@ -162,15 +161,15 @@
       <h1>TRPGの二次創作を、<br>正しく・安心して頒布するために。</h1>
       <p>SPLL（スモールパブリッシャーリミテッドライセンス）は、登録されたTRPGタイトルの二次創作を有料で頒布する際のライセンス制度です。原作の権利者へ適正に還元しながら、創作活動を続けられる仕組みを目指しています。</p>
       <div class="btns">
-        <button class="pbtn" onclick="show('search')">作品をさがして申し込む →</button>
+        <button class="pbtn" onclick="show('search')">原作をさがして申し込む →</button>
         <button class="pbtn ghost" onclick="document.getElementById('guideline').scrollIntoView({behavior:'smooth'})">ガイドラインについて</button>
       </div>
     </div></div>
 
     <div class="cards3">
-      <div class="info"><div class="ic">L</div><h3>SPLLとは</h3><p>一定の条件を満たす有料の二次創作物について、ライセンスの申込みと許諾料のお支払いをお願いする制度です。お支払いから事務手数料を除いた額が原著作者へ還元されます。</p></div>
-      <div class="info"><div class="ic">P</div><h3>パートナーシップ</h3><p>TRPGライツ事務局は、複数のパブリッシャと連携して運営されています。各タイトルの権利者がパートナーとして参加し、二次創作の許諾と還元を支えています。</p></div>
-      <div class="info"><div class="ic">G</div><h3>申込みの流れ</h3><p>対象作品を選ぶ → 個人情報の取扱いに同意 → 利用規約（ライセンス契約条件）に同意 → 申込み。作品により、作品審査のタイミング（お申込み時または締結後）が異なります。</p></div>
+      <div class="info"><div class="ic">1</div><h3>原作を複数えらぶ</h3><p>ひとつの二次創作物が複数の原作を利用する場合も、利用する原作をまとめて選択し、1つの申込にできます。</p></div>
+      <div class="info"><div class="ic">2</div><h3>申込・契約締結</h3><p>選択内容を確認し、クラウドサインフォームで申込者情報・同意を入力。CloudSignで電子契約を締結します。</p></div>
+      <div class="info"><div class="ic">3</div><h3>作品提出・審査</h3><p>締結後、専用ページから作品を提出。AI一次審査と人手審査を経て、認証（クレジット表記）を発行します。</p></div>
     </div>
 
     <div class="homeband" id="guideline">
@@ -179,7 +178,7 @@
       <p class="mono" style="font-size:11px;color:var(--soft);">※ 本ページは設計検討用のモックアップです。ガイドライン本文・参加パブリッシャの正式な記載は確定前です。</p>
       <div class="partners">
         <span class="ptag">参加パブリッシャ（例）</span>
-        <span class="ptag">アークライト</span><span class="ptag">KADOKAWA</span><span class="ptag">グループSNE</span><span class="ptag">新紀元社</span><span class="ptag">F.E.A.R.</span><span class="ptag">冒険支援</span>
+        <span class="ptag">アークライト</span><span class="ptag">KADOKAWA</span><span class="ptag">グループSNE</span><span class="ptag">新紀元社</span><span class="ptag">F.E.A.R.</span><span class="ptag">冒険企画局</span>
       </div>
     </div>
   </section>
@@ -187,73 +186,90 @@
   <!-- ============ SEARCH ============ -->
   <section class="view" id="v-search">
     <div class="shead">
-      <span class="eyebrow">作品をさがす</span>
-      <h1>対象作品から選ぶ</h1>
-      <div class="sheetnote">作品データは作品マスタ（スプレッドシート）から取得 ／ 下記はサンプル表示</div>
+      <span class="eyebrow">原作をさがす</span>
+      <h1>利用する原作を選ぶ（複数選択可）</h1>
+      <div class="sheetnote">原作データは原作マスタ（スプレッドシート）から取得 ／ 下記はサンプル表示</div>
     </div>
-    <div class="searchbar"><input id="q" placeholder="作品名・パブリッシャで検索" oninput="renderGrid()"></div>
+    <div class="searchbar"><input id="q" placeholder="原作名・パブリッシャで検索" oninput="renderGrid()"></div>
     <div class="grid" id="grid"></div>
   </section>
 
   <!-- ============ DETAIL ============ -->
   <section class="view" id="v-detail">
-    <button class="back" onclick="show('search')">← 作品一覧へ戻る</button>
+    <button class="back" onclick="show('search')">← 原作一覧へ戻る</button>
     <div class="statblock" id="detail"></div>
-    <button class="next" id="toApply" style="margin-top:20px;">この作品で申込みに進む →</button>
+    <button class="next" id="toAdd" style="margin-top:20px;">この原作を利用原作に追加 →</button>
   </section>
 
-  <!-- ============ WIZARD (consent / terms / apply) ============ -->
-  <section class="view" id="v-wizard">
-    <button class="back" onclick="showDetail(current)">← 作品詳細へ戻る</button>
+  <!-- ============ CONFIRM / CONSENT ============ -->
+  <section class="view" id="v-apply">
+    <button class="back" onclick="show('search')">← 原作をさがすに戻る</button>
     <div class="stepper" id="stepper">
-      <div class="step on" data-s="0"><span class="n">1</span> 個人情報の同意</div>
-      <div class="step" data-s="1"><span class="n">2</span> 規約の同意</div>
-      <div class="step" data-s="2"><span class="n">3</span> 申込み</div>
+      <div class="step on" data-s="0"><span class="n">1</span> 選択内容の確認</div>
+      <div class="step" data-s="1"><span class="n">2</span> 個人情報の同意</div>
+      <div class="step" data-s="2"><span class="n">3</span> 規約の同意</div>
+      <div class="step" data-s="3"><span class="n">4</span> 申込</div>
     </div>
-    <div class="routebanner" id="routeBanner"></div>
+
+    <!-- step 0: confirm selection -->
+    <div class="wstep" id="ws0">
+      <h2 class="wtitle">選択中の原作</h2>
+      <p class="wsub">これらの原作を1つの契約で包括的に利用許諾します。追加・削除は「原作をさがす」から行えます。</p>
+      <ul class="sellist" id="selList"></ul>
+      <div class="navbar"><button class="prev" onclick="show('search')">原作を追加する</button><button class="next" id="n0" onclick="goStep(1)">この内容で申込へ進む →</button></div>
+    </div>
 
     <!-- step 1: privacy -->
-    <div class="wstep" id="ws0">
+    <div class="wstep" id="ws1" style="display:none;">
       <h2 class="wtitle">個人情報の取得について <span class="draftflag">DRAFT・法務確定前</span></h2>
       <p class="wsub">SPLLの利用申込みにあたり、以下のとおり個人情報を取得・利用します。</p>
       <div class="legaltext" id="privacyText"></div>
-      <label class="check"><input type="checkbox" class="g0"><span class="ct">上記の個人情報の取扱いに同意します<span class="must">必須</span></span></label>
-      <div class="navbar"><button class="prev" onclick="show('detail')">戻る</button><button class="next" id="n0" disabled onclick="goStep(1)">同意して次へ →</button></div>
-    </div>
-
-    <!-- step 2: terms -->
-    <div class="wstep" id="ws1" style="display:none;">
-      <h2 class="wtitle">利用規約（ライセンス契約条件） <span class="draftflag">DRAFT・法務確定前</span></h2>
-      <p class="wsub" id="termsSub"></p>
-      <div class="legaltext" id="termsText"></div>
-      <div class="scrollhint">▲ 全文をスクロールしてご確認ください</div>
-      <label class="check"><input type="checkbox" class="g1"><span class="ct" id="termsCheckLabel"></span></label>
+      <label class="check"><input type="checkbox" class="g1"><span class="ct">上記の個人情報の取扱いに同意します<span class="must">必須</span></span></label>
       <div class="navbar"><button class="prev" onclick="goStep(0)">戻る</button><button class="next" id="n1" disabled onclick="goStep(2)">同意して次へ →</button></div>
     </div>
 
-    <!-- step 3: apply -->
+    <!-- step 2: terms -->
     <div class="wstep" id="ws2" style="display:none;">
+      <h2 class="wtitle">利用規約（ライセンス契約条件） <span class="draftflag">DRAFT・法務確定前</span></h2>
+      <p class="wsub">お申込みにより、選択した原作を対象として、この条件でCloudSignにて契約を締結します。</p>
+      <div class="legaltext" id="termsText"></div>
+      <div class="scrollhint">▲ 全文をスクロールしてご確認ください</div>
+      <label class="check"><input type="checkbox" class="g2"><span class="ct">上記に同意し、これを内容とする契約をCloudSignで締結することに同意します<span class="must">必須</span></span></label>
+      <div class="navbar"><button class="prev" onclick="goStep(1)">戻る</button><button class="next" id="n2" disabled onclick="goStep(3)">同意して次へ →</button></div>
+    </div>
+
+    <!-- step 3: oath + apply -->
+    <div class="wstep" id="ws3" style="display:none;">
       <h2 class="wtitle">誓約・表明とお申込み</h2>
       <p class="wsub">最後に、以下を確認のうえお申込みください。</p>
-      <label class="check oath"><input type="checkbox" class="g2"><span class="ct">私は満18歳以上です。未成年の場合は、法定代理人の同意を得ています。<span class="must">必須</span></span></label>
-      <label class="check oath"><input type="checkbox" class="g2"><span class="ct">私は暴力団等の反社会的勢力に該当せず、これらと関係を有しません。<span class="must">必須</span></span></label>
-      <label class="check oath"><input type="checkbox" class="g2"><span class="ct">申込内容および提出作品に関する記載は真実であり、第三者の権利を侵害しません。<span class="must">必須</span></span></label>
+      <label class="check oath"><input type="checkbox" class="g3"><span class="ct">私は満18歳以上です。未成年の場合は、法定代理人の同意を得ています。<span class="must">必須</span></span></label>
+      <label class="check oath"><input type="checkbox" class="g3"><span class="ct">私は暴力団等の反社会的勢力に該当せず、これらと関係を有しません。<span class="must">必須</span></span></label>
+      <label class="check oath"><input type="checkbox" class="g3"><span class="ct">申込内容および提出作品に関する記載は真実であり、第三者の権利を侵害しません。<span class="must">必須</span></span></label>
       <div class="warnnote">これらの表明に虚偽があった場合、利用許諾の取消し、契約の解除その他の措置の対象となることがあります。</div>
-
-      <div id="uploadSec" style="margin-top:16px;display:none;">
-        <div class="upload"><div class="ic">⤴</div>PDF・PNG・JPEG（1ファイル20MBまで）をアップロード<br><small>提出作品はAI（Vertex AI Gemini）による一次審査に付されます。</small></div>
-        <label class="check"><input type="checkbox" class="g2 gfile"><span class="ct">提出作品がAIによる一次審査に付されることに同意します<span class="must">必須</span></span></label>
-      </div>
-
-      <div class="navbar"><button class="prev" onclick="goStep(1)">戻る</button><button class="next" id="submit" disabled>申込みを送信する →</button></div>
+      <div class="navbar"><button class="prev" onclick="goStep(2)">戻る</button><button class="next" id="submit" disabled>申込を作成してクラウドサインへ進む →</button></div>
     </div>
 
     <!-- done -->
     <div class="wstep" id="wsDone" style="display:none;">
-      <div class="done"><div class="big">✓ お申込みを受け付けました</div><p id="doneMsg" style="color:var(--soft);font-size:13px;"></p><button class="next" onclick="show('home')" style="margin-top:14px;">ホームへ戻る</button></div>
+      <div class="done">
+        <div class="big">✓ お申込みを作成しました</div>
+        <p style="color:var(--soft);font-size:13px;">申込参照番号（application_ref）</p>
+        <div class="refbox mono" id="refBox">—</div>
+        <p id="doneMsg" style="color:var(--soft);font-size:13px;max-width:52ch;margin:0 auto;"></p>
+        <div style="margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+          <button class="next" id="toForm">クラウドサインフォームへ進む →</button>
+          <button class="prev" onclick="resetAll()">最初に戻る</button>
+        </div>
+      </div>
     </div>
   </section>
 </main>
+
+<!-- cart bar -->
+<div class="cartbar" id="cartbar"><div class="cartinner">
+  <div><div class="cnt">選択中の原作 <b id="cartCnt">0</b> 件</div><div class="names" id="cartNames"></div></div>
+  <button onclick="openApply()">選択内容を確認して申込へ →</button>
+</div></div>
 
 <footer><div class="fwrap">
   <span>SPLL 利用申込窓口 ／ TRPGライツ事務局（株式会社アークライト）</span>
@@ -261,163 +277,205 @@
 </div></footer>
 
 <script>
-// 作品マスタ（スプレッドシート）の1行＝1作品。本番ではGAS①の api_listWorks() がJSONで返す。
-// スタンドアロン（google.script.run 不在）時は下記サンプルを使用する。
+// 原作マスタ（スプレッドシート）の1行＝1原作。本番ではGAS① の api_listWorks() がJSONで返す。
 const SAMPLE_WORKS = [
-  { id:"WRK-ARK00012", name:"新クトゥルフ神話TRPG", pub:"アークライト／KADOKAWA", cat:"TRPG / ルールブック", timing:"B",
+  { id:"WRK-ARK00012", name:"新クトゥルフ神話TRPG", pub:"アークライト／KADOKAWA", cat:"TRPG / ルールブック",
     fee:"電子書籍：売上の10％", media:["書籍","電子書籍","商品販売"],
     ok:["世界観・神話設定","シナリオ"], no:["公式イラスト流用","ルールデータ転載"],
-    credit:"指定のシリーズ権利表記を記載", policy:"PATROL_ONLY（契約後審査）" },
-  { id:"WRK-SNE00031", name:"ソード・ワールド2.5", pub:"グループSNE／KADOKAWA", cat:"TRPG / ルールブック", timing:"B",
+    credit:"指定のシリーズ権利表記を記載", policy:"契約後審査" },
+  { id:"WRK-SNE00031", name:"ソード・ワールド2.5", pub:"グループSNE／KADOKAWA", cat:"TRPG / ルールブック",
     fee:"書籍：16,500円／作品", media:["書籍","電子書籍"],
     ok:["世界観設定","モンスター名称"], no:["データ表の転載","公式イラスト"],
-    credit:"指定の権利表記を記載", policy:"PATROL_ONLY（契約後審査）" },
-  { id:"WRK-FEAR0007", name:"ダブルクロス The 3rd Edition", pub:"F.E.A.R.／KADOKAWA", cat:"TRPG / ルールブック", timing:"B",
+    credit:"指定の権利表記を記載", policy:"契約後審査" },
+  { id:"WRK-FEAR0007", name:"ダブルクロス The 3rd Edition", pub:"F.E.A.R.／KADOKAWA", cat:"TRPG / ルールブック",
     fee:"電子書籍：売上の10％", media:["電子書籍","サブスクリプション"],
     ok:["世界観設定","シーン制メカニクス"], no:["公式キャラクター造形"],
-    credit:"指定の権利表記を記載", policy:"PATROL_ONLY（契約後審査）" },
-  { id:"WRK-ARK00045", name:"光砕のリヴァルチャー", pub:"どらこにあん／アークライト", cat:"TRPG / ルールブック", timing:"A",
+    credit:"指定の権利表記を記載", policy:"契約後審査" },
+  { id:"WRK-ARK00045", name:"光砕のリヴァルチャー", pub:"どらこにあん／アークライト", cat:"TRPG / ルールブック",
     fee:"書籍：16,500円／作品", media:["書籍","電子書籍","商品販売"],
     ok:["世界観設定","シナリオ","キャラクター名称"], no:["公式イラスト流用"],
-    credit:"指定の権利表記を記載", policy:"PRE_CONTRACT（契約前審査）" },
-  { id:"WRK-ARK00046", name:"復讐執行TRPG 瞳逸らさぬイリスベイン", pub:"どらこにあん／アークライト", cat:"TRPG / ルールブック", timing:"A",
-    fee:"商品販売：16,500円／商品", media:["商品販売","上演活動"],
-    ok:["世界観設定","キャラクター名称"], no:["公式コンポーネント画像"],
-    credit:"指定の権利表記を記載", policy:"PRE_CONTRACT（契約前審査）" },
-  { id:"WRK-BKK00019", name:"インセイン", pub:"冒険企画局", cat:"TRPG / ルールブック", timing:"B",
+    credit:"指定の権利表記を記載", policy:"契約後審査" },
+  { id:"WRK-BKK00019", name:"インセイン", pub:"冒険企画局", cat:"TRPG / ルールブック",
     fee:"電子書籍：売上の10％", media:["電子書籍"],
     ok:["世界観設定","ハンドアウト形式"], no:["シナリオデータ転載"],
-    credit:"指定の権利表記を記載", policy:"PATROL_ONLY（契約後審査）" },
+    credit:"指定の権利表記を記載", policy:"契約後審査" },
 ];
 
 let WORKS = SAMPLE_WORKS;
-let current=null, filter="all", step=0;
+let cart = [];         // selected work ids
+let current = null;    // detail view work id
+let step = 0;
 
-/** GAS① の api_listWorks() で作品を取得。スタンドアロン時はサンプルにフォールバック。 */
+const hasGas = (typeof google!=="undefined" && google.script && google.script.run);
+
+/** GAS① の api_listWorks() で原作を取得。スタンドアロン時はサンプルにフォールバック。 */
 function loadWorks(){
-  if(typeof google!=="undefined" && google.script && google.script.run){
+  if(hasGas){
     google.script.run
       .withSuccessHandler(ws=>{ if(ws && ws.length) WORKS=ws; renderGrid(); })
       .withFailureHandler(()=>renderGrid())
       .api_listWorks();
-  } else {
-    renderGrid();
-  }
+  } else { renderGrid(); }
 }
+
+function inCart(id){ return cart.indexOf(id)>=0; }
+function workById(id){ return WORKS.find(w=>w.id===id); }
 
 function renderGrid(){
   const q=(document.getElementById("q").value||"").trim();
   const g=document.getElementById("grid"); g.innerHTML="";
-  WORKS.filter(w=>(filter==="all"||w.timing===filter) && (!q||(w.name+w.pub).includes(q))).forEach(w=>{
-    const el=document.createElement("div"); el.className="card"; el.onclick=()=>showDetail(w.id);
-    el.innerHTML=`<div class="cardtop"><span class="cat">${w.cat}</span></div>
-      <div class="cardbody"><h3>${w.name}</h3><div class="pub">${w.pub}</div><div class="wid mono">${w.id}</div>
-      <div class="cardfoot"><span class="fee">${w.fee}</span><span class="go">詳細・申込 →</span></div></div>`;
+  WORKS.filter(w=>!q||(w.name+w.pub+(w.cat||"")).includes(q)).forEach(w=>{
+    const on=inCart(w.id);
+    const el=document.createElement("div"); el.className="card"+(on?" sel":"");
+    el.innerHTML=`<div class="cardtop"><span class="cat">${esc(w.cat||"")}</span></div>
+      <div class="cardbody"><h3>${esc(w.name)}</h3><div class="pub">${esc(w.pub||"")}</div><div class="wid mono">${esc(w.id)}</div>
+      <div class="fee">${esc(w.fee||"")}</div>
+      <div class="cardacts">
+        <button class="det" onclick="showDetail('${w.id}')">詳細</button>
+        <button class="add${on?" on":""}" onclick="toggleCart('${w.id}')">${on?"✓ 追加済み":"＋ 利用原作に追加"}</button>
+      </div></div>`;
     g.appendChild(el);
   });
-  if(!g.children.length) g.innerHTML='<p style="color:var(--soft);font-size:13px;">該当する作品がありません。</p>';
+  if(!g.children.length) g.innerHTML='<p style="color:var(--soft);font-size:13px;">該当する原作がありません。</p>';
+  renderCart();
+}
+
+function toggleCart(id){
+  const i=cart.indexOf(id);
+  if(i>=0) cart.splice(i,1); else cart.push(id);
+  renderGrid();
+}
+
+function renderCart(){
+  document.getElementById("cartCnt").textContent=cart.length;
+  document.getElementById("cartNames").textContent=cart.map(id=>{const w=workById(id);return w?w.name:id;}).join("、");
+  document.getElementById("cartbar").classList.toggle("show", cart.length>0);
 }
 
 function showDetail(id){
-  current=id; const w=WORKS.find(x=>x.id===id); const isA=w.timing==="A";
+  current=id; const w=workById(id); const on=inCart(id);
   document.getElementById("detail").innerHTML=`
-    <div class="sbhead">
-      <div class="cat">${w.cat}</div><h2>${w.name}</h2><div class="pub">${w.pub}</div><div class="wid">${w.id}</div></div>
-    <div class="sbrow"><div class="sbk">許諾要素</div><div class="sbv"><div class="tags">${w.ok.map(t=>`<span class="tag ok">${t}</span>`).join("")}</div></div></div>
-    <div class="sbrow"><div class="sbk">禁止要素</div><div class="sbv"><div class="tags">${w.no.map(t=>`<span class="tag no">${t}</span>`).join("")}</div></div></div>
-    <div class="sbrow"><div class="sbk">対象媒体</div><div class="sbv">${w.media.join("、")}</div></div>
-    <div class="sbrow"><div class="sbk">利用許諾料</div><div class="sbv"><b>${w.fee}</b></div></div>
-    <div class="sbrow"><div class="sbk">クレジット表記</div><div class="sbv">${w.credit}</div></div>
-    <div class="sbrow"><div class="sbk">審査ポリシー</div><div class="sbv mono" style="font-size:12px;">${w.policy}</div></div>`;
-  const note=isA
-    ?`<div class="timingnote A"><b>お申込みの流れ：</b> お申込み時に作品を提出いただき、内容を確認のうえ、問題がなければ契約のご案内をお送りします。`
-    :`<div class="timingnote B"><b>お申込みの流れ：</b> お申込み後にご契約いただき、その後に作品提出のご案内をお送りします。`;
-  document.getElementById("detail").insertAdjacentHTML("beforeend",note+"</div>");
-  document.getElementById("toApply").onclick=()=>startWizard(id);
+    <div class="sbhead"><div class="cat">${esc(w.cat||"")}</div><h2>${esc(w.name)}</h2><div class="pub">${esc(w.pub||"")}</div><div class="wid">${esc(w.id)}</div></div>
+    <div class="sbrow"><div class="sbk">許諾要素</div><div class="sbv"><div class="tags">${(w.ok||[]).map(t=>`<span class="tag ok">${esc(t)}</span>`).join("")}</div></div></div>
+    <div class="sbrow"><div class="sbk">禁止要素</div><div class="sbv"><div class="tags">${(w.no||[]).map(t=>`<span class="tag no">${esc(t)}</span>`).join("")}</div></div></div>
+    <div class="sbrow"><div class="sbk">対象媒体</div><div class="sbv">${esc((w.media||[]).join("、"))}</div></div>
+    <div class="sbrow"><div class="sbk">利用許諾料</div><div class="sbv"><b>${esc(w.fee||"")}</b></div></div>
+    <div class="sbrow"><div class="sbk">クレジット表記</div><div class="sbv">${esc(w.credit||"")}</div></div>
+    <div class="sbrow"><div class="sbk">審査ポリシー</div><div class="sbv mono" style="font-size:12px;">${esc(w.policy||"")}</div></div>`;
+  const btn=document.getElementById("toAdd");
+  btn.textContent=on?"✓ 追加済み（原作一覧へ）":"この原作を利用原作に追加 →";
+  btn.onclick=()=>{ if(!inCart(id)) cart.push(id); show("search"); };
   show("detail");
 }
 
-// 同意文・規約は管理コンソール（admin）から編集可能。GAS上では api_getLegalTexts() で取得し、
-// 取得できない場合は下記の既定文にフォールバックする。規約は {{token}} を作品ごとに差込む。
+// ---- consent texts (editable via admin) ----
 const DEFAULT_PRIVACY=`
-<h4>1. 取得する情報</h4><ol><li>氏名、連絡先（メールアドレス）</li><li>申込作品・利用態様、提出作品データ</li><li>契約に至る場合は、住所・振込先その他の契約履行に必要な情報</li></ol>
+<h4>1. 取得する情報</h4><ol><li>氏名、連絡先（メールアドレス）</li><li>申込原作・利用態様、提出作品データ</li><li>契約に至る場合は、住所・振込先その他の契約履行に必要な情報</li></ol>
 <h4>2. 利用目的</h4><ol><li>SPLL利用許諾の審査・契約の締結および管理</li><li>提出作品の適合性審査（AIによる一次審査を含む）</li><li>利用許諾料・配分の計算および清算</li><li>お問い合わせ対応・連絡</li><li>法令遵守および権利保護</li></ol>
 <h4>3. 委託・第三者提供</h4><ol><li>契約締結のため電子契約サービス（CloudSign）に取扱いを委託します。</li><li>データの保管・処理のためGoogle Workspace／Google Cloud（Vertex AI Geminiによる作品審査を含む）に取扱いを委託します。</li><li>法令に基づく場合を除き、ご本人の同意なく第三者へ提供しません。</li></ol>
-<h4>4. 保有期間</h4><ol><li>契約に至らなかった申込情報・提出作品データは、取得から1年で削除します。</li><li>契約に至った場合は、契約期間および関係法令の定める期間、保有します。</li></ol>
+<h4>4. 保有期間</h4><ol><li>契約に至らなかった申込情報は、取得から1年で削除します。</li><li>契約に至った場合は、契約期間および関係法令の定める期間、保有します。</li></ol>
 <h4>5. 開示等の請求</h4><ol><li>保有個人データの開示・訂正・利用停止等のご請求は、下記窓口で受け付けます。［窓口記載・法務確定前］</li></ol>`;
 
 const DEFAULT_TERMS_TEMPLATE=`
-<h4>第1条（許諾の範囲）</h4><ol><li>本作品の許諾要素（{{ok}}）について、対象媒体（{{media}}）での二次創作・頒布を許諾します。</li><li>禁止要素（{{no}}）は利用できません。</li></ol>
-<h4>第2条（利用許諾料）</h4><ol><li>利用許諾料は {{fee}} とします。免除・追加契約の条件は別表によります。</li></ol>
-<h4>第3条（クレジット表記）</h4><ol><li>{{credit}}。「公式」「公認」等と誤認させる表示は行いません。</li></ol>
+<h4>第1条（許諾の範囲）</h4><ol><li>本契約に基づく利用許諾の対象原作は、申込時に選択した原作一覧のとおりとします。</li><li>各原作の許諾要素・対象媒体の範囲で二次創作・頒布を許諾し、禁止要素は利用できません。</li></ol>
+<h4>第2条（利用許諾料）</h4><ol><li>利用許諾料は原作一覧記載の条件によります。免除・追加契約の条件は別表によります。</li></ol>
+<h4>第3条（クレジット表記）</h4><ol><li>各原作の指定するクレジットを表記します。「公式」「公認」等と誤認させる表示は行いません。</li></ol>
 <h4>第4条（作品審査・是正）</h4><ol><li>提出作品はAI（Vertex AI Gemini）による一次審査に付されます。AIの判定は最終決定ではなく、当社・事務局の人的判断と区別されます。</li><li>適合性に疑義がある場合、是正の要求・公開停止・許諾の取消し等を行うことがあります。</li></ol>
 <h4>第5条（非承認・非保証）</h4><ol><li>審査の通過、または一定期間の無指摘は、当社の承認・適法性保証・権利非侵害保証を意味しません。</li></ol>
 <h4>第6条（解除）</h4><ol><li>表明の虚偽、本規約違反その他の事由があるときは、本許諾を解除できます。［解除の遡及／非遡及は別途規定・法務確定前］</li></ol>
 <h4>第7条（準拠法・管轄）</h4><ol><li>日本法に準拠し、当社所在地を管轄する裁判所を専属的合意管轄とします。</li></ol>`;
 
 let LEGAL = { privacy: DEFAULT_PRIVACY, termsTemplate: DEFAULT_TERMS_TEMPLATE };
+let APPLY = { formUrl:"", refParam:"application_ref" };
 
-/** 管理コンソールで編集された同意文・規約を取得（失敗時は既定文のまま） */
 function loadLegal(){
-  if(typeof google!=="undefined" && google.script && google.script.run){
+  if(hasGas){
     google.script.run.withSuccessHandler(l=>{
-      if(l && l.privacy) LEGAL.privacy = l.privacy;
-      if(l && l.termsTemplate) LEGAL.termsTemplate = l.termsTemplate;
+      if(l && l.privacy) LEGAL.privacy=l.privacy;
+      if(l && l.termsTemplate) LEGAL.termsTemplate=l.termsTemplate;
     }).api_getLegalTexts();
+    google.script.run.withSuccessHandler(c=>{ if(c){ APPLY.formUrl=c.formUrl||""; APPLY.refParam=c.refParam||"application_ref"; } }).api_getApplyConfig();
   }
 }
 
-/** 規約テンプレートに作品データを差込んでHTML化 */
-function termsHTML(w){
-  return LEGAL.termsTemplate
-    .replace(/{{name}}/g, w.name)
-    .replace(/{{pub}}/g, w.pub)
-    .replace(/{{ok}}/g, w.ok.join("、"))
-    .replace(/{{no}}/g, w.no.join("、"))
-    .replace(/{{media}}/g, w.media.join("、"))
-    .replace(/{{fee}}/g, w.fee)
-    .replace(/{{credit}}/g, w.credit);
+/** 選択原作一覧を規約末尾に差込んだHTMLを生成 */
+function termsHTML(){
+  const list = cart.map((id,i)=>{const w=workById(id); return `<li>${esc(w.name)}（${esc(w.pub||"")}）／ ${esc(w.fee||"")}</li>`;}).join("");
+  const appendix = `<h4>別表：対象原作一覧</h4><ol>${list}</ol>`;
+  return (LEGAL.termsTemplate||"") + appendix;
 }
 
-function startWizard(id){
-  current=id; step=0;
-  const w=WORKS.find(x=>x.id===id); const isA=w.timing==="A";
+function openApply(){
+  if(!cart.length){ show("search"); return; }
+  step=0; renderSelList();
   document.getElementById("privacyText").innerHTML=LEGAL.privacy;
-  document.getElementById("termsText").innerHTML=termsHTML(w);
-  const rb=document.getElementById("routeBanner"); rb.className="routebanner "+w.timing;
-  rb.innerHTML=isA
-    ?`<div class="rt">${w.name}</div>お申込み時に作品を提出いただき、内容確認のうえ、問題がなければ契約のご案内をお送りします。`
-    :`<div class="rt">${w.name}</div>お申込み後にご契約いただき、その後に作品提出のご案内をお送りします。`;
-  document.getElementById("termsSub").textContent=isA?"審査通過後に締結する契約の条件です。":"お申込みにより、この条件でCloudSignにて契約を締結します。";
-  document.getElementById("termsCheckLabel").innerHTML=isA
-    ?`上記の利用規約（ライセンス契約条件）に同意します<span class="must">必須</span>`
-    :`上記に同意し、これを内容とする契約をCloudSignで締結することに同意します<span class="must">必須</span>`;
-  document.getElementById("uploadSec").style.display=isA?"block":"none";
-  document.querySelectorAll(".g0,.g1,.g2").forEach(c=>c.checked=false);
-  document.getElementById("submit").onclick=()=>{
-    document.getElementById("doneMsg").innerHTML=isA
-      ?"AI審査の結果、通過した場合のみ契約用フォームをお送りします。<br><span class='mono' style='font-size:11px'>（実装：formrun／GASへ連携）</span>"
-      :"続けてCloudSignでの契約締結にお進みください。<br><span class='mono' style='font-size:11px'>（実装：formrun→CloudSignへ連携）</span>";
-    showWStep("Done");
-  };
-  goStep(0); show("wizard");
+  document.getElementById("termsText").innerHTML=termsHTML();
+  document.querySelectorAll(".g1,.g2,.g3").forEach(c=>c.checked=false);
+  goStep(0); show("apply");
 }
 
-function showWStep(s){["0","1","2","Done"].forEach(x=>document.getElementById("ws"+x).style.display="none");document.getElementById("ws"+s).style.display="block";window.scrollTo(0,0);}
+function renderSelList(){
+  const ul=document.getElementById("selList"); ul.innerHTML="";
+  cart.forEach(id=>{const w=workById(id);
+    const li=document.createElement("li");
+    li.innerHTML=`<div><div class="nm">${esc(w.name)}</div><div class="sub">${esc(w.pub||"")} ／ ${esc(w.fee||"")}</div></div>
+      <button class="rm" onclick="removeFromCart('${id}')">削除</button>`;
+    ul.appendChild(li);
+  });
+  document.getElementById("n0").disabled = cart.length===0;
+}
+function removeFromCart(id){ const i=cart.indexOf(id); if(i>=0)cart.splice(i,1); renderCart(); if(!cart.length){ show("search"); return;} renderSelList(); document.getElementById("termsText").innerHTML=termsHTML(); }
+
+function showWStep(s){["0","1","2","3","Done"].forEach(x=>document.getElementById("ws"+x).style.display="none");document.getElementById("ws"+s).style.display="block";window.scrollTo(0,0);}
 function goStep(s){
   step=s; showWStep(String(s));
   document.querySelectorAll("#stepper .step").forEach((el,i)=>{el.classList.toggle("on",i===s);el.classList.toggle("done",i<s);});
   updateGates();
 }
 function updateGates(){
-  document.getElementById("n0").disabled=!document.querySelector(".g0").checked;
   document.getElementById("n1").disabled=!document.querySelector(".g1").checked;
-  const g2=[...document.querySelectorAll(".g2")].filter(c=>!c.classList.contains("gfile")||document.getElementById("uploadSec").style.display!=="none");
-  document.getElementById("submit").disabled=!g2.every(c=>c.checked);
+  document.getElementById("n2").disabled=!document.querySelector(".g2").checked;
+  document.getElementById("submit").disabled=![...document.querySelectorAll(".g3")].every(c=>c.checked);
 }
+
+function submitApplication(){
+  const btn=document.getElementById("submit"); btn.disabled=true; btn.textContent="申込を作成中…";
+  const ids=cart.slice();
+  if(hasGas){
+    google.script.run
+      .withSuccessHandler(res=>onCreated(res))
+      .withFailureHandler(err=>{ btn.disabled=false; btn.textContent="申込を作成してクラウドサインへ進む →"; alert("申込の作成に失敗しました：\n"+(err&&err.message||err)); })
+      .web_createApplication(ids);
+  } else {
+    // standalone mock
+    const ym=new Date(); const mm=(""+ym.getFullYear()+String(ym.getMonth()+1).padStart(2,"0")).slice(2);
+    onCreated({ application_id:"APP-mock", application_ref:"REF-"+mm+"-"+String(Math.floor(Math.random()*9000)+1000) });
+  }
+}
+function onCreated(res){
+  const ref=(res&&res.application_ref)||"—";
+  document.getElementById("refBox").textContent=ref;
+  document.getElementById("doneMsg").innerHTML=
+    "続けてクラウドサインフォームで申込者情報・同意を入力し、CloudSignで契約を締結してください。<br>この参照番号（application_ref）で申込と契約が紐付きます。控えとして保管してください。";
+  const toForm=document.getElementById("toForm");
+  const base=APPLY.formUrl;
+  if(base){
+    const sep=base.indexOf("?")>=0?"&":"?";
+    toForm.onclick=()=>{ window.open(base+sep+encodeURIComponent(APPLY.refParam)+"="+encodeURIComponent(ref),"_blank"); };
+    toForm.style.display="";
+  } else {
+    toForm.style.display="none";
+    document.getElementById("doneMsg").innerHTML+="<br><span class='mono' style='font-size:11px'>（クラウドサインフォームURLは管理コンソール「設定」で登録します）</span>";
+  }
+  showWStep("Done");
+}
+
+function resetAll(){ cart=[]; renderCart(); show("home"); }
 function show(v){document.querySelectorAll(".view").forEach(x=>x.classList.remove("active"));document.getElementById("v-"+v).classList.add("active");window.scrollTo(0,0);}
-document.addEventListener("change",e=>{if(/g0|g1|g2/.test(e.target.className))updateGates();});
-document.querySelectorAll(".chip").forEach(c=>c.onclick=()=>{document.querySelectorAll(".chip").forEach(x=>x.classList.remove("on"));c.classList.add("on");filter=c.dataset.f;renderGrid();});
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));}
+
+document.addEventListener("change",e=>{if(/g1|g2|g3/.test(e.target.className))updateGates();});
+document.getElementById("submit").onclick=submitApplication;
 loadLegal();
 loadWorks();
 </script>

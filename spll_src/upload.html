@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPLL 作品提出</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@500;700;900&family=IBM+Plex+Sans+JP:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root{--ink:#211E2B;--paper:#F2F1F5;--surface:#fff;--brand:#3D2F6B;--brand2:#6B4FB0;--brass:#A87B2E;--brass-bg:#F4EBD8;--ok:#2F7D5B;--ok-bg:#E2F0E9;--warn:#A6342F;--warn-bg:#F3DEDC;--line:#DAD7E2;--soft:#6A6577;}
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:"IBM Plex Sans JP",system-ui,sans-serif;line-height:1.6;}
+  .mono{font-family:"IBM Plex Mono",monospace;}
+  header{background:var(--ink);color:#EDEAF4;border-bottom:3px solid var(--brass);}
+  .hwrap{max-width:760px;margin:0 auto;padding:14px 22px;display:flex;align-items:center;gap:12px;}
+  .seal{width:34px;height:34px;border:2px solid var(--brass);border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:"Zen Kaku Gothic New";font-weight:900;color:var(--brass);font-size:13px;}
+  .t{font-family:"Zen Kaku Gothic New";font-weight:900;font-size:16px;}
+  main{max-width:760px;margin:0 auto;padding:26px 22px 80px;}
+  h1{font-family:"Zen Kaku Gothic New";font-weight:900;font-size:22px;margin:0 0 4px;}
+  .sub{color:var(--soft);font-size:13px;margin:0 0 18px;}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:16px;}
+  .meta{display:grid;grid-template-columns:110px 1fr;gap:0;font-size:13px;}
+  .meta .k{background:#F7F6FA;font-weight:600;color:var(--brand);padding:9px 12px;border:1px solid var(--line);border-bottom:none;font-family:"Zen Kaku Gothic New";}
+  .meta .v{padding:9px 12px;border:1px solid var(--line);border-bottom:none;border-left:none;}
+  .meta .k:last-of-type,.meta .v:last-of-type{border-bottom:1px solid var(--line);}
+  label.f{display:block;font-size:12.5px;font-weight:600;color:var(--brand);margin:14px 0 5px;font-family:"Zen Kaku Gothic New";}
+  input[type=text],textarea{width:100%;border:1px solid var(--line);border-radius:9px;padding:11px 13px;font-size:14px;font-family:inherit;}
+  textarea{min-height:70px;resize:vertical;}
+  .drop{border:2px dashed var(--line);border-radius:10px;padding:22px;text-align:center;color:var(--soft);font-size:13px;background:#FBFAFD;cursor:pointer;}
+  .drop.on{border-color:var(--brand2);background:#F3F0FA;color:var(--brand);}
+  .drop .ic{font-size:24px;}
+  .file{font-size:12.5px;margin-top:8px;color:var(--ink);}
+  .check{display:flex;gap:10px;align-items:flex-start;padding:11px 13px;border:1px solid var(--line);border-radius:9px;margin-top:12px;background:var(--surface);cursor:pointer;}
+  .check input{margin-top:3px;width:17px;height:17px;accent-color:var(--brand);}
+  .must{font-family:"IBM Plex Mono";font-size:9px;color:var(--warn);font-weight:600;margin-left:6px;}
+  .btn{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:13px 24px;font-size:15px;font-weight:700;cursor:pointer;font-family:"Zen Kaku Gothic New";margin-top:18px;}
+  .btn:disabled{background:#C7C3D2;cursor:not-allowed;}
+  .prev{background:none;border:1px solid var(--line);border-radius:9px;padding:9px 16px;font-size:12px;cursor:pointer;color:var(--soft);}
+  .hist{font-size:12px;}
+  .hist .row{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px dashed var(--line);}
+  .hist .row:first-child{border-top:none;}
+  .st{font-family:"IBM Plex Mono";font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;background:#EEE;color:#555;}
+  .st.CLEARED{background:var(--ok-bg);color:var(--ok);}
+  .st.CORRECTION_REQUIRED,.st.ESCALATED{background:var(--warn-bg);color:var(--warn);}
+  .notice{font-size:12px;padding:11px 13px;border-radius:9px;margin-bottom:14px;}
+  .notice.err{background:var(--warn-bg);color:var(--warn);}
+  .notice.ok{background:var(--ok-bg);color:var(--ok);}
+  .done{text-align:center;padding:30px 10px;}
+  .done .big{font-family:"Zen Kaku Gothic New";font-weight:900;font-size:20px;color:var(--ok);margin-bottom:8px;}
+</style>
+</head>
+<body>
+<header><div class="hwrap"><div class="seal">SPLL</div><div class="t">SPLL 作品提出</div></div></header>
+<main>
+  <div id="loading" class="sub">読み込み中…</div>
+
+  <div id="app" style="display:none;">
+    <h1>作品を提出する</h1>
+    <p class="sub">契約締結後の二次創作作品の提出ページです。提出作品はAI一次審査と人手審査に付されます。</p>
+
+    <div class="card">
+      <div class="meta">
+        <div class="k">契約番号</div><div class="v mono" id="mContract">—</div>
+        <div class="k">対象原作</div><div class="v" id="mWorks">—</div>
+      </div>
+    </div>
+
+    <div id="histCard" class="card" style="display:none;">
+      <label class="f">これまでの提出</label>
+      <div class="hist" id="hist"></div>
+      <p class="sub" style="margin:10px 0 0;font-size:11px;">是正要求を受けた作品は、下のフォームで同じ作品として再提出（新しい版）できます。</p>
+    </div>
+
+    <form id="form" class="card">
+      <div id="notice"></div>
+      <label class="f">再提出する提出（新規提出はそのまま）</label>
+      <select id="reSubmit" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:11px 13px;font-size:14px;">
+        <option value="">＋ 新しい作品として提出</option>
+      </select>
+
+      <label class="f">二次創作作品名 <span class="must">必須</span></label>
+      <input type="text" id="title" placeholder="例）狂気山脈の夜想曲">
+
+      <label class="f">作品ファイル（PDF・PNG・JPEG／20MBまで） <span class="must">必須</span></label>
+      <div class="drop" id="drop"><div class="ic">⤴</div>クリックまたはドラッグしてファイルを選択<div class="file" id="fileName"></div></div>
+      <input type="file" id="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" style="display:none;">
+
+      <label class="f">補足説明（任意）</label>
+      <textarea id="note" placeholder="利用した原作要素、クレジット表記の掲載箇所など"></textarea>
+
+      <label class="check"><input type="checkbox" id="agree"><span>提出作品がAI（Vertex AI Gemini）による一次審査に付されることに同意します<span class="must">必須</span></span></label>
+
+      <button type="submit" class="btn" id="submit" disabled>作品を提出する →</button>
+    </form>
+  </div>
+
+  <div id="done" class="card" style="display:none;">
+    <div class="done">
+      <div class="big">✓ 作品を提出しました</div>
+      <p class="sub" id="doneMsg"></p>
+      <button class="prev" onclick="location.reload()">続けて別の作品を提出する</button>
+    </div>
+  </div>
+</main>
+
+<script>
+var TOKEN = "<?= token ?>";
+var fileData = null;   // {b64, name, type}
+var CTX = null;
+
+function notice(kind,msg){ document.getElementById("notice").innerHTML = msg ? '<div class="notice '+kind+'">'+msg+'</div>' : ''; }
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];});}
+
+function load(){
+  if(!(typeof google!=="undefined" && google.script && google.script.run)){
+    document.getElementById("loading").textContent="この提出ページはSPLLサーバー上でのみ動作します。";
+    return;
+  }
+  google.script.run
+    .withSuccessHandler(renderCtx)
+    .withFailureHandler(function(err){ document.getElementById("loading").innerHTML='<div class="notice err">'+esc(err&&err.message||err)+'</div>'; })
+    .web_getSubmitContext(TOKEN);
+}
+
+function renderCtx(ctx){
+  CTX=ctx;
+  document.getElementById("loading").style.display="none";
+  document.getElementById("app").style.display="";
+  document.getElementById("mContract").textContent=ctx.contract_id||"—";
+  document.getElementById("mWorks").textContent=(ctx.works&&ctx.works.length)?ctx.works.join("、"):"—";
+
+  var subs=ctx.submissions||[];
+  var sel=document.getElementById("reSubmit");
+  if(subs.length){
+    var hc=document.getElementById("histCard"); hc.style.display="";
+    var h=document.getElementById("hist"); h.innerHTML="";
+    subs.forEach(function(s){
+      var latest=s.versions&&s.versions.length?s.versions[s.versions.length-1]:null;
+      var st=(latest&&latest.status)||s.status||"";
+      h.innerHTML+='<div class="row"><span>'+esc(s.title||s.submission_id)+' <span class="mono" style="color:#999;font-size:10px">v'+((latest&&latest.version_no)||1)+'</span></span><span class="st '+esc(st)+'">'+esc(st)+'</span></div>';
+      var o=document.createElement("option"); o.value=s.submission_id; o.textContent="再提出：「"+(s.title||s.submission_id)+"」"; sel.appendChild(o);
+    });
+  }
+  sel.addEventListener("change",function(){
+    var s=(CTX.submissions||[]).find(function(x){return x.submission_id===sel.value;});
+    if(s) document.getElementById("title").value=s.title||"";
+  });
+}
+
+// file handling
+var drop=document.getElementById("drop"), fileInput=document.getElementById("file");
+drop.onclick=function(){ fileInput.click(); };
+["dragover","dragenter"].forEach(function(ev){ drop.addEventListener(ev,function(e){e.preventDefault();drop.classList.add("on");}); });
+["dragleave","drop"].forEach(function(ev){ drop.addEventListener(ev,function(e){e.preventDefault();drop.classList.remove("on");}); });
+drop.addEventListener("drop",function(e){ if(e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]); });
+fileInput.onchange=function(){ if(fileInput.files.length) handleFile(fileInput.files[0]); };
+
+function handleFile(f){
+  if(f.size>20*1024*1024){ notice("err","ファイルが20MBを超えています。"); return; }
+  notice("");
+  var r=new FileReader();
+  r.onload=function(){ var b64=String(r.result).split(",")[1]||""; fileData={b64:b64,name:f.name,type:f.type||"application/octet-stream"}; document.getElementById("fileName").textContent="選択済み："+f.name+"（"+Math.round(f.size/1024)+" KB）"; gate(); };
+  r.readAsDataURL(f);
+}
+
+function gate(){
+  var ok=document.getElementById("title").value.trim() && fileData && document.getElementById("agree").checked;
+  document.getElementById("submit").disabled=!ok;
+}
+document.getElementById("title").addEventListener("input",gate);
+document.getElementById("agree").addEventListener("change",gate);
+
+document.getElementById("form").addEventListener("submit",function(e){
+  e.preventDefault();
+  var btn=document.getElementById("submit"); btn.disabled=true; btn.textContent="送信中…";
+  var data={ submission_id:document.getElementById("reSubmit").value||"", title:document.getElementById("title").value.trim(),
+    filename:fileData.name, mimeType:fileData.type, dataBase64:fileData.b64, note:document.getElementById("note").value };
+  google.script.run
+    .withSuccessHandler(function(res){
+      document.getElementById("app").style.display="none";
+      document.getElementById("done").style.display="";
+      document.getElementById("doneMsg").innerHTML="提出ID："+esc(res.submission_id)+" ／ 版：v"+esc(res.version_no)+"<br>AI一次審査を開始しました。人手審査を経て結果をご連絡します。";
+    })
+    .withFailureHandler(function(err){ btn.disabled=false; btn.textContent="作品を提出する →"; notice("err","提出に失敗しました："+esc(err&&err.message||err)); })
+    .web_submitWork(TOKEN, data);
+});
+
+load();
+</script>
+</body>
+</html>

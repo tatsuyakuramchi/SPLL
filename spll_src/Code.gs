@@ -113,35 +113,15 @@ function api_getLegalTexts(){
   };
 }
 
-// ============================================================
-// 2. 申込 → Applications 書き出し（D-11）
-// ============================================================
-/**
- * FormRun申込の受け口。FormRunのWebhook(doPost)またはGAS①からの送信を受ける。
- * A経路：作品提出を伴う（Drive一時保存→審査Job）。B経路：CloudSign送信へ。
- */
-function createApplication_(payload){
-  const work = api_getWork(payload.work_id);
-  const appId = newId_('APP');
-  appendRow_(ssOps_(), 'Applications', {
-    application_id: appId, work_id: payload.work_id, review_timing: work.timing,
-    applicant_email: payload.email, applicant_name: payload.name,
-    status: 'RECEIVED',
-    retention_until: '',           // A-FAIL確定時に new Date()+365d をセット
-    created_at: new Date().toISOString()
-  });
-  logEvent_('application', appId, payload.email, null, {status:'RECEIVED'});
-  if(work.timing === 'A'){
-    // A経路：作品をDrive一時保存→AI審査Job作成（審査後にリンク送付制御）
-    enqueueAiReview_({applicationId:appId, fileId:payload.file_id, work});
-  } else {
-    // B経路：CloudSign APIで送信→締結
-    cloudSignSend_({applicationId:appId, payload, work});
-    updateRow_(ssOps_(),'Applications','application_id',appId,{status:'SENT'});
-  }
-  return appId;
+/** 公開：申込導線の設定（クラウドサインフォームURL）。application_ref を引き継ぐ。 */
+function api_getApplyConfig(){
+  return { formUrl: prop_('FORMRUN_FORM_URL') || '', refParam: prop_('FORM_REF_PARAM') || 'application_ref' };
 }
 
+// ============================================================
+// 2. 申込 → Applications（B経路固定）
+//    申込の作成は公開ポータルの web_createApplication（複数原作）で行う。
+//    A経路（作品審査後に締結）は廃止したため、申込時の作品提出は存在しない。
 // ============================================================
 // 3. CloudSign API 送信・締結Webhook（D-11）
 // ============================================================
@@ -198,40 +178,10 @@ function admin_cloudSignTest(){
   }
 }
 
-/**
- * 契約書を作成・送信。テンプレート(CLOUDSIGN_TEMPLATE_ID)があれば差込、無ければ規約PDFを生成して添付。
- * document_id を Applications に控える（status遷移は呼び出し側）。
- */
-function cloudSignSend_(ctx){
-  const app  = ctx.payload || {};
-  const work = ctx.work || {};
-  const title = 'SPLL利用許諾契約 ' + (work.name || '') + '（' + (ctx.applicationId || '') + '）';
-  const doc   = cs_createDocument_(title, 'SPLL利用許諾の電子契約です。内容をご確認のうえ締結してください。');
-  const docId = doc.id;
-  const templateId = prop_('CLOUDSIGN_TEMPLATE_ID');
-  if(templateId) cs_attachFromTemplate_(docId, templateId);
-  else cs_attachFile_(docId, buildContractPdf_(work), (work.name || 'contract') + '.pdf');
-  if(app.email) cs_addParticipant_(docId, app.email, app.name || '');
-  cs_sendDocument_(docId);
-  if(ctx.applicationId) updateRow_(ssOps_(),'Applications','application_id',ctx.applicationId,{ cloudsign_document_id: docId });
-  logEvent_('application', ctx.applicationId || '', 'cloudsign', null, { cloudsign_document_id: docId, sandbox: cs_isSandbox_() });
-  return docId;
-}
+// 注：契約書の作成・送信は「クラウドサインフォーム powered by formrun」で完結する。
+// GAS からの CloudSign 送信は行わない（申込→締結は FormRun→CloudSign 直結）。
+// GAS が CloudSign API を使うのは清算計算書のみ（cloudSignSendStatement_）。
 
-/** 規約テンプレート（Config）に作品条件を差込んでHTML→PDF化（個人情報は含めない） */
-function buildContractPdf_(work){
-  const legal = api_getLegalTexts();
-  const terms = String(legal.termsTemplate || '')
-    .replace(/{{name}}/g, work.name || '').replace(/{{pub}}/g, work.pub || '')
-    .replace(/{{ok}}/g, (work.ok || []).join('、')).replace(/{{no}}/g, (work.no || []).join('、'))
-    .replace(/{{media}}/g, (work.media || []).join('、')).replace(/{{fee}}/g, work.fee || '')
-    .replace(/{{credit}}/g, work.credit || '');
-  const html = '<html><head><meta charset="utf-8"><style>body{font-family:sans-serif;line-height:1.7;}'
-    + 'h1{font-size:18px;}h4{margin:14px 0 4px;}ol{margin:4px 0;padding-left:20px;}</style></head><body>'
-    + '<h1>SPLL利用許諾契約</h1><p>作品：' + (work.name || '') + '（' + (work.pub || '') + '）</p>'
-    + terms + '</body></html>';
-  return Utilities.newBlob(html, 'text/html', 'contract.html').getAs('application/pdf');
-}
 /** Webフック受け口。?hook=formrun は申込連携、既定は CloudSign 締結完了。 */
 function doPost(e){
   const hook = (e && e.parameter && e.parameter.hook) || '';
@@ -315,21 +265,6 @@ function handleFormrunWebhook_(e){
   }
   return ContentService.createTextOutput('ok');
 }
-function verifyFormrunSig_(e){
-  const secret = prop_('FORMRUN_WEBHOOK_SECRET');
-  if(!secret) return true;
-  // TODO: FormRunの署名仕様に合わせて検証（公式仕様確認）
-  return true;
-}
-function parseFormrunBody_(e){
-  const raw = (e && e.postData && e.postData.contents) || '';
-  try{ return JSON.parse(raw); }catch(_){}
-  try{
-    const params = {}; raw.split('&').forEach(function(kv){ const i=kv.indexOf('='); if(i>=0) params[decodeURIComponent(kv.slice(0,i))]=decodeURIComponent(kv.slice(i+1).replace(/\+/g,' ')); });
-    const cand = params.payload || params.body || params.data || Object.keys(params)[0] && params[Object.keys(params)[0]];
-    return JSON.parse(cand);
-  }catch(_){ return { sequence_number:'', columns:[] }; }
-}
 function parseJson_(s, def){ try{ const v = JSON.parse(s); return (v==null ? def : v); }catch(e){ return def; } }
 function verifyFormrunSig_(e){
   const secret = prop_('FORMRUN_WEBHOOK_SECRET');
@@ -369,30 +304,25 @@ function createContractFolder_(contractId){
     .forEach(n=>f.createFolder(n));
   return f.getId();
 }
-function sendUploadLink_(contractId, email){
-  const token = Utilities.getUuid();
-  appendRow_(ssOps_(),'Upload_Tokens',{ token_id:Utilities.getUuid(), contract_id:contractId,
-    token_hash: hash_(token), status:'OPEN', expires_at: addDaysIso_(14) });
-  const url = ScriptApp.getService().getUrl()+'?page=upload&token='+token;
-  MailApp.sendEmail(email, 'SPLL 作品提出のご案内', '提出はこちら: '+url);
+
+/** 契約フォルダ配下の指定サブフォルダを取得（無ければ作成） */
+function contractSubFolder_(contract, name){
+  let base;
+  try{ base = contract.folder_id ? DriveApp.getFolderById(contract.folder_id) : DriveApp.getFolderById(cfg_('DRIVE_ROOT')); }
+  catch(e){ base = DriveApp.getFolderById(cfg_('DRIVE_ROOT')); }
+  const it = base.getFoldersByName(name);
+  return it.hasNext() ? it.next() : base.createFolder(name);
 }
-function enqueueAiReview_(ctx){
-  ctx = ctx || {};
-  let submissionId = ctx.submissionId || '';
-  // 提出ファイルがあれば Submission / Submission_File を用意（A経路は申込時に作品提出）
-  if(ctx.fileId && !submissionId){
-    submissionId = newId_('SUB');
-    appendRow_(ssOps_(),'Submissions',{ submission_id:submissionId,
-      application_id:ctx.applicationId||'', contract_id:ctx.contractId||'',
-      submission_no:1, status:'SUBMITTED', submitted_at:new Date().toISOString() });
-    const meta = fileMeta_(ctx.fileId);
-    appendRow_(ssOps_(),'Submission_Files',{ submission_file_id:newId_('SBF'),
-      submission_id:submissionId, drive_file_id:ctx.fileId, sha256:meta.sha256, mime:meta.mime, size:meta.size });
-  }
+
+/**
+ * 版(Submission_Versions)単位でAI審査ジョブを起票。
+ * B経路固定：審査対象は提出済みの版。application 経由の起票は行わない。
+ */
+function enqueueAiReview_(submissionId, versionId){
   const aiId = newId_('AIR');
-  appendRow_(ssOps_(),'AI_Review_Jobs',{ ai_review_id:aiId, application_id:ctx.applicationId||'',
-    submission_id:submissionId, model:cfg_('GEMINI_MODEL'), prompt_version:AI_PROMPT_VERSION, status:'QUEUED', retry_count:0 });
-  logEvent_('ai_review', aiId, 'system', null, {status:'QUEUED'});
+  appendRow_(ssOps_(),'AI_Review_Jobs',{ ai_review_id:aiId, submission_id:submissionId||'', version_id:versionId||'',
+    model:cfg_('GEMINI_MODEL'), prompt_version:AI_PROMPT_VERSION, status:'QUEUED', retry_count:0 });
+  logEvent_('ai_review', aiId, 'system', null, {status:'QUEUED', version_id:versionId||''});
   // 即時実行を試行（失敗時はQUEUEDのまま batch_runAiReviews_ が再試行）
   try{ runAiReview_(aiId); }catch(e){ /* バッチ再試行に委ねる */ }
   return aiId;
@@ -419,14 +349,16 @@ const REVIEW_SCHEMA = { type:'object', properties:{
   overall_result:{ type:'string', enum:['PASS_CANDIDATE','REVIEW_REQUIRED','HIGH_RISK','UNREADABLE'] },
   risk_score:{ type:'integer' }, human_review_required:{ type:'boolean' },
   findings:{ type:'array', items:{ type:'object', properties:{
-    rule_id:{type:'string'}, severity:{type:'string'}, result:{type:'string'},
+    work_id:{type:'string'}, rule_id:{type:'string'}, severity:{type:'string'}, result:{type:'string'},
     page:{type:'integer'}, evidence:{type:'string'}, recommended_action:{type:'string'}, confidence:{type:'number'}
   }}}
 }};
 function buildReviewPrompt_(rules){
   return [
     'あなたは審査者ではなく一次スクリーナーです。根拠箇所を示し、不明は不明としてください。',
-    '次の作品別ルールと契約条件に対する適合候補・要確認・高リスク候補を抽出してください。',
+    '本提出作品は、複数の原作を同時に利用している可能性があります。',
+    '各指摘(finding)には、どの原作(work_id)のルールに関するものかを必ず付与してください。',
+    '次の原作別ルールと契約条件に対する適合候補・要確認・高リスク候補を抽出してください。',
     JSON.stringify(rules)
   ].join('\n');
 }
@@ -444,18 +376,19 @@ function batch_runAiReviews_(){
   return { processed: jobs.length, completed: completed };
 }
 
-/** 1件のAI審査を実行：ファイル取得→Gemini→Findings記録→経路別ルーティング */
+/** 1件のAI審査を実行：ファイル取得→Gemini（複数原作ルール）→Findings記録→人手審査へ */
 function runAiReview_(aiReviewId){
   const job = readRows_(ssOps_(),'AI_Review_Jobs').find(j => j.ai_review_id===aiReviewId);
   if(!job) throw new Error('AI review job not found: '+aiReviewId);
   if(job.status==='COMPLETED') return 'COMPLETED';          // 冪等
   updateRow_(ssOps_(),'AI_Review_Jobs','ai_review_id',aiReviewId,{status:'SCANNING'});
+  markVersionStatus_(job.version_id, 'AI_SCREENING');
   try{
     const blob = resolveSubmissionBlob_(job);
     if(!blob) throw new Error('提出ファイルが見つかりません');
-    const work  = resolveJobWork_(job);
-    const rules = buildRules_(work);
-    const parsed = parseGeminiResult_(geminiReview_(blob, rules));   // 個人情報は送らず作品＋条件のみ
+    const works = resolveJobWorks_(job);                            // 契約対象原作（複数）
+    const rules = buildRulesMulti_(works);
+    const parsed = parseGeminiResult_(geminiReview_(blob, rules));  // 個人情報は送らず作品＋条件のみ
     writeFindings_(aiReviewId, parsed.findings);
     const overall = parsed.overall_result
       || (parsed.findings.length ? worstResult_(parsed.findings.map(f => ({severity:f.severity, result:f.result}))) : 'REVIEW_REQUIRED');
@@ -472,44 +405,44 @@ function runAiReview_(aiReviewId){
   }
 }
 
-/** ジョブの提出ファイル（先頭）をBlobで取得。作品ファイルのみで個人情報は含めない。 */
+/** ジョブの提出ファイル（版の先頭）をBlobで取得。作品ファイルのみで個人情報は含めない。 */
 function resolveSubmissionBlob_(job){
-  if(!job.submission_id) return null;
-  const f = readRows_(ssOps_(),'Submission_Files').find(x => String(x.submission_id)===String(job.submission_id));
+  const vid = job.version_id;
+  if(!vid) return null;
+  const f = readRows_(ssOps_(),'Submission_Files').find(x => String(x.version_id)===String(vid));
   if(!f || !f.drive_file_id) return null;
   return DriveApp.getFileById(f.drive_file_id).getBlob();
 }
 
-/** ジョブ対象の作品（Works_Masterの行）を解決（A=申込, B=提出→契約 経由） */
-function resolveJobWork_(job){
-  let workId = '';
-  if(job.application_id){
-    const a = readRows_(ssOps_(),'Applications').find(x => x.application_id===job.application_id);
-    if(a) workId = a.work_id;
-  }
-  if(!workId && job.submission_id){
-    const s = readRows_(ssOps_(),'Submissions').find(x => x.submission_id===job.submission_id);
-    if(s && s.contract_id){
-      const c = readRows_(ssOps_(),'Contracts').find(x => x.contract_id===s.contract_id);
-      if(c) workId = c.work_id;
-    }
-  }
-  return readRows_(ssMaster_(),'Works_Master').find(w => w.work_id===workId) || { work_id:workId };
+/** ジョブ対象の契約対象原作（Works_Master行の配列）を解決：提出→契約→Contract_Works */
+function resolveJobWorks_(job){
+  const sub = readRows_(ssOps_(),'Submissions').find(x => x.submission_id===job.submission_id);
+  const contractId = sub && sub.contract_id;
+  if(!contractId) return [];
+  const workIds = readRows_(ssOps_(),'Contract_Works')
+    .filter(x => x.contract_id===contractId).map(x => x.work_id);
+  const byId = {}; readRows_(ssMaster_(),'Works_Master').forEach(w => { byId[w.work_id] = w; });
+  return workIds.map(id => byId[id] || { work_id:id });
 }
 
-/** 作品別ルール＋契約条件を構造化（個人情報は含めない） */
-function buildRules_(work){
-  const rules = readRows_(ssMaster_(),'Review_Rules')
-    .filter(r => r.work_id===work.work_id && ruleActive_(r))
-    .map(r => ({ rule_id:r.rule_id, category:r.category, text:r.rule_text, severity:r.severity }));
+/** 複数原作の作品別ルール＋契約条件を構造化（個人情報は含めない） */
+function buildRulesMulti_(works){
+  const allRules = readRows_(ssMaster_(),'Review_Rules');
   return {
-    work_id: work.work_id || '',
-    work_name: work.work_name || '',
-    allowed_elements: csv_(work.ok_elements),
-    prohibited_elements: csv_(work.no_elements),
-    required_credit: work.credit_text || '',
-    allowed_media: csv_(work.media),
-    rules: rules
+    works: (works||[]).map(function(work){
+      const rules = allRules
+        .filter(r => r.work_id===work.work_id && ruleActive_(r))
+        .map(r => ({ rule_id:r.rule_id, category:r.category, text:r.rule_text, severity:r.severity }));
+      return {
+        work_id: work.work_id || '',
+        work_name: work.work_name || '',
+        allowed_elements: csv_(work.ok_elements),
+        prohibited_elements: csv_(work.no_elements),
+        required_credit: work.credit_text || '',
+        allowed_media: csv_(work.media),
+        rules: rules
+      };
+    })
   };
 }
 function ruleActive_(r){
@@ -535,49 +468,29 @@ function parseGeminiResult_(raw){
   return obj;
 }
 
-/** Findings を AI_Findings へ記録 */
+/** Findings を AI_Findings へ記録（原作ごとに work_id を保持） */
 function writeFindings_(aiReviewId, findings){
   (findings||[]).forEach(f => appendRow_(ssOps_(),'AI_Findings',{
-    finding_id: newId_('FND'), ai_review_id: aiReviewId,
+    finding_id: newId_('FND'), ai_review_id: aiReviewId, work_id: f.work_id||'',
     rule_id: f.rule_id||'', severity: f.severity||'', result: f.result||'',
     page: f.page||'', evidence: f.evidence||'', confidence: f.confidence||''
   }));
 }
 
-/** 総合結果に応じた経路別処理（A=締結リンク制御／B=コンプラ・アラート） */
+/**
+ * AI審査結果のルーティング（B経路固定）。AIは一次スクリーナーであり、
+ * 判定だけで自動不採用にはしない。必ず人手審査を必須とする。
+ *   PASS_CANDIDATE → 版=AI_SCREENED・人手簡易確認
+ *   REVIEW_REQUIRED → 版=AI_SCREENED・通常審査
+ *   HIGH_RISK/UNREADABLE → 版=AI_SCREENED・法務上申＋コンプラ・アラート
+ */
 function postReviewRouting_(job, overall){
   const high = (overall==='HIGH_RISK' || overall==='UNREADABLE');
-  if(job.application_id){
-    // A経路：審査後に契約リンク送付可否を決定
-    const appId = job.application_id;
-    updateRow_(ssOps_(),'Applications','application_id',appId,{status:'AI_SCREENED'});
-    if(high){
-      const until = addDaysIso_(CFG.RETENTION_DAYS_REJECTED);   // 落選データは1年保有→自動削除
-      updateRow_(ssOps_(),'Applications','application_id',appId,{status:'REJECTED', retention_until:until});
-      logEvent_('application', appId, 'system', {status:'AI_SCREENED'}, {status:'REJECTED', overall_result:overall});
-    }else{
-      // PASS候補／要確認 → 契約リンク（CloudSign）送付。
-      // CloudSign障害でAI審査ジョブを失敗扱いにしないよう送信は分離（失敗時はAI_SCREENEDで保留・再送可）。
-      const app = readRows_(ssOps_(),'Applications').find(a => a.application_id===appId);
-      let sent = false;
-      if(app){
-        try{ sendContractForApplication_(app); sent = true; }
-        catch(err){ logEvent_('application', appId, 'system', null, {contract_send_error:String(err)}); }
-      }
-      const next = sent ? 'LINK_SENT' : 'AI_SCREENED';
-      updateRow_(ssOps_(),'Applications','application_id',appId,{status:next});
-      logEvent_('application', appId, 'system', {status:'AI_SCREENED'}, {status:next, overall_result:overall});
-    }
-  }else{
-    // B経路：締結後審査。高リスクはアラート起票（既発生のパートナー配分は当然には消滅させない）
-    if(high) createComplianceAlert_(job.submission_id, overall);
-  }
-}
-
-/** A経路：審査通過後のCloudSign契約送信 */
-function sendContractForApplication_(app){
-  cloudSignSend_({ applicationId: app.application_id,
-    payload: { email: app.applicant_email, name: app.applicant_name }, work: api_getWork(app.work_id) });
+  markVersionStatus_(job.version_id, 'AI_SCREENED');
+  // 提出(Submission)を人手審査待ちへ
+  if(job.submission_id) updateRow_(ssOps_(),'Submissions','submission_id',job.submission_id,{ status:'HUMAN_REVIEW_PENDING' });
+  logEvent_('submission', job.submission_id||'', 'system', null, {overall_result:overall, status:'HUMAN_REVIEW_PENDING'});
+  if(high) createComplianceAlert_(job.submission_id, overall);   // 既発生のパートナー配分は当然には消滅させない
 }
 
 /** コンプライアンス・アラート起票（settlement_block空＝清算は止めない） */
@@ -613,9 +526,9 @@ function report_getContext(token){
   const c = readRows_(ssOps_(),'Contracts').find(x=>x.contract_id===tok.contract_id) || {};
   return { contract_id:c.contract_id||'', work:contractWorkNames_(c.contract_id).join('、'), fee:'', period:currentPeriod_() };
 }
-/** 利用報告の登録 → Usage_Reports */
+/** 利用報告の登録 → Usage_Reports（トークンは Submission_Access を共用） */
 function report_submit(token, data){
-  const tok = readRows_(ssOps_(),'Upload_Tokens').find(x=>x.token_hash===hash_(token) && x.status==='OPEN');
+  const tok = readRows_(ssOps_(),'Submission_Access').find(x=>x.token_hash===hash_(token) && x.status==='OPEN');
   if(!tok) throw new Error('invalid token');
   const reportId = newId_('RPT');
   const net = Math.max(0,(+data.gross||0)-(+data.returns||0)-(+data.deductions||0));
@@ -627,11 +540,100 @@ function report_submit(token, data){
   return reportId;
 }
 
-/** 作品提出ページ（トークン）：B経路締結後のアップロード受け口 */
+// ============================================================
+// 5.1 作品提出ページ（?page=upload&t=トークン）
+//     受付番号のみのアクセスは不可。Submission_Access のトークンで認証。
+//     再提出は新Submissionではなく同一Submission配下の版(Version)として管理。
+// ============================================================
 function serveUpload_(e){
-  const t = HtmlService.createTemplateFromFile('report');   // 暫定：提出UIはreportに集約 or upload.htmlを追加
-  t.token = (e.parameter && e.parameter.token) || '';
+  const t = HtmlService.createTemplateFromFile('upload');
+  t.token = (e.parameter && (e.parameter.t || e.parameter.token)) || '';
   return t.evaluate().setTitle('SPLL 作品提出');
+}
+
+/** 提出ページのコンテキスト：契約番号・対象原作・既存提出（版履歴つき）を返す */
+function web_getSubmitContext(token){
+  const tok = resolveSubmissionToken_(token);
+  if(!tok) throw new Error('提出用リンクが無効か、有効期限が切れています。');
+  const contractId = tok.contract_id;
+  const versions = readRows_(ssOps_(),'Submission_Versions');
+  const subs = readRows_(ssOps_(),'Submissions').filter(s => s.contract_id===contractId).map(function(s){
+    const vs = versions.filter(v => v.submission_id===s.submission_id)
+      .sort(function(a,b){ return num_(a.version_no)-num_(b.version_no); })
+      .map(function(v){ return { version_no:v.version_no, status:v.status, submitted_at:String(v.submitted_at||'') }; });
+    return { submission_id:s.submission_id, title:s.title, status:s.status, versions:vs };
+  });
+  return { contract_id:contractId, works:contractWorkNames_(contractId), submissions:subs };
+}
+
+/**
+ * 作品提出（新規 or 再提出）。data:
+ *   { submission_id?（再提出時）, title, filename, mimeType, dataBase64, note }
+ * 新規は Submission＋v1、再提出は既存Submission配下に新しい版を追加。
+ * 保存先: 契約フォルダ/02_Submissions/SUB-xxx/vN/。AI審査を起票して返す。
+ */
+function web_submitWork(token, data){
+  const tok = resolveSubmissionToken_(token);
+  if(!tok) throw new Error('提出用リンクが無効か、有効期限が切れています。');
+  data = data || {};
+  if(!data.dataBase64) throw new Error('作品ファイルが添付されていません。');
+  const contractId = tok.contract_id;
+  const contract = readRows_(ssOps_(),'Contracts').find(x => x.contract_id===contractId) || {};
+
+  // 提出（新規 or 既存）
+  let submissionId = data.submission_id || '';
+  let sub = submissionId ? readRows_(ssOps_(),'Submissions').find(s => s.submission_id===submissionId) : null;
+  if(sub && sub.contract_id !== contractId) throw new Error('この提出は対象の契約に属していません。');
+  const now = new Date().toISOString();
+  if(!sub){
+    submissionId = newId_('SUB');
+    appendRow_(ssOps_(),'Submissions',{ submission_id:submissionId, contract_id:contractId,
+      title:data.title||'', status:'SUBMITTED', submitted_at:now });
+    logEvent_('submission', submissionId, 'licensee', null, {status:'SUBMITTED', contract_id:contractId});
+  }else{
+    updateRow_(ssOps_(),'Submissions','submission_id',submissionId,{ status:'SUBMITTED' });
+    if(data.title) updateRow_(ssOps_(),'Submissions','submission_id',submissionId,{ title:data.title });
+  }
+
+  // 版（version_no = 既存最大+1）
+  const existingVers = readRows_(ssOps_(),'Submission_Versions').filter(v => v.submission_id===submissionId);
+  const versionNo = existingVers.reduce(function(m,v){ return Math.max(m, num_(v.version_no)); }, 0) + 1;
+  const versionId = newId_('SV');
+  appendRow_(ssOps_(),'Submission_Versions',{ version_id:versionId, submission_id:submissionId,
+    version_no:versionNo, status:'SUBMITTED', submitted_at:now });
+
+  // Driveへ保存（契約フォルダ/02_Submissions/SUB/vN）
+  const blob = Utilities.newBlob(Utilities.base64Decode(data.dataBase64),
+    data.mimeType || 'application/octet-stream', data.filename || ('submission_v'+versionNo));
+  const subRoot = getOrCreateChildFolder_(contractSubFolder_(contract,'02_Submissions'), submissionId);
+  const verFolder = subRoot.createFolder('v'+versionNo);
+  const file = verFolder.createFile(blob);
+  const bytes = blob.getBytes();
+  appendRow_(ssOps_(),'Submission_Files',{ submission_file_id:newId_('SBF'), version_id:versionId,
+    drive_file_id:file.getId(), mime_type:blob.getContentType(), size:file.getSize(), sha256:sha256Bytes_(bytes) });
+
+  // AI一次審査を起票（→人手審査必須）
+  const aiId = enqueueAiReview_(submissionId, versionId);
+  logEvent_('submission', submissionId, 'licensee', null, {version_no:versionNo, ai_review_id:aiId});
+  return { submission_id:submissionId, version_no:versionNo, ai_review_id:aiId };
+}
+
+/** Submission_Access トークン検証（OPEN・期限内のみ有効） */
+function resolveSubmissionToken_(token){
+  if(!token) return null;
+  const tok = readRows_(ssOps_(),'Submission_Access').find(x => x.token_hash===hash_(token) && x.status==='OPEN');
+  if(!tok) return null;
+  if(tok.expires_at && new Date(tok.expires_at) < new Date()) return null;
+  return tok;
+}
+function getOrCreateChildFolder_(parent, name){
+  const it = parent.getFoldersByName(name);
+  return it.hasNext() ? it.next() : parent.createFolder(name);
+}
+/** 版のステータス更新（存在すれば） */
+function markVersionStatus_(versionId, status){
+  if(!versionId) return;
+  updateRow_(ssOps_(),'Submission_Versions','version_id',versionId,{ status:status });
 }
 
 // ============================================================
@@ -642,6 +644,17 @@ function worksNameMap_(){
   const m = {}; readRows_(ssMaster_(), 'Works_Master').forEach(w => { m[w.work_id] = w.work_name; });
   return m;
 }
+/** 契約ID → 対象原作名リスト（Contract_Works）。一括読みで構築（複数原作対応）。 */
+function contractWorksMap_(){
+  const nameMap = worksNameMap_();
+  const m = {};
+  readRows_(ssOps_(),'Contract_Works').forEach(function(x){
+    (m[x.contract_id] = m[x.contract_id] || []).push(nameMap[x.work_id] || x.work_id);
+  });
+  return m;
+}
+/** 契約ID → 対象原作名（表示用の結合文字列） */
+function contractWorkLabel_(map, contractId){ const a = map[contractId]; return a && a.length ? a.join('、') : ''; }
 function isHighRisk_(r){ return /HIGH/i.test(String(r.severity)) || /HIGH_RISK/i.test(String(r.result)); }
 function sevRank_(f){
   const s = String(f.severity||'').toUpperCase(), r = String(f.result||'').toUpperCase();
@@ -668,117 +681,138 @@ function admin_dashboard(){
   const reports   = readRows_(ssOps_(),'Usage_Reports');
   const alerts    = readRows_(ssOps_(),'Compliance_Alerts');
   const human     = readRows_(ssOps_(),'Human_Reviews');
-  const nameMap   = worksNameMap_();
-  const ctrWork   = {}; contracts.forEach(c => { ctrWork[c.contract_id] = c.work_id; });
+  const ctrWorks  = contractWorksMap_();
   const cleared   = {}; human.filter(h=>h.result==='CLEARED').forEach(h => { cleared[String(h.submission_id)] = true; });
 
   const kpis = {
-    reviewPending: jobs.filter(j => j.status==='COMPLETED' && !cleared[String(j.submission_id||j.application_id)]).length,
+    reviewPending: jobs.filter(j => j.status==='COMPLETED' && !cleared[String(j.submission_id)]).length,
     highRisk:      findings.filter(isHighRisk_).length,
     unscreened:    jobs.filter(j => j.status==='QUEUED' || j.status==='SCANNING').length,
-    signing:       contracts.filter(c => c.status && c.status!=='SIGNED' && c.status!=='DECLINED' && c.status!=='CANCELLED').length
-                   + apps.filter(a => a.status==='SENT').length,
+    signing:       apps.filter(a => a.status && a.status!=='SIGNED' && a.status!=='CANCELLED').length,
     unpaid:        invoices.filter(v => v.status && v.status!=='入金済' && v.status!=='取消').length,
     reporting:     reports.filter(r => r.status && r.status!=='SUBMITTED' && r.status!=='APPROVED' && r.status!=='LOCKED').length
   };
 
+  const subCtr = {}; readRows_(ssOps_(),'Submissions').forEach(s => { subCtr[s.submission_id] = s.contract_id; });
   const rows = [];
   alerts.filter(a => a.status!=='CLOSED').forEach(a => rows.push({
-    kind:'審査', target:a.submission_id||a.contract_id||'', work:nameMap[ctrWork[a.contract_id]]||'',
+    kind:'審査', target:a.submission_id||a.contract_id||'', work:contractWorkLabel_(ctrWorks, a.contract_id||subCtr[a.submission_id]),
     status:String(a.severity||'ALERT'), cls:isHighRisk_(a)?'fail':'review', at:String(a.occurred_at||'')
   }));
-  contracts.filter(c => c.status==='SENT').forEach(c => rows.push({
-    kind:'契約', target:c.contract_id, work:nameMap[c.work_id]||'', status:'締結待ち', cls:'wait', at:String(c.signed_at||'')
-  }));
   invoices.filter(v => v.status==='入金待ち').forEach(v => rows.push({
-    kind:'入金', target:v.contract_id, work:nameMap[ctrWork[v.contract_id]]||'', status:'入金待ち', cls:'unpaid', at:String(v.issued_at||'')
+    kind:'入金', target:v.contract_id, work:contractWorkLabel_(ctrWorks, v.contract_id), status:'入金待ち', cls:'unpaid', at:String(v.issued_at||'')
   }));
   rows.sort((a,b) => String(b.at).localeCompare(String(a.at)));
   return { kpis: kpis, alerts: rows.slice(0,8) };
 }
 
-/** 審査キュー：ジョブ単位に総合結果・経路(A/B)・主指摘・作品名を結合 */
+/** 審査キュー：提出版(version)単位に総合結果・主指摘・対象原作(複数)を結合（B経路固定） */
 function admin_reviewQueue(){
   const jobs      = readRows_(ssOps_(),'AI_Review_Jobs');
   const findings  = readRows_(ssOps_(),'AI_Findings');
-  const apps      = readRows_(ssOps_(),'Applications');
   const subs      = readRows_(ssOps_(),'Submissions');
-  const contracts = readRows_(ssOps_(),'Contracts');
   const nameMap   = worksNameMap_();
-  const appById   = {}; apps.forEach(a => { appById[a.application_id] = a; });
+  const ctrWorks  = contractWorksMap_();
   const subById   = {}; subs.forEach(s => { subById[s.submission_id] = s; });
-  const ctrWork   = {}; contracts.forEach(c => { ctrWork[c.contract_id] = c.work_id; });
 
   return jobs.map(j => {
     const fs = findings.filter(f => f.ai_review_id===j.ai_review_id);
     const top = fs.slice().sort((a,b)=>sevRank_(b)-sevRank_(a))[0];
-    const timing = j.application_id ? 'A' : 'B';        // A=締結前提出 / B=締結後提出
-    let workId = '';
-    if(j.application_id && appById[j.application_id]) workId = appById[j.application_id].work_id;
-    else if(j.submission_id && subById[j.submission_id]) workId = ctrWork[subById[j.submission_id].contract_id];
+    const sub = subById[j.submission_id] || {};
+    const topWork = top && top.work_id ? (nameMap[top.work_id] || top.work_id) : '';
     return {
-      id: j.submission_id || j.application_id || j.ai_review_id,
+      id: j.submission_id || j.ai_review_id,
       ai_review_id: j.ai_review_id,
-      work: nameMap[workId] || '',
-      timing: timing,
+      submission_id: j.submission_id || '',
+      version_id: j.version_id || '',
+      title: sub.title || '',
+      work: contractWorkLabel_(ctrWorks, sub.contract_id),
       job_status: j.status,
       result: j.status==='COMPLETED' ? worstResult_(fs) : (j.status||'QUEUED'),
-      finding: top ? String(top.evidence||top.result||'') : ''
+      finding: top ? (topWork ? '['+topWork+'] ' : '') + String(top.evidence||top.result||'') : ''
     };
   });
 }
 
-/** 人手判断の記録（CLEARED / CORRECTION_REQUIRED / ESCALATED） */
-function admin_setHumanReview(submissionId, result, comment, reviewer){
+/** 人手判断の記録（CLEARED / CORRECTION_REQUIRED / ESCALATED）。版・提出状態も更新。 */
+function admin_setHumanReview(submissionId, result, comment, reviewer, versionId){
   reviewer = reviewer || actor_();
   appendRow_(ssOps_(),'Human_Reviews',{ human_review_id:newId_('HRV'), submission_id:submissionId,
-    reviewer:reviewer, result:result, comments:comment||'', reviewed_at:new Date().toISOString() });
+    version_id:versionId||latestVersionId_(submissionId), reviewer:reviewer, result:result,
+    comments:comment||'', reviewed_at:new Date().toISOString() });
+  const subStatus = result==='CLEARED' ? 'CLEARED'
+    : (result==='CORRECTION_REQUIRED' ? 'CORRECTION_REQUIRED'
+    : (result==='ESCALATED' ? 'ESCALATED' : 'HUMAN_REVIEW_PENDING'));
+  updateRow_(ssOps_(),'Submissions','submission_id',submissionId,{ status:subStatus });
+  markVersionStatus_(versionId||latestVersionId_(submissionId), result==='CLEARED' ? 'CLEARED' : result);
   logEvent_('human_review', submissionId, reviewer, null, {result:result});
   return true;
 }
+/** 提出の最新版ID */
+function latestVersionId_(submissionId){
+  const vs = readRows_(ssOps_(),'Submission_Versions').filter(v => v.submission_id===submissionId)
+    .sort(function(a,b){ return num_(b.version_no)-num_(a.version_no); });
+  return vs.length ? vs[0].version_id : '';
+}
 
-/** 契約一覧：締結済(Contracts)＋締結待ち(Applications status=SENT)を結合、契約者名はマスク */
+/** 契約一覧：締結済(Contracts)＋締結待ち(Applications)を結合、契約者名はマスク、対象原作は複数表示 */
 function admin_listContracts(){
   const contracts = readRows_(ssOps_(),'Contracts');
   const apps      = readRows_(ssOps_(),'Applications');
+  const ctrWorks  = contractWorksMap_();
+  const appWorks  = {};   // application_id → 原作名リスト（締結前）
   const nameMap   = worksNameMap_();
+  readRows_(ssOps_(),'Application_Works').forEach(function(x){
+    (appWorks[x.application_id] = appWorks[x.application_id] || []).push(nameMap[x.work_id] || x.work_id);
+  });
   const certs = readRows_(ssOps_(),'Certificates');
   const certByContract = {}; certs.forEach(x => { certByContract[x.contract_id] = x.status; });
   const rows = contracts.map(c => ({
-    contract_id:c.contract_id, application_id:c.application_id, work:nameMap[c.work_id]||'',
+    contract_id:c.contract_id, application_id:c.application_id, application_ref:c.application_ref||'',
+    work:contractWorkLabel_(ctrWorks, c.contract_id),
     applicant:'＊＊＊＊（個人）', status:c.status||'', signed_at:String(c.signed_at||''),
     cert_status: certByContract[c.contract_id] || 'NONE'
   }));
-  const contracted = {}; contracts.forEach(c => { contracted[c.application_id] = true; });
-  apps.filter(a => a.status==='SENT' && !contracted[a.application_id]).forEach(a => rows.push({
-    contract_id:'—', application_id:a.application_id, work:nameMap[a.work_id]||'',
-    applicant:'＊＊＊＊（個人）', status:'送信済・締結待ち', signed_at:''
+  const contracted = {}; contracts.forEach(c => { if(c.application_id) contracted[c.application_id] = true; });
+  apps.filter(a => a.status && a.status!=='SIGNED' && !contracted[a.application_id]).forEach(a => rows.push({
+    contract_id:'—', application_id:a.application_id, application_ref:a.application_ref||'',
+    work:(appWorks[a.application_id]||[]).join('、'),
+    applicant:'＊＊＊＊（個人）', status:'締結待ち（'+(a.status||'')+'）', signed_at:'', cert_status:'NONE'
   }));
   return rows;
 }
 
-/** B経路：締結済契約へ作品提出リンクを送付 */
+/**
+ * B経路：締結済契約の作品提出リンクを発行して返す（当社からメール送信はしない）。
+ * 既存の有効トークンがあれば再利用し、無ければ Submission_Access を新規発行。
+ */
 function admin_sendUploadLink(contractId){
   const c = readRows_(ssOps_(),'Contracts').find(x => x.contract_id===contractId);
   if(!c) throw new Error('契約が見つかりません: '+contractId);
-  const a = readRows_(ssOps_(),'Applications').find(x => x.application_id===c.application_id);
-  if(!a || !a.applicant_email) throw new Error('申込メールが見つかりません');
-  sendUploadLink_(contractId, a.applicant_email);
-  logEvent_('contract', contractId, actor_(), null, {upload_link_sent:true});
-  return true;
+  let token = '';
+  const existing = readRows_(ssOps_(),'Submission_Access')
+    .find(x => x.contract_id===contractId && x.status==='OPEN' && (!x.expires_at || new Date(x.expires_at) > new Date()));
+  if(existing){
+    // トークン実体は保存していないため、再掲不可の場合は新規発行し直す
+    token = prepareSubmissionToken_(contractId);
+  }else{
+    token = prepareSubmissionToken_(contractId);
+  }
+  let base = ''; try{ base = ScriptApp.getService().getUrl() || ''; }catch(e){}
+  const url = base ? (base + '?page=upload&t=' + token) : ('?page=upload&t=' + token);
+  logEvent_('contract', contractId, actor_(), null, {upload_link_issued:true});
+  return { url:url, token:token };
 }
 
 /** 入金管理：請求(Invoices)に入金(Payments)状況・作品名を結合 */
 function admin_listPayments(){
   const invoices  = readRows_(ssOps_(),'Invoices');
   const payments  = readRows_(ssOps_(),'Payments');
-  const contracts = readRows_(ssOps_(),'Contracts');
-  const nameMap   = worksNameMap_();
-  const ctrWork   = {}; contracts.forEach(c => { ctrWork[c.contract_id] = c.work_id; });
+  const ctrWorks  = contractWorksMap_();
   return invoices.map(v => {
     const pay = payments.find(p => String(p.invoice_id)===String(v.invoice_id) && p.status==='入金済');
     return {
-      invoice_id:v.invoice_id, contract_id:v.contract_id, work:nameMap[ctrWork[v.contract_id]]||'',
+      invoice_id:v.invoice_id, contract_id:v.contract_id, work:contractWorkLabel_(ctrWorks, v.contract_id),
       amount:String(v.amount||v.amount_rule||''), status: pay ? '入金済' : (v.status||'入金待ち'),
       paid_at: pay ? String(pay.paid_at||'') : ''
     };
@@ -854,31 +888,39 @@ function batch_generateStatements(period){
 
   const reports = readRows_(ssOps_(),'Usage_Reports')
     .filter(r => String(r.period)===String(period) && (r.status==='APPROVED' || r.status==='LOCKED'));
-  const contracts = readRows_(ssOps_(),'Contracts');
-  const ctrWork = {}; contracts.forEach(c => { ctrWork[c.contract_id] = c.work_id; });
+  // 契約→対象原作（Contract_Works）。複数原作を1契約で包括許諾（契約単位でロイヤリティ計算）。
+  const ctrWorkIds = {}; readRows_(ssOps_(),'Contract_Works').forEach(x => { (ctrWorkIds[x.contract_id] = ctrWorkIds[x.contract_id] || []).push(x.work_id); });
   const workById = {}; readRows_(ssMaster_(),'Works_Master').forEach(w => { workById[w.work_id] = w; });
   const partners = readRows_(ssOps_(),'Partners');
 
-  const royaltyDefault = num_(getConfig_('DEFAULT_ROYALTY_RATE', '0.10'));   // 既定ロイヤリティ率
-  const handlingRate   = num_(getConfig_('HANDLING_FEE_RATE',   '0.30'));    // 事務手数料率
+  const royaltyRate  = num_(getConfig_('DEFAULT_ROYALTY_RATE', '0.10'));   // 契約単位の既定ロイヤリティ率
+  const handlingRate = num_(getConfig_('HANDLING_FEE_RATE',   '0.30'));    // 事務手数料率
 
   const byPartner = {};  // partner_id -> { partner, details:[], total }
   reports.forEach(r => {
-    const work = workById[ctrWork[r.contract_id]] || { work_id:ctrWork[r.contract_id]||'', publisher:'' };
-    const partner = resolveWorkPartner_(work, partners);
     const net = num_(r.net_sales);
-    const royaltyRate = (work.royalty_rate!==undefined && work.royalty_rate!=='') ? num_(work.royalty_rate) : royaltyDefault;
     const licenseFee   = Math.round(net * royaltyRate);
     const partnerShare = Math.round(licenseFee * (1 - handlingRate));
-    const key = partner.partner_id;
-    if(!byPartner[key]) byPartner[key] = { partner:partner, details:[], total:0 };
-    byPartner[key].details.push({
-      contract_id: r.contract_id,
-      rate_snapshot: JSON.stringify({ royalty_rate:royaltyRate, handling_fee_rate:handlingRate,
-        net_sales:net, license_fee:licenseFee, report_id:r.report_id }),
-      amount: partnerShare
+    // 契約対象原作のパートナー群へ均等配分（原作ごとの別料金は設けない）
+    const workIds = ctrWorkIds[r.contract_id] || [];
+    const pmap = {};   // partner_id -> partner
+    workIds.forEach(function(wid){ const p = resolveWorkPartner_(workById[wid] || { work_id:wid, publisher:'' }, partners); pmap[p.partner_id] = p; });
+    let plist = Object.keys(pmap).map(function(k){ return pmap[k]; });
+    if(!plist.length) plist = [ resolveWorkPartner_({ work_id:'', publisher:'' }, partners) ];   // 未割当
+    const each = Math.floor(partnerShare / plist.length);
+    let remainder = partnerShare - each * plist.length;
+    plist.forEach(function(partner){
+      const amt = each + (remainder-- > 0 ? 1 : 0);   // 端数は先頭から1ずつ
+      const key = partner.partner_id;
+      if(!byPartner[key]) byPartner[key] = { partner:partner, details:[], total:0 };
+      byPartner[key].details.push({
+        contract_id: r.contract_id,
+        rate_snapshot: JSON.stringify({ royalty_rate:royaltyRate, handling_fee_rate:handlingRate,
+          net_sales:net, license_fee:licenseFee, works:workIds.length, partners:plist.length, report_id:r.report_id }),
+        amount: amt
+      });
+      byPartner[key].total += amt;
     });
-    byPartner[key].total += partnerShare;
   });
 
   const out = [];
@@ -895,7 +937,7 @@ function batch_generateStatements(period){
       settlement_id:settlementId, partner_id:pid, period:period, type:'PARTNER',
       reg_number_snapshot: grp.partner.invoice_reg_number || '',   // 登録番号(T番号)スナップショット
       status:'DRAFT', effective_date:'', objection_due:'', pdf_file_id:'', sheet_id:'',
-      version:1, sent_at:'', confirmed_at:'' });
+      version:1, sent_at:'', finalized_at:'' });
     logEvent_('settlement_statement', statementId, 'system', null,
       {status:'DRAFT', period:period, partner_id:pid, amount:grp.total, details:grp.details.length});
     out.push({ statement_id:statementId, partner:grp.partner.name, amount:grp.total, details:grp.details.length });
@@ -1399,23 +1441,7 @@ function admin_getXPostPreview(workId){
 // ============================================================
 const BADGE_SIZES = [{ key:'L', size:'LARGE' }, { key:'M', size:'MEDIUM' }, { key:'S', size:'SMALL' }];
 
-/**
- * 課金モデルの判定。従量課金・後払い（電子書籍等）は true。
- * 明示列 billing_type（PREPAID/POSTPAID）を優先し、無ければ料金表記から推定
- * （％や「売上」を含む＝従量課金・後払い）。
- */
-function isPostpaid_(work){
-  const bt = String(work.billing_type || '').toUpperCase();
-  if(bt === 'POSTPAID' || bt === '後払い' || bt === '従量') return true;
-  if(bt === 'PREPAID'  || bt === '前払い' || bt === '定額') return false;
-  return /[%％]|従量|売上/.test(String(work.fee_label || ''));
-}
-function contractIsPostpaid_(contract){
-  const w = readRows_(ssMaster_(),'Works_Master').find(function(x){ return x.work_id === contract.work_id; }) || {};
-  return isPostpaid_(w);
-}
-/** バッジ発行トリガーの判定 → 'ON_SIGN'（後払い）/ 'ON_PAYMENT'（前払い） */
-function badgeTriggerFor_(contract){ return contractIsPostpaid_(contract) ? 'ON_SIGN' : 'ON_PAYMENT'; }
+// B経路固定：認証・バッジは締結時に発行（課金モデル分岐なし）。
 
 /** バッジ発行（契約単位・冪等）。BADGE_TEMPLATE_IDがあればテンプレ差込、無ければ自動組版。 */
 function issueBadge_(contractId){
@@ -1508,7 +1534,7 @@ function serveBadge_(e){
   const token = (e.parameter && e.parameter.token) || '';
   const b = readRows_(ssOps_(),'Badges').find(function(x){ return x.token_hash === hash_(token) && String(x.status) === 'ISSUED'; });
   if(!b) return HtmlService.createHtmlOutput('<p style="font-family:sans-serif">リンクが無効です。</p>').setTitle('SPLL 認証バッジ');
-  const w = readRows_(ssMaster_(),'Works_Master').find(function(x){ return x.work_id === b.work_id; }) || {};
+  const workNames = contractWorkNames_(b.contract_id).join('、');   // 契約単位（複数原作）
   const rows = [['大 (L)', b.png_l], ['中 (M)', b.png_m], ['小 (S)', b.png_s]].map(function(p){
     const view = 'https://drive.google.com/uc?id=' + p[1];
     const dl   = 'https://drive.google.com/uc?export=download&id=' + p[1];
@@ -1517,7 +1543,7 @@ function serveBadge_(e){
       '<a href="' + dl + '" style="display:inline-block;margin-top:6px">PNGをダウンロード</a></div>';
   }).join('');
   const html = '<div style="font-family:sans-serif;max-width:720px;margin:0 auto;padding:24px">' +
-    '<h2>SPLL 認証バッジ</h2><p>' + (w.work_name || '') + ' ／ ライセンスID: ' + b.contract_id +
+    '<h2>SPLL 認証バッジ</h2><p>' + esc_(workNames) + ' ／ ライセンスID: ' + b.contract_id +
     ' ／ 発行日: ' + b.issued_at + '</p>' + rows +
     '<p style="font-size:12px;color:#666">クレジット表記としてご利用ください。表示位置・改変の可否は利用規約に従います。</p></div>';
   return HtmlService.createHtmlOutput(html).setTitle('SPLL 認証バッジ');

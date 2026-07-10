@@ -133,7 +133,7 @@
     <p class="sub">Geminiの一次審査結果（PASS/REVIEW/HIGH_RISK）を受けて、人手判断（承認・是正要求・エスカレーション）を行います。A作品は締結前、B作品は締結後の提出。</p>
     <div class="panel">
       <div class="ph"><h3>審査キュー</h3><div style="display:flex;gap:8px;align-items:center;"><span class="hint">AI_Review_Jobs / AI_Findings より</span><button class="btn p" onclick="runAiReviews()">QUEUEDを実行</button></div></div>
-      <table><thead><tr><th>提出ID</th><th>作品</th><th>経路</th><th>AI結果</th><th>主な指摘</th><th>人手判断</th></tr></thead><tbody id="review-tbody"></tbody></table>
+      <table><thead><tr><th>提出ID</th><th>対象原作</th><th>作品名</th><th>AI結果</th><th>主な指摘</th><th>人手判断</th></tr></thead><tbody id="review-tbody"></tbody></table>
     </div>
     <div class="note">AI結果は一次スクリーニングで、承認・適法性保証ではありません。最終判断は人手で行い、判断はEventsへ記録されます。</div>
   </section>
@@ -144,7 +144,7 @@
     <p class="sub">FormRun申込→CloudSign API送信→締結の状態を一覧。締結有無はCloudSignのWebhookでSheetsへ自動書き戻し。</p>
     <div class="panel">
       <div class="ph"><h3>契約一覧</h3><span class="hint">Applications / Contracts より</span></div>
-      <table><thead><tr><th>契約ID</th><th>申込ID</th><th>作品</th><th>契約者</th><th>締結状態</th><th>認証</th><th>締結日</th><th>操作</th></tr></thead><tbody id="contract-tbody"></tbody></table>
+      <table><thead><tr><th>契約ID</th><th>申込ID</th><th>対象原作</th><th>契約者</th><th>締結状態</th><th>認証</th><th>締結日</th><th>操作</th></tr></thead><tbody id="contract-tbody"></tbody></table>
     </div>
     <div class="note">締結状態の遷移（送信済→締結済／辞退／取消）はCloudSign Webhook（COMPLETED等）またはAPI照合バッチのみが更新します。手動での締結化はできません。</div>
   </section>
@@ -558,25 +558,32 @@ function loadReview(){
     if(!rows.length){ emptyRow(tb,6,"審査対象がありません"); return; }
     rows.forEach(function(r){
       var rp=resultPill(r.result);
-      var route=(r.timing==="A")?'<span class="pill A">締結前</span>':'<span class="pill B">締結後</span>';
       var tr=document.createElement("tr");
       tr.appendChild(td('<span class="id">'+esc(r.id)+'</span>'));
       tr.appendChild(td(esc(r.work)));
-      tr.appendChild(td(route));
+      tr.appendChild(td(esc(r.title||"—")));
       tr.appendChild(td(pill(rp)));
       tr.appendChild(td('<span class="evi">'+esc(r.finding||"—")+'</span>'));
       var act=document.createElement("td"); act.className="actions";
-      var bClear=mkBtn("承認(CLEARED)","btn",function(){ humanReview(r.id,"CLEARED"); });
-      var bFix=mkBtn("是正要求","btn",function(){ humanReview(r.id,"CORRECTION_REQUIRED"); });
-      var bEsc=mkBtn("上申","btn d",function(){ humanReview(r.id,"ESCALATED"); });
+      var bClear=mkBtn("承認(CLEARED)","btn",function(){ humanReview(r,"CLEARED"); });
+      var bFix=mkBtn("是正要求","btn",function(){ humanReview(r,"CORRECTION_REQUIRED"); });
+      var bEsc=mkBtn("上申","btn d",function(){ humanReview(r,"ESCALATED"); });
       act.appendChild(bClear); act.appendChild(bFix); act.appendChild(bEsc);
       tr.appendChild(act); tb.appendChild(tr);
     });
   });
 }
-function humanReview(id,result){
+function humanReview(r,result){
+  var id=(r&&r.submission_id)||r.id||r;
+  var vid=(r&&r.version_id)||"";
   var comment = (result==="CORRECTION_REQUIRED"||result==="ESCALATED") ? (prompt("コメント（任意）：","")||"") : "";
-  call("admin_setHumanReview",[id,result,comment],function(){ toast("人手判断を記録： "+result); loadReview(); loadDashboard(); });
+  call("admin_setHumanReview",[id,result,comment,"",vid],function(){ toast("人手判断を記録： "+result); loadReview(); loadDashboard(); });
+}
+
+function showUploadLink(contractId, res){
+  var url=(res&&res.url)||"";
+  if(!url){ toast("提出リンクの発行に失敗しました"); return; }
+  window.prompt("契約 "+contractId+" の作品提出リンク（利用者へ共有。当社からのメール送信は行いません）：", url);
 }
 
 // ---- 契約一覧 ----
@@ -597,11 +604,15 @@ function loadContract(){
       tr.appendChild(td(pill(certPill)));
       tr.appendChild(td('<span class="id">'+esc(c.signed_at||"—")+'</span>'));
       var act=document.createElement("td"); act.className="actions";
+      var hasContract = c.contract_id && c.contract_id!=="—";
+      if(hasContract){
+        act.appendChild(mkBtn("提出リンク発行","btn",function(){ call("admin_sendUploadLink",[c.contract_id],function(res){ showUploadLink(c.contract_id, res); }); }));
+      }
       if(cs==="ACTIVE"){
         act.appendChild(mkBtn("認証を失効","btn d",function(){ if(confirm("この認証を失効しますか？（検証ページが「無効」表示になります）")) call("admin_revokeCert",[c.contract_id],function(){ toast("認証を失効しました"); loadContract(); }); }));
       } else if(cs==="REVOKED"){
         act.appendChild(mkBtn("再有効化","btn",function(){ if(confirm("この認証を再有効化しますか？")) call("admin_reactivateCert",[c.contract_id],function(){ toast("認証を再有効化しました"); loadContract(); }); }));
-      } else {
+      } else if(!hasContract){
         act.appendChild(mkBtn("CloudSign確認","btn",function(){ toast("CloudSign管理画面でご確認ください"); }));
       }
       tr.appendChild(act); tb.appendChild(tr);
@@ -693,18 +704,17 @@ MOCK.admin_dashboard=function(){ return { kpis:{reviewPending:7,highRisk:2,unscr
   {kind:"入金",target:"CTR-202606-0011",work:"インセイン",status:"入金待ち",cls:"unpaid",at:"2026-06-25"}
 ]}; };
 MOCK.admin_reviewQueue=function(){ return [
-  {id:"SUB-202606-0042",work:"新クトゥルフ神話TRPG",timing:"B",result:"HIGH_RISK",finding:"必須クレジット欠落（p.1）"},
-  {id:"SUB-202606-0039",work:"ソード・ワールド2.5",timing:"B",result:"REVIEW_REQUIRED",finding:"公式誤認の可能性（表紙）"},
-  {id:"APP-202606-0051",work:"光砕のリヴァルチャー",timing:"A",result:"PASS_CANDIDATE",finding:"明確な違反候補なし"},
-  {id:"SUB-202606-0036",work:"インセイン",timing:"B",result:"PASS_CANDIDATE",finding:"—"}
+  {id:"SUB-202606-0042",submission_id:"SUB-202606-0042",version_id:"SV-1",title:"狂気山脈の夜想曲",work:"新クトゥルフ神話TRPG、インセイン",result:"HIGH_RISK",finding:"[新クトゥルフ神話TRPG] 必須クレジット欠落（p.1）"},
+  {id:"SUB-202606-0039",submission_id:"SUB-202606-0039",version_id:"SV-2",title:"剣の街の異邦人",work:"ソード・ワールド2.5",result:"REVIEW_REQUIRED",finding:"公式誤認の可能性（表紙）"},
+  {id:"SUB-202606-0036",submission_id:"SUB-202606-0036",version_id:"SV-3",title:"インセインリプレイ集",work:"インセイン",result:"PASS_CANDIDATE",finding:"—"}
 ]; };
 MOCK.admin_setHumanReview=function(){ return true; };
 MOCK.admin_listContracts=function(){ return [
-  {contract_id:"—",application_id:"APP-202606-0050",work:"光砕のリヴァルチャー",applicant:"＊＊＊＊（個人）",status:"送信済・締結待ち",signed_at:"",cert_status:"NONE"},
-  {contract_id:"CTR-202606-0017",application_id:"APP-202606-0048",work:"新クトゥルフ神話TRPG",applicant:"＊＊＊＊（個人）",status:"SIGNED",signed_at:"2026-06-26",cert_status:"ACTIVE"},
-  {contract_id:"CTR-202606-0011",application_id:"APP-202606-0040",work:"インセイン",applicant:"＊＊＊＊（個人）",status:"SIGNED",signed_at:"2026-06-20",cert_status:"REVOKED"}
+  {contract_id:"—",application_id:"APP-202606-0050",application_ref:"REF-202606-0050",work:"光砕のリヴァルチャー",applicant:"＊＊＊＊（個人）",status:"締結待ち（CONTRACT_PENDING）",signed_at:"",cert_status:"NONE"},
+  {contract_id:"CTR-202606-0017",application_id:"APP-202606-0048",application_ref:"REF-202606-0048",work:"新クトゥルフ神話TRPG、インセイン",applicant:"＊＊＊＊（個人）",status:"SIGNED",signed_at:"2026-06-26",cert_status:"ACTIVE"},
+  {contract_id:"CTR-202606-0011",application_id:"APP-202606-0040",application_ref:"REF-202606-0040",work:"インセイン",applicant:"＊＊＊＊（個人）",status:"SIGNED",signed_at:"2026-06-20",cert_status:"REVOKED"}
 ]; };
-MOCK.admin_sendUploadLink=function(){ return true; };
+MOCK.admin_sendUploadLink=function(){ return { url:"https://script.example/exec?page=upload&t=mock-token-xxxx", token:"mock-token-xxxx" }; };
 MOCK.admin_revokeCert=function(){ return true; };
 MOCK.admin_reactivateCert=function(){ return true; };
 MOCK.admin_listPayments=function(){ return [
