@@ -1,9 +1,8 @@
 # clasp が GAS へ push する対象を限定する（rootDir = spll_src）。
-# パターンは rootDir 基準。まず全て無視し、必要なソースだけを許可リストで戻す。
+# パターンは rootDir 基準。まず全て無視し、ソース一式を許可リストで戻す。
+# （SEC-01 で Code.gs は 00_core.gs 等の複数 .gs に分割済み。upload.html も配信対象）
 **/**
 
 !appsscript.json
-!Code.gs
-!index.html
-!admin.html
-!report.html
+!*.gs
+!*.html
