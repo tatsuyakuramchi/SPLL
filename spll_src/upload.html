@@ -63,6 +63,11 @@
       <div class="meta">
         <div class="k">契約番号</div><div class="v mono" id="mContract">—</div>
         <div class="k">対象原作</div><div class="v" id="mWorks">—</div>
+        <div class="k">認証状態</div><div class="v" id="mCert">—</div>
+        <div class="k">提出期限・残数</div><div class="v" id="mLimit">—</div>
+      </div>
+      <div id="badgeRow" style="display:none;margin-top:12px;">
+        <a id="badgeLink" href="#" target="_blank" style="display:inline-block;background:var(--brass-bg);border:1px solid #E4D3A8;border-radius:9px;padding:10px 16px;font-weight:600;color:var(--ink);text-decoration:none;">🏅 認証バッジをダウンロード →</a>
       </div>
     </div>
 
@@ -129,6 +134,10 @@ function renderCtx(ctx){
   document.getElementById("app").style.display="";
   document.getElementById("mContract").textContent=ctx.contract_id||"—";
   document.getElementById("mWorks").textContent=(ctx.works&&ctx.works.length)?ctx.works.join("、"):"—";
+  var certMap={ACTIVE:"✔ 有効",SUSPENDED:"一時停止",REVOKED:"失効",EXPIRED:"期限切れ",TERMINATED:"終了",PAYMENT_HOLD:"支払保留",NONE:"—"};
+  document.getElementById("mCert").textContent=certMap[ctx.cert_status]||ctx.cert_status||"—";
+  document.getElementById("mLimit").textContent=(ctx.expires_at?("期限 "+ctx.expires_at):"")+(ctx.remaining_uploads!=null?("　残り "+ctx.remaining_uploads+" 回"):"");
+  if(ctx.badge_url){ document.getElementById("badgeRow").style.display=""; document.getElementById("badgeLink").href=ctx.badge_url; }
 
   var subs=ctx.submissions||[];
   var sel=document.getElementById("reSubmit");

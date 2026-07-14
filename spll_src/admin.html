@@ -163,10 +163,14 @@
 
   <!-- PAY -->
   <section class="view" id="v-pay">
-    <h2>入金・清算</h2>
-    <p class="sub">利用許諾料の請求・入金消込と、半期清算（計算書生成）の起点。入金があったら結果を入力します。</p>
+    <h2>報告・入金・清算</h2>
+    <p class="sub">利用報告の確認・承認 → 請求起票 → 入金消込 → 半期清算（計算書）の流れを管理します。</p>
     <div class="panel">
-      <div class="ph"><h3>入金管理（利用許諾料）</h3><span class="hint">Invoices / Payments より</span></div>
+      <div class="ph"><h3>利用報告（確認・承認・差戻し・ロック）</h3><div style="display:flex;gap:8px;align-items:center;"><span class="hint">Usage_Reports より</span><button class="btn p" onclick="generateInvoices()">承認済からRATE請求を起票</button></div></div>
+      <table><thead><tr><th>報告ID</th><th>対象原作</th><th>期 / チャネル</th><th>総売上</th><th>純売上</th><th>状態</th><th>操作</th></tr></thead><tbody id="report-tbody"></tbody></table>
+    </div>
+    <div class="panel">
+      <div class="ph"><h3>入金管理（利用許諾料）</h3><span class="hint">Invoices / Payments より（FLAT/PER_WORKは締結時に自動起票）</span></div>
       <table><thead><tr><th>契約ID</th><th>作品</th><th>請求額</th><th>入金状態</th><th>入金日</th><th>結果入力</th></tr></thead><tbody id="pay-tbody"></tbody></table>
     </div>
     <div class="panel">
@@ -229,7 +233,7 @@
 
       <div class="panel">
         <div class="ph"><h3>作品一覧（Works_Master）</h3><span class="hint" id="works-count"></span></div>
-        <table><thead><tr><th>作品ID</th><th>作品名</th><th>出版社</th><th>審査</th><th>公開状態</th><th>操作</th></tr></thead><tbody id="works-tbody"></tbody></table>
+        <table><thead><tr><th>作品ID</th><th>作品名</th><th>出版社</th><th>公開状態</th><th>操作</th></tr></thead><tbody id="works-tbody"></tbody></table>
       </div>
 
       <div class="panel">
@@ -240,7 +244,6 @@
             <div class="fld"><label>作品名</label><input id="w-work_name"></div>
             <div class="fld"><label>出版社</label><input id="w-publisher"></div>
             <div class="fld"><label>カテゴリ</label><input id="w-category" placeholder="TRPG / ルールブック"></div>
-            <div class="fld"><label>審査タイミング</label><select id="w-review_timing"><option value="A">A（契約前審査）</option><option value="B">B（契約後審査）</option></select></div>
             <div class="fld"><label>審査ポリシー</label><input id="w-review_policy" placeholder="PRE_CONTRACT / PATROL_ONLY"></div>
             <div class="fld"><label>利用許諾料（表示）</label><input id="w-fee_label" placeholder="電子書籍：売上の10％"></div>
             <div class="fld"><label>課金モデル <span class="h">バッジ発行トリガー</span></label><select id="w-billing_type"><option value="">自動判定（料金表記から）</option><option value="PREPAID">前払い・定額（入金時に発行）</option><option value="POSTPAID">後払い・従量／電子書籍（締結時に発行）</option></select></div>
@@ -253,7 +256,7 @@
         </div>
         <div class="pfoot"><button class="btn" onclick="resetWorkForm()">クリア</button><button class="save" onclick="saveWork()">作品を保存</button></div>
       </div>
-      <div class="note">公開状態を <span class="mono">PUBLISHED</span> にした作品のみ、公開申込窓口（api_listWorks）に表示されます。審査タイミング(A/B)は内部属性で、公開UIにはバッジを出しません。</div>
+      <div class="note">公開状態を <span class="mono">PUBLISHED</span> にした作品のみ、公開申込窓口（api_listWorks）に表示されます。審査はすべて契約締結後（B経路固定）です。</div>
     </div>
 
     <!-- FEE SCHEDULE（別紙2 利用料条件） -->
@@ -439,9 +442,9 @@ var _mLegal = {
   termsTemplate:"<h4>第1条（許諾の範囲）</h4><ol><li>許諾要素（{{ok}}）について、媒体（{{media}}）での頒布を許諾します。禁止要素（{{no}}）は利用できません。</li></ol><h4>第2条（許諾料）</h4><ol><li>利用許諾料は {{fee}} とします。</li></ol>"
 };
 var _mWorks = [
-  {work_id:"WRK-ARK00045",work_name:"光砕のリヴァルチャー",publisher:"どらこにあん／アークライト",category:"TRPG / ルールブック",review_timing:"A",review_policy:"PRE_CONTRACT",fee_label:"書籍：16,500円／作品",publish_status:"PUBLISHED",media:"書籍,電子書籍,商品販売",ok_elements:"世界観設定,シナリオ,キャラクター名称",no_elements:"公式イラスト流用",credit_text:"指定の権利表記を記載"},
-  {work_id:"WRK-ARK00012",work_name:"新クトゥルフ神話TRPG",publisher:"アークライト／KADOKAWA",category:"TRPG / ルールブック",review_timing:"B",review_policy:"PATROL_ONLY",fee_label:"電子書籍：売上の10％",publish_status:"PUBLISHED",media:"書籍,電子書籍,商品販売",ok_elements:"世界観・神話設定,シナリオ",no_elements:"公式イラスト流用,ルールデータ転載",credit_text:"指定のシリーズ権利表記を記載"},
-  {work_id:"WRK-BKK00019",work_name:"インセイン",publisher:"冒険企画局",category:"TRPG / ルールブック",review_timing:"B",review_policy:"PATROL_ONLY",fee_label:"電子書籍：売上の10％",publish_status:"DRAFT",media:"電子書籍",ok_elements:"世界観設定,ハンドアウト形式",no_elements:"シナリオデータ転載",credit_text:"指定の権利表記を記載"}
+  {work_id:"WRK-ARK00045",work_name:"光砕のリヴァルチャー",publisher:"どらこにあん／アークライト",category:"TRPG / ルールブック",review_policy:"PATROL_ONLY",fee_label:"書籍：16,500円／作品",publish_status:"PUBLISHED",media:"書籍,電子書籍,商品販売",ok_elements:"世界観設定,シナリオ,キャラクター名称",no_elements:"公式イラスト流用",credit_text:"指定の権利表記を記載"},
+  {work_id:"WRK-ARK00012",work_name:"新クトゥルフ神話TRPG",publisher:"アークライト／KADOKAWA",category:"TRPG / ルールブック",review_policy:"PATROL_ONLY",fee_label:"電子書籍：売上の10％",publish_status:"PUBLISHED",media:"書籍,電子書籍,商品販売",ok_elements:"世界観・神話設定,シナリオ",no_elements:"公式イラスト流用,ルールデータ転載",credit_text:"指定のシリーズ権利表記を記載"},
+  {work_id:"WRK-BKK00019",work_name:"インセイン",publisher:"冒険企画局",category:"TRPG / ルールブック",review_policy:"PATROL_ONLY",fee_label:"電子書籍：売上の10％",publish_status:"DRAFT",media:"電子書籍",ok_elements:"世界観設定,ハンドアウト形式",no_elements:"シナリオデータ転載",credit_text:"指定の権利表記を記載"}
 ];
 var _mFee = [
   {usage_category:"書籍",fee_model:"PER_WORK",fee_value:"16500",fee_label:"16,500円／原作",licensed_uses:"複製・頒布",payment_due:"契約締結後の請求書発行日から30日以内",reporting_requirement:"定額のため利用報告は原則不要",report_due:"－",threshold_or_cap:"－",reprint_rule:"増刷時も追加料金なし",special_terms:"",active:"true"},
@@ -481,7 +484,7 @@ function loadDataSource(){ call("admin_getDataSourceConfig",[],function(c){ if(!
 function saveDataSource(){ var c={}; DSKEYS.forEach(function(k){ c[k]=$("ds-"+k).value; }); call("admin_saveDataSourceConfig",[c],function(){ toast("データソース設定を保存しました"); }); }
 
 // 作品マスタ
-var WFIELDS = ["work_id","work_name","publisher","category","review_timing","review_policy","fee_label","billing_type","publish_status","media","ok_elements","no_elements","credit_text"];
+var WFIELDS = ["work_id","work_name","publisher","category","review_policy","fee_label","billing_type","publish_status","media","ok_elements","no_elements","credit_text"];
 function loadWorksPane(){ loadDataSource(); reloadWorks(); }
 function reloadWorks(){ call("admin_listWorksMaster",[],renderWorks); }
 function renderWorks(rows){
@@ -491,7 +494,6 @@ function renderWorks(rows){
     var pub = String(w.publish_status||"")==="PUBLISHED";
     var tr=document.createElement("tr");
     tr.innerHTML = '<td class="id">'+esc(w.work_id)+'</td><td>'+esc(w.work_name)+'</td><td>'+esc(w.publisher)+'</td>'+
-      '<td><span class="pill '+(w.review_timing==="A"?"A":"B")+'">'+esc(w.review_timing||"")+'</span></td>'+
       '<td><span class="pill '+(pub?"pass":"wait")+'">'+esc(w.publish_status||"DRAFT")+'</span></td>';
     var td=document.createElement("td"); td.className="actions";
     var bEdit=document.createElement("button"); bEdit.className="btn"; bEdit.textContent="編集"; bEdit.onclick=function(){ editWork(w); };
@@ -501,7 +503,7 @@ function renderWorks(rows){
   });
 }
 function editWork(w){ $("work-form-title").textContent="作品を編集： "+(w.work_name||w.work_id); WFIELDS.forEach(function(k){ var el=$("w-"+k); if(el) el.value=(w[k]==null?"":w[k]); }); window.scrollTo(0,document.body.scrollHeight); }
-function resetWorkForm(){ $("work-form-title").textContent="作品を追加"; WFIELDS.forEach(function(k){ var el=$("w-"+k); if(el) el.value=(k==="review_timing"?"A":(k==="publish_status"?"DRAFT":"")); }); }
+function resetWorkForm(){ $("work-form-title").textContent="作品を追加"; WFIELDS.forEach(function(k){ var el=$("w-"+k); if(el) el.value=(k==="publish_status"?"DRAFT":""); }); }
 function saveWork(){
   var w={}; WFIELDS.forEach(function(k){ var el=$("w-"+k); if(el) w[k]=el.value; });
   if(!w.work_name){ toast("作品名を入力してください", true); return; }
@@ -661,15 +663,25 @@ function contractPill(s){
   if(s==="SENT") return {cls:"wait", label:"送信済・締結待ち"};
   return {cls:"wait", label:s||"-"};
 }
-// 計算書状態 → ピル
+// 計算書状態 → ピル（修正設計書 FLOW-03/§12.3：サーバーの新ステータスに統一。旧 CONFIRMED/OBJECTED は表示しない）
 function stmtPill(s){
   s=String(s||"");
   if(s==="DRAFT") return {cls:"wait", label:"DRAFT"};
   if(s==="APPROVED") return {cls:"review", label:"承認済"};
-  if(s==="SENT") return {cls:"sign", label:"送信済(みなし確認待ち)"};
-  if(s==="CONFIRMED") return {cls:"pass", label:"確認済"};
-  if(s==="OBJECTED") return {cls:"fail", label:"異議あり"};
-  if(s==="ISSUED") return {cls:"pass", label:"発行済"};
+  if(s==="OBJECTION_PERIOD") return {cls:"sign", label:"異議期間中"};
+  if(s==="NO_OBJECTION_RECORDED") return {cls:"pass", label:"無異議記録"};
+  if(s==="OBJECTION_RECEIVED") return {cls:"fail", label:"異議受領"};
+  if(s==="FINALIZED") return {cls:"pass", label:"支払確定"};
+  if(s==="SUPERSEDED") return {cls:"wait", label:"差替済"};
+  return {cls:"wait", label:s||"-"};
+}
+// 利用報告状態 → ピル
+function reportPill(s){
+  s=String(s||"");
+  if(s==="SUBMITTED") return {cls:"review", label:"確認待ち"};
+  if(s==="RETURNED") return {cls:"fail", label:"差戻し"};
+  if(s==="APPROVED") return {cls:"pass", label:"承認済"};
+  if(s==="LOCKED") return {cls:"sign", label:"ロック"};
   return {cls:"wait", label:s||"-"};
 }
 function pill(p){ return '<span class="pill '+p.cls+'">'+esc(p.label)+'</span>'; }
@@ -830,14 +842,49 @@ function loadPay(){
       tr.appendChild(td(pill(sp)));
       tr.appendChild(td('<span class="id">'+esc(s.objection_due||"—")+'</span>'));
       var act=document.createElement("td"); act.className="actions";
-      if(String(s.status)==="DRAFT"){
+      var st=String(s.status);
+      if(st==="DRAFT"){
         act.appendChild(mkBtn("承認","btn p",function(){ if(confirm("計算書を承認しますか？（承認後にCloudSign送信）")) call("admin_approveStatement",[s.statement_id],function(){ toast("計算書を承認しました"); loadPay(); }); }));
+      } else if(st==="OBJECTION_PERIOD"){
+        act.appendChild(mkBtn("異議を記録","btn d",function(){ var note=prompt("異議の内容（メモ）：",""); if(note===null) return; call("admin_recordObjection",[s.statement_id,note],function(){ toast("異議を記録しました"); loadPay(); }); }));
+      } else if(st==="NO_OBJECTION_RECORDED"){
+        act.appendChild(mkBtn("支払確定","btn p",function(){ if(confirm("この計算書を支払確定（FINALIZED）にしますか？")) call("admin_finalizeStatement",[s.statement_id],function(){ toast("支払確定しました"); loadPay(); }); }));
       } else {
         act.appendChild(mkBtn("CloudSign確認","btn",function(){ toast("CloudSign管理画面でご確認ください"); }));
       }
       tr.appendChild(act); tb.appendChild(tr);
     });
   });
+  loadReports();
+}
+// ---- 利用報告（FUN-01：確認・差戻し・承認・ロック → RATE請求起票）----
+function loadReports(){
+  call("admin_listReports",[],function(rows){
+    var tb=$("report-tbody"); if(!tb) return; tb.innerHTML=""; rows=rows||[];
+    if(!rows.length){ emptyRow(tb,7,"利用報告がありません"); return; }
+    rows.forEach(function(r){
+      var tr=document.createElement("tr");
+      tr.appendChild(td('<span class="id">'+esc(r.report_id)+'</span>'));
+      tr.appendChild(td(esc(r.work)));
+      tr.appendChild(td(esc(r.period)+' / '+esc(r.channel)));
+      tr.appendChild(td(esc(r.gross)));
+      tr.appendChild(td(esc(r.net)));
+      tr.appendChild(td(pill(reportPill(r.status))));
+      var act=document.createElement("td"); act.className="actions";
+      if(r.status==="SUBMITTED"){
+        act.appendChild(mkBtn("承認","btn p",function(){ call("admin_approveReport",[r.report_id],function(){ toast("報告を承認しました"); loadReports(); }); }));
+        act.appendChild(mkBtn("差戻し","btn d",function(){ var reason=prompt("差戻し理由（必須）：",""); if(!reason) return; call("admin_returnReport",[r.report_id,reason],function(){ toast("差し戻しました"); loadReports(); }); }));
+      } else if(r.status==="APPROVED"){
+        act.appendChild(mkBtn("ロック","btn",function(){ if(confirm("この報告をロック（確定）しますか？")) call("admin_lockReport",[r.report_id],function(){ toast("ロックしました"); loadReports(); }); }));
+      }
+      tr.appendChild(act); tb.appendChild(tr);
+    });
+  });
+}
+function generateInvoices(){
+  var period=prompt("請求起票の対象期（例 2026H1）：","");
+  if(period===null) return;
+  call("admin_generateInvoicesFromReports",[period||undefined],function(r){ r=r||{}; toast("請求を起票： "+(r.generated||0)+" 件（"+(r.period||"")+"）"); loadPay(); });
 }
 function recordPay(v){
   var amount=prompt("入金額（円）：", String(v.amount||"").replace(/[^0-9]/g,"")||"");
@@ -912,6 +959,17 @@ MOCK.admin_listSettlements=function(){ return [
   {statement_id:"STM-202606-0002",period:"2026H1",partner:"グループSNE",amount:"＊＊＊円",status:"SENT",objection_due:"2026-07-26"}
 ]; };
 MOCK.admin_approveStatement=function(){ return true; };
+MOCK.admin_recordObjection=function(){ return true; };
+MOCK.admin_finalizeStatement=function(){ return true; };
+var _mReports=[
+  {report_id:"RPT-202607-0001",contract_id:"CTR-202606-0017",work:"新クトゥルフ神話TRPG、インセイン",period:"2026H1",channel:"電子書籍",gross:"120000",net:"110000",status:"SUBMITTED",url:""},
+  {report_id:"RPT-202607-0002",contract_id:"CTR-202606-0011",work:"インセイン",period:"2026H1",channel:"DL販売",gross:"50000",net:"48000",status:"APPROVED",url:""}
+];
+MOCK.admin_listReports=function(){ return _mReports; };
+MOCK.admin_approveReport=function(id){ _mReports.forEach(function(r){ if(r.report_id===id) r.status="APPROVED"; }); return true; };
+MOCK.admin_returnReport=function(id){ _mReports.forEach(function(r){ if(r.report_id===id) r.status="RETURNED"; }); return true; };
+MOCK.admin_lockReport=function(id){ _mReports.forEach(function(r){ if(r.report_id===id) r.status="LOCKED"; }); return true; };
+MOCK.admin_generateInvoicesFromReports=function(){ return { period:"2026H1", generated:1, invoices:[] }; };
 MOCK.admin_cloudSignTest=function(){ return {ok:true,sandbox:_mInt.cloudsign.sandbox,base:_mInt.cloudsign.sandbox?"https://api-sandbox.cloudsign.jp":"https://api.cloudsign.jp",token_prefix:"sbx_ab…"}; };
 var _mX={api_key:"",api_secret_set:false,access_token:"",access_secret_set:false,autopost:true,template:"【SPLL 対象作品】{name}（{publisher}）\n二次創作の有料頒布ライセンスのお申込みを受付中です。 #SPLL #TRPG\n{url}"};
 var _mBadge={auto:true,template_id:""};

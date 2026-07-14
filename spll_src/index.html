@@ -371,14 +371,28 @@ function updateN0(){ const b=document.getElementById("n0"); if(b) b.disabled=!(c
 
 const hasGas = (typeof google!=="undefined" && google.script && google.script.run);
 
-/** GAS① の api_listWorks() で原作を取得。スタンドアロン時はサンプルにフォールバック。 */
+/**
+ * GAS① の api_listWorks() で原作を取得。
+ * フェイルクローズ（修正設計書 OPS-02/§17.1）：GAS上で取得に失敗した場合はサンプルを表示せず、
+ * 「現在申込を受け付けられません」を表示して申込を停止する。サンプルはスタンドアロン確認時のみ。
+ */
 function loadWorks(){
   if(hasGas){
     google.script.run
-      .withSuccessHandler(ws=>{ if(ws && ws.length) WORKS=ws; renderGrid(); })
-      .withFailureHandler(()=>renderGrid())
+      .withSuccessHandler(ws=>{
+        if(ws && ws.length){ WORKS=ws; renderGrid(); }
+        else failClosed("公開中の原作がありません。");
+      })
+      .withFailureHandler(err=>failClosed(err && err.message || ""))
       .api_listWorks();
   } else { renderGrid(); }
+}
+function failClosed(detail){
+  WORKS=[]; cart=[]; renderCart();
+  const g=document.getElementById("grid");
+  g.innerHTML='<div style="grid-column:1/-1;background:var(--warn-bg);border:1px solid #E0B4B0;border-radius:12px;padding:22px;text-align:center;">'+
+    '<div style="font-family:\'Zen Kaku Gothic New\';font-weight:700;color:var(--warn);font-size:16px;">現在申込を受け付けられません</div>'+
+    '<div style="font-size:12.5px;color:var(--soft);margin-top:6px;">システムの都合により原作情報を取得できませんでした。時間をおいて再度お試しください。</div></div>';
 }
 
 function inCart(id){ return cart.indexOf(id)>=0; }
