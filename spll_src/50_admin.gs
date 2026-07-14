@@ -675,28 +675,101 @@ function admin_rotateCertCode(contractId){
   const code = randCode_(12);
   updateRow_(ssOps_(),'Certificates','cert_id',cert.cert_id,{ check_code_hash:hash_(code) });
   logEvent_('certificate', cert.cert_id, actor.email, null, { code_rotated:true });
-  return { cert_id:cert.cert_id, check_code:code, verify_url:verifyUrl_(cert.cert_id, code) };
+  const url = verifyUrl_(cert.cert_id, code);
+  // 旧QRを含むバッジを差し替え（V2-015）
+  readRows_(ssOps_(),'Badges').filter(function(b){ return b.contract_id === contractId && b.status === 'ISSUED'; })
+    .forEach(function(b){ updateRow_(ssOps_(),'Badges','badge_id',b.badge_id,{ status:'SUPERSEDED' }); });
+  enqueueBadgeJob_(contractId, url);
+  return { cert_id:cert.cert_id, check_code:code, verify_url:url };
 }
 
 /**
  * 認証の状態変更（理由・承認記録付き）。status は CERT_STATES のいずれか。
  * 例：SUSPENDED / REVOKED / PAYMENT_HOLD / ACTIVE(再有効) / TERMINATED / EXPIRED
  */
+const CERT_CRITICAL_STATES = ['REVOKED','TERMINATED','PAYMENT_HOLD','ACTIVE'];   // 職務分離の対象（V2-018）
+
 function admin_setCertStatus(contractId, status, reasonCode, reasonText, legalCaseId){ requireRole_(['LEGAL_ADMIN']);
+  if(CERT_CRITICAL_STATES.indexOf(status) >= 0)
+    throw new Error('AUTHORIZATION_ERROR: この状態変更（' + status + '）は申請・承認の分離が必要です。admin_requestCertChange → 別の担当者が admin_approveCertChange を実行してください。');
+  return applyCertStatus_(contractId, status, reasonCode, reasonText, legalCaseId, actor_());
+}
+/** 状態変更の実適用（内部）。承認済み申請または非重要状態からのみ呼ばれる。 */
+function applyCertStatus_(contractId, status, reasonCode, reasonText, legalCaseId, actorEmail){
   if(CERT_STATES.indexOf(status) < 0) throw new Error('不正な状態: ' + status);
   const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.contract_id === contractId; });
   if(!cert) throw new Error('認証が見つかりません: ' + contractId);
   const before = cert.status;
   updateRow_(ssOps_(),'Certificates','cert_id',cert.cert_id,{
     status:status, reason_code:reasonCode||'', reason_text:reasonText||'',
-    requested_by:actor_(), approved_by:actor_(), legal_case_id:legalCaseId||'',
+    requested_by:actorEmail, approved_by:actorEmail, legal_case_id:legalCaseId||'',
     effective_at:new Date().toISOString() });
-  logEvent_('certificate', cert.cert_id, actor_(), {status:before}, {status:status, reason_code:reasonCode||''});
+  logEvent_('certificate', cert.cert_id, actorEmail, {status:before}, {status:status, reason_code:reasonCode||''});
   return true;
 }
+
+// ---- 認証状態変更の申請・承認（V2-018）----
+/** 申請（LEGAL_ADMIN / OPERATIONS）。REQUESTED で登録し、別担当者の承認を待つ。 */
+function admin_requestCertChange(contractId, requestedStatus, reasonCode, reasonText, legalCaseId){
+  const actor = requireRole_(['LEGAL_ADMIN','OPERATIONS']);
+  if(CERT_STATES.indexOf(requestedStatus) < 0) throw new Error('不正な状態: ' + requestedStatus);
+  if(!String(reasonText||'').trim()) throw new Error('VALIDATION_ERROR: 理由は必須です');
+  const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.contract_id === contractId; });
+  if(!cert) throw new Error('認証が見つかりません: ' + contractId);
+  const reqId = Utilities.getUuid();
+  appendRow_(ssOps_(),'Certificate_Change_Requests',{ request_id:reqId, cert_id:cert.cert_id, contract_id:contractId,
+    requested_status:requestedStatus, reason_code:reasonCode||'', reason_text:sanitizeCell_(String(reasonText)),
+    legal_case_id:legalCaseId||'', requested_by:actor.email, requested_at:new Date().toISOString(),
+    approved_by:'', approved_at:'', status:'REQUESTED', emergency_override:'' });
+  logEvent_('cert_change_request', reqId, actor.email, null, { contract_id:contractId, requested_status:requestedStatus });
+  return { request_id:reqId };
+}
+/**
+ * 承認・却下（LEGAL_ADMIN）。申請者本人による承認は原則拒否
+ * （緊急時のみ emergencyReason を指定して EMERGENCY_OVERRIDE として記録・V2-018）。
+ */
+function admin_approveCertChange(requestId, approve, emergencyReason){
+  const actor = requireRole_(['LEGAL_ADMIN']);
+  const req = readRows_(ssOps_(),'Certificate_Change_Requests').find(function(r){ return r.request_id === requestId; });
+  if(!req) throw new Error('DATA_NOT_FOUND: 申請が見つかりません');
+  if(req.status !== 'REQUESTED') throw new Error('DATA_CONFLICT: この申請は処理済みです（' + req.status + '）');
+  const now = new Date().toISOString();
+  if(approve === false){
+    updateRow_(ssOps_(),'Certificate_Change_Requests','request_id',requestId,
+      { status:'REJECTED', approved_by:actor.email, approved_at:now });
+    logEvent_('cert_change_request', requestId, actor.email, {status:'REQUESTED'}, { status:'REJECTED' });
+    return true;
+  }
+  let override = '';
+  if(String(req.requested_by).toLowerCase() === String(actor.email).toLowerCase()){
+    if(!String(emergencyReason||'').trim())
+      throw new Error('AUTHORIZATION_ERROR: 申請者本人は承認できません（緊急時は emergencyReason を指定＝EMERGENCY_OVERRIDE として記録されます）');
+    override = 'EMERGENCY_OVERRIDE: ' + String(emergencyReason);
+  }
+  applyCertStatus_(req.contract_id, req.requested_status, req.reason_code, req.reason_text, req.legal_case_id, actor.email);
+  updateRow_(ssOps_(),'Certificate_Change_Requests','request_id',requestId,
+    { status:'APPLIED', approved_by:actor.email, approved_at:now, emergency_override:sanitizeCell_(override) });
+  // 再有効化時は照合コードを再発行（旧QRのバッジ差替え・再生成も rotate 内で実施。V2-015）
+  if(req.requested_status === 'ACTIVE'){
+    try{ admin_rotateCertCode(req.contract_id); }
+    catch(e){ logError_('PROCESSING_ERROR','certReactivateBadge', e, { contract_id:req.contract_id }); }
+  }
+  logEvent_('cert_change_request', requestId, actor.email, {status:'REQUESTED'},
+    { status:'APPLIED', applied_status:req.requested_status, emergency:!!override });
+  return true;
+}
+/** 未処理の状態変更申請一覧 */
+function admin_listCertChangeRequests(){ requireRole_([]);
+  return readRows_(ssOps_(),'Certificate_Change_Requests')
+    .filter(function(r){ return r.status === 'REQUESTED'; })
+    .map(function(r){ return { request_id:r.request_id, contract_id:r.contract_id,
+      requested_status:r.requested_status, reason_text:r.reason_text, requested_by:r.requested_by,
+      requested_at:String(r.requested_at||'').slice(0,10) }; });
+}
 // UI互換の薄いラッパ
-function admin_revokeCert(contractId, reasonText){ return admin_setCertStatus(contractId, 'REVOKED', 'MANUAL_REVOKE', reasonText||'', ''); }
-function admin_reactivateCert(contractId){ return admin_setCertStatus(contractId, 'ACTIVE', 'REACTIVATE', '', ''); }
+// V2-018：失効・再有効は「申請」を作成（承認は別担当者）
+function admin_revokeCert(contractId, reasonText){ return admin_requestCertChange(contractId, 'REVOKED', 'MANUAL_REVOKE', reasonText||'管理コンソールからの失効申請', ''); }
+function admin_reactivateCert(contractId){ return admin_requestCertChange(contractId, 'ACTIVE', 'REACTIVATE', '再有効化の申請', ''); }
 function admin_getCertStatus(contractId){ requireRole_([]);
   const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.contract_id === contractId; });
   return cert ? { cert_id:cert.cert_id, status:cert.status, reason_code:cert.reason_code, issued_at:cert.issued_at } : { status:'NONE' };

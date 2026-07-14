@@ -25,7 +25,8 @@ const SCHEMA_MASTER = {
   // 利用料条件（別紙2）の一律ルール。利用目的(usage_category)ごとに計算方式を持つ（事務局が編集）。
   //   fee_model: RATE=売上連動 / FLAT=定額(契約単位) / PER_WORK=原作数比例
   //   fee_value: RATEは率(0.10=10%)、FLAT/PER_WORKは金額(円)
-  Fee_Schedule:    ['usage_category','fee_model','fee_value','fee_label','licensed_uses','payment_due','reporting_requirement','report_due','threshold_or_cap','reprint_rule','special_terms','active']
+  // report_* 構造化列（V2-017）：報告要否・期限を文言でなく構造化値で保持
+  Fee_Schedule:    ['usage_category','fee_model','fee_value','fee_label','licensed_uses','payment_due','reporting_requirement','report_due','threshold_or_cap','reprint_rule','special_terms','active','requires_usage_report','report_frequency','report_due_days','report_due_base']
 };
 const SCHEMA_OPS = {
   // 申込：複数原作は中間テーブル Application_Works で管理（B経路固定・A/B分岐なし）
@@ -44,7 +45,7 @@ const SCHEMA_OPS = {
   Submission_Versions:  ['version_id','submission_id','version_no','status','submitted_at'],
   Submission_Files:     ['submission_file_id','version_id','drive_file_id','mime_type','size','sha256','original_filename','magic_valid'],
   AI_Review_Jobs:       ['ai_review_id','submission_id','version_id','model','prompt_version','status','retry_count','overall_result','risk_score','human_review_required','response_file_id','started_at','completed_at','last_error'],
-  AI_Findings:          ['finding_id','ai_review_id','work_id','rule_id','severity','result','page','evidence','confidence'],
+  AI_Findings:          ['finding_id','ai_review_id','work_id','rule_id','severity','result','page','evidence','recommended_action','confidence'],
   Human_Reviews:        ['human_review_id','submission_id','version_id','reviewer','result','comments','reviewed_at'],
   Compliance_Alerts:    ['alert_id','contract_id','submission_id','severity','status','settlement_block'],
   // 利用報告（FUN-01/§11.1）：SUBMITTED→RETURNED/APPROVED→LOCKED（→SUPERSEDED）
@@ -77,6 +78,10 @@ const SCHEMA_OPS = {
   // 通知キュー（§10）：メール非保持方針下の「誰に何を通知すべきか」の記録
   Notification_Queue:   ['notification_id','contract_id','type','reference_id','payload_json','status','created_at','sent_at','handled_by'],
   // スキーマ移行（V2-003）
+  // バッジ発行ジョブ（V2-014）：QUEUED→GENERATING→ISSUED／ERROR→RETRY_WAIT
+  Badge_Jobs:           ['badge_job_id','contract_id','status','retry_count','last_error','created_at','finished_at'],
+  // 認証状態変更の職務分離（V2-018）：申請→承認→適用
+  Certificate_Change_Requests: ['request_id','cert_id','contract_id','requested_status','reason_code','reason_text','legal_case_id','requested_by','requested_at','approved_by','approved_at','status','emergency_override'],
   Schema_Versions:      ['schema_name','version','applied_at','applied_by','checksum'],
   Migration_Runs:       ['migration_run_id','migration_name','started_at','finished_at','status','before_snapshot','after_snapshot','error_detail']
 };
@@ -94,16 +99,19 @@ const SAMPLE_PARTNERS_SEED = [
 const SAMPLE_FEE_SCHEDULE_SEED = [
   {usage_category:'書籍', fee_model:'PER_WORK', fee_value:'16500', fee_label:'16,500円／原作',
    licensed_uses:'複製・頒布', payment_due:'契約締結後の請求書発行日から30日以内', reporting_requirement:'定額のため利用報告は原則不要',
-   report_due:'－', threshold_or_cap:'－', reprint_rule:'増刷時も追加料金なし（要お申し出）', special_terms:'', active:'true'},
+   report_due:'－', threshold_or_cap:'－', reprint_rule:'増刷時も追加料金なし（要お申し出）', special_terms:'', active:'true',
+   requires_usage_report:'false', report_frequency:'', report_due_days:'', report_due_base:''},
   {usage_category:'電子出版物', fee_model:'RATE', fee_value:'0.10', fee_label:'売上の10％',
    licensed_uses:'複製・公衆送信', payment_due:'半期ごとの計算書発効後', reporting_requirement:'半期ごとに販売実績を報告',
-   report_due:'各半期終了後1ヶ月以内', threshold_or_cap:'－', reprint_rule:'－', special_terms:'', active:'true'},
+   report_due:'各半期終了後1ヶ月以内', threshold_or_cap:'－', reprint_rule:'－', special_terms:'', active:'true',
+   requires_usage_report:'true', report_frequency:'HALF_YEARLY', report_due_days:'30', report_due_base:'PERIOD_END'},
   {usage_category:'商品販売', fee_model:'PER_WORK', fee_value:'16500', fee_label:'16,500円／原作',
    licensed_uses:'複製・頒布・販売', payment_due:'契約締結後の請求書発行日から30日以内', reporting_requirement:'定額のため利用報告は原則不要',
    report_due:'－', threshold_or_cap:'頒布数の上限は設けない', reprint_rule:'追加製造も追加料金なし（要お申し出）', special_terms:'', active:'true'},
   {usage_category:'サブスクリプション', fee_model:'RATE', fee_value:'0.10', fee_label:'売上の10％',
    licensed_uses:'公衆送信（継続的提供）', payment_due:'半期ごとの計算書発効後', reporting_requirement:'半期ごとに売上を報告',
-   report_due:'各半期終了後1ヶ月以内', threshold_or_cap:'－', reprint_rule:'－', special_terms:'', active:'true'},
+   report_due:'各半期終了後1ヶ月以内', threshold_or_cap:'－', reprint_rule:'－', special_terms:'', active:'true',
+   requires_usage_report:'true', report_frequency:'HALF_YEARLY', report_due_days:'30', report_due_base:'PERIOD_END'},
   {usage_category:'イベント', fee_model:'FLAT', fee_value:'0', fee_label:'無償（イベント頒布・要事前申告）',
    licensed_uses:'頒布・上演', payment_due:'－', reporting_requirement:'頒布実績を事後報告',
    report_due:'イベント終了後1ヶ月以内', threshold_or_cap:'－', reprint_rule:'－', special_terms:'営利目的の恒常販売には別区分が適用されます', active:'true'},

@@ -317,6 +317,7 @@ function setConfig_(key, value){
 // ---- 9.1 同意文・規約 ----
 const DEFAULT_PRIVACY =
 '<h4>1. 取得する情報</h4><ol><li>氏名、連絡先（メールアドレス）</li><li>申込作品・利用態様、提出作品データ</li><li>契約に至る場合は、住所・振込先その他の契約履行に必要な情報</li></ol>'+
+'<h4>1の2. AIによる審査処理</h4><ol><li>提出作品はVertex AI Gemini による一次審査に付されます。提出作品に個人情報が含まれる場合、当該情報もAI処理の対象となります（審査以外の目的には使用しません）。</li></ol>'+
 '<h4>2. 利用目的</h4><ol><li>SPLL利用許諾の審査・契約の締結および管理</li><li>提出作品の適合性審査（AIによる一次審査を含む）</li><li>利用許諾料・配分の計算および清算</li><li>お問い合わせ対応・連絡</li><li>法令遵守および権利保護</li></ol>'+
 '<h4>3. 委託・第三者提供</h4><ol><li>契約締結のため電子契約サービス（CloudSign）に取扱いを委託します。</li><li>データの保管・処理のためGoogle Workspace／Google Cloud（Vertex AI Geminiによる作品審査を含む）に取扱いを委託します。</li><li>法令に基づく場合を除き、ご本人の同意なく第三者へ提供しません。</li></ol>'+
 '<h4>4. 保有期間</h4><ol><li>契約に至らなかった申込情報・提出作品データは、取得から1年で削除します。</li><li>契約に至った場合は、契約期間および関係法令の定める期間、保有します。</li></ol>'+
@@ -340,9 +341,14 @@ function verifyUrl_(certId, code){
   let base = ''; try{ base = ScriptApp.getService().getUrl() || ''; }catch(e){}
   return (base||'') + '?page=verify&id=' + encodeURIComponent(certId) + '&c=' + encodeURIComponent(code);
 }
+/** 暗号学的乱数コード（V2-014-5：Math.random不使用）。UUID×2のSHA-256から生成。 */
 function randCode_(n){
-  const cs = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let s = '';
-  for(var i=0;i<n;i++) s += cs.charAt(Math.floor(Math.random()*cs.length));
+  const cs = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let s = '';
+  while(s.length < n){
+    const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, Utilities.getUuid() + Utilities.getUuid());
+    for(var i=0; i<bytes.length && s.length<n; i++){ s += cs.charAt(((bytes[i]%256)+256) % cs.length); }
+  }
   return s;
 }
 /** 契約の対象原作名リスト（Contract_Works→Works_Master） */

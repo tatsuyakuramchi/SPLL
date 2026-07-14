@@ -116,14 +116,12 @@ function web_getSubmitContext(token){
     }
     return { submission_id:s.submission_id, title:s.title, status:s.status, versions:vs, correction:correction };
   });
-  // バッジ取得導線（FUN-03）：発行済みならBADGE_DOWNLOADトークンを払い出してURLを返す
+  // バッジ取得導線（V2-014-7）：提出トークンのままバッジページを開ける（表示毎の再発行はしない）
   let badgeUrl = '';
   const badge = readRows_(ssOps_(),'Badges').find(function(b){ return b.contract_id === contractId && String(b.status) === 'ISSUED'; });
   if(badge){
-    revokeTokens_(contractId, 'BADGE_DOWNLOAD');
-    const bt = issueToken_(contractId, 'BADGE_DOWNLOAD', 90, 20);
     let base = ''; try{ base = ScriptApp.getService().getUrl() || ''; }catch(e){}
-    badgeUrl = (base||'') + '?page=badge&token=' + bt;
+    badgeUrl = (base||'') + '?page=badge&token=' + encodeURIComponent(token);
   }
   const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.contract_id === contractId; });
   const remaining = Math.max(0, num_(tok.max_uses) - num_(tok.used_count));
@@ -210,20 +208,27 @@ function web_submitWork(token, data){
   return { submission_id:submissionId, version_no:versionNo, ai_review_id:aiId };
 }
 
-/** バッジDLページ（BADGE_DOWNLOADトークン）：3サイズのプレビューとダウンロードリンク */
+/**
+ * バッジDLページ（V2-014-3/4/7）：BADGE_DOWNLOAD または SUBMISSION トークンで認証し、
+ * GASがDriveから読み出した画像を data URI で配信する（Drive共有リンクは使わない）。
+ */
 function serveBadge_(e){
   const token = (e.parameter && e.parameter.token) || '';
-  const tok = resolveToken_(token, 'BADGE_DOWNLOAD');
+  let tok = resolveToken_(token, 'BADGE_DOWNLOAD');
+  if(tok){ consumeToken_(tok); }
+  else { tok = resolveToken_(token, 'SUBMISSION'); }   // 提出者は提出トークンのまま閲覧可（再発行不要）
   const b = tok ? readRows_(ssOps_(),'Badges').find(function(x){ return x.contract_id === tok.contract_id && String(x.status) === 'ISSUED'; }) : null;
   if(!b) return HtmlService.createHtmlOutput('<p style="font-family:sans-serif">リンクが無効か、有効期限が切れています。</p>').setTitle('SPLL 認証バッジ');
-  consumeToken_(tok);
   const workNames = contractWorkNames_(b.contract_id).join('、');   // 契約単位（複数原作）
   const rows = [['大 (L)', b.png_l], ['中 (M)', b.png_m], ['小 (S)', b.png_s]].map(function(p){
-    const view = 'https://drive.google.com/uc?id=' + p[1];
-    const dl   = 'https://drive.google.com/uc?export=download&id=' + p[1];
+    let dataUri = '';
+    try{
+      const blob = DriveApp.getFileById(p[1]).getBlob();
+      dataUri = 'data:image/png;base64,' + Utilities.base64Encode(blob.getBytes());
+    }catch(err){ return '<div style="margin:18px 0;color:#A6342F">' + p[0] + '：画像を取得できませんでした</div>'; }
     return '<div style="margin:18px 0"><div style="font-weight:600;margin-bottom:6px">' + p[0] + '</div>' +
-      '<img src="' + view + '" style="max-width:100%;border:1px solid #ccc;border-radius:8px"><br>' +
-      '<a href="' + dl + '" style="display:inline-block;margin-top:6px">PNGをダウンロード</a></div>';
+      '<img src="' + dataUri + '" style="max-width:100%;border:1px solid #ccc;border-radius:8px"><br>' +
+      '<a href="' + dataUri + '" download="SPLL_badge_' + esc_(b.badge_id) + '_' + p[0].slice(-3,-1) + '.png" style="display:inline-block;margin-top:6px">PNGをダウンロード</a></div>';
   }).join('');
   const html = '<div style="font-family:sans-serif;max-width:720px;margin:0 auto;padding:24px">' +
     '<h2>SPLL 認証バッジ</h2><p>' + esc_(workNames) + ' ／ ライセンスID: ' + b.contract_id +

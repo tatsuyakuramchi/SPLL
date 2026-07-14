@@ -219,10 +219,47 @@ const lcRow=lc.find(r=>r.contract_id===contract.contract_id);
 ok(lcRow && lcRow.work.split('、').length===2,'listContracts shows 2 works: '+(lcRow&&lcRow.work));
 ok(lcRow.cert_status==='ACTIVE','listContracts cert ACTIVE');
 
-// 11. cert states
+// 11. cert states（V2-018：重要変更は申請→別担当者の承認・職務分離）
 G.admin_setCertStatus(contract.contract_id,'SUSPENDED','PAYMENT','支払保留','LC-1');
-ok(rows(OPS,'Certificates')[0].status==='SUSPENDED','cert SUSPENDED');
-G.admin_reactivateCert(contract.contract_id);
+ok(rows(OPS,'Certificates')[0].status==='SUSPENDED','cert SUSPENDED（非重要は直接変更可）');
+let critErr=false; try{ G.admin_setCertStatus(contract.contract_id,'REVOKED','X','x',''); }catch(e){ critErr=/申請・承認の分離/.test(String(e.message)); }
+ok(critErr,'重要状態（REVOKED等）の直接変更は拒否');
+const reqA=G.admin_reactivateCert(contract.contract_id);
+ok(reqA && reqA.request_id,'再有効化は申請を作成（即時変更しない）');
+ok(rows(OPS,'Certificates')[0].status==='SUSPENDED','承認前は状態が変わらない');
+ok(G.admin_listCertChangeRequests().some(r=>r.request_id===reqA.request_id),'承認待ち一覧に出る');
+let selfErr=false; try{ G.admin_approveCertChange(reqA.request_id,true,''); }catch(e){ selfErr=/本人は承認できません/.test(String(e.message)); }
+ok(selfErr,'申請者本人の承認は拒否（職務分離）');
+const SessA=G.Session;
+G.Session={ getActiveUser:()=>({ getEmail:()=>'legal2@example.com' }) };
+G.admin_approveCertChange(reqA.request_id,true,'');
+G.Session=SessA;
+ok(rows(OPS,'Certificates')[0].status==='ACTIVE','別担当者の承認で再有効化（APPLIED）');
+const reqRowA=rows(OPS,'Certificate_Change_Requests').find(r=>r.request_id===reqA.request_id);
+ok(reqRowA.status==='APPLIED' && reqRowA.approved_by==='legal2@example.com' && !reqRowA.emergency_override,'申請APPLIED＋承認者記録（override無し）');
+// 再有効化で照合コード再発行＋バッジ再生成（旧QR差替え・V2-015）
+ok(rows(OPS,'Badges').some(b=>b.contract_id===contract.contract_id&&b.status==='SUPERSEDED'),'旧バッジをSUPERSEDED');
+ok(rows(OPS,'Badge_Jobs').some(j=>j.contract_id===contract.contract_id&&j.status==='ISSUED'),'バッジ再生成ジョブがISSUED');
+ok(rows(OPS,'Badges').filter(b=>b.contract_id===contract.contract_id&&b.status==='ISSUED').length===1,'有効バッジは常に1枚');
+// 緊急時のみ本人承認可＝EMERGENCY_OVERRIDE として記録
+const reqB=G.admin_revokeCert(contract.contract_id,'緊急停止テスト');
+G.admin_approveCertChange(reqB.request_id,true,'権利者からの緊急要請');
+const reqRowB=rows(OPS,'Certificate_Change_Requests').find(r=>r.request_id===reqB.request_id);
+ok(rows(OPS,'Certificates')[0].status==='REVOKED' && String(reqRowB.emergency_override).indexOf('EMERGENCY_OVERRIDE')===0,'緊急承認はEMERGENCY_OVERRIDEとして記録');
+let dupAppr=false; try{ G.admin_approveCertChange(reqB.request_id,true,'x'); }catch(e){ dupAppr=/処理済み/.test(String(e.message)); }
+ok(dupAppr,'処理済み申請の再承認は拒否');
+// 却下は状態を変えない
+const reqC=G.admin_requestCertChange(contract.contract_id,'ACTIVE','REACTIVATE','誤操作のため再有効化','');
+G.Session={ getActiveUser:()=>({ getEmail:()=>'legal2@example.com' }) };
+G.admin_approveCertChange(reqC.request_id,false,'');
+G.Session=SessA;
+ok(rows(OPS,'Certificate_Change_Requests').find(r=>r.request_id===reqC.request_id).status==='REJECTED','却下でREJECTED');
+ok(rows(OPS,'Certificates')[0].status==='REVOKED','却下は状態を変えない');
+// 後続テストのためACTIVEへ戻す（申請→別担当者承認）
+const reqD=G.admin_reactivateCert(contract.contract_id);
+G.Session={ getActiveUser:()=>({ getEmail:()=>'legal2@example.com' }) };
+G.admin_approveCertChange(reqD.request_id,true,'');
+G.Session=SessA;
 ok(rows(OPS,'Certificates')[0].status==='ACTIVE','cert reactivated');
 
 // 12. verify portal
@@ -456,9 +493,12 @@ const dupN=rows(OPS,'Notification_Queue').filter(n=>n.type==='UPLOAD_GUIDE'&&n.r
 G.enqueueNotification_(contract.contract_id,'UPLOAD_GUIDE',contract.contract_id,{});
 ok(rows(OPS,'Notification_Queue').filter(n=>n.type==='UPLOAD_GUIDE'&&n.reference_id===contract.contract_id).length===dupN,'同一参照の通知は重複起票しない');
 
-// 28. SLA監視（§18）
-// 審査待ち提出の submitted_at を過去に改ざんしてSLA超過を再現
+// 28. SLA監視（§18）— 起点は「最新版の提出日時」（V2-017：再提出でSLAを再計算）
 G.updateRow_(OPS,'Submissions','submission_id',sub1.submission_id,{ status:'HUMAN_REVIEW_PENDING', submitted_at:'2020-01-01T00:00:00.000Z' });
+const sla0=G.notifyReviewSla_();
+ok(sla0.processed===0,'最新版が新しい間はSLA超過にしない（再提出でリセット）: '+sla0.processed);
+const lv28=rows(OPS,'Submission_Versions').filter(v=>v.submission_id===sub1.submission_id).sort((a,b)=>Number(b.version_no)-Number(a.version_no))[0];
+G.updateRow_(OPS,'Submission_Versions','version_id',lv28.version_id,{ submitted_at:'2020-01-02T00:00:00.000Z' });
 const sla=G.notifyReviewSla_();
 ok(sla.processed>=1,'審査SLA超過を通知キューへ: '+sla.processed);
 ok(rows(OPS,'Notification_Queue').some(n=>n.type==='REVIEW_SLA_OVERDUE'),'REVIEW_SLA_OVERDUE 起票');
@@ -586,6 +626,50 @@ if(apStmts.length){
     '外部書類ID保持により二重送信しない');
 }
 delete scriptProps.CLOUDSIGN_CLIENT_ID;
+
+// ============ P1（V2-014〜018）追加検証 ============
+// 38. 照合コードの暗号学的生成（V2-015：Math.random不使用・紛らわしい文字なし）
+const codes=new Set(); for(let ci=0;ci<50;ci++) codes.add(G.randCode_(12));
+ok(codes.size===50,'randCode_ 50回で重複なし');
+ok(Array.from(codes).every(c=>/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{12}$/.test(c)),'randCode_ 文字集合・桁数（I/O/0/1を含まない）');
+
+// 39. バッジ配信（V2-014）：共有リンク不使用・トークン検証後にデータURIで配信
+const bJobs=rows(OPS,'Badge_Jobs');
+ok(bJobs.length>=1 && bJobs.every(j=>['QUEUED','GENERATING','ISSUED','RETRY_WAIT','ERROR'].indexOf(j.status)>=0),'Badge_Jobs に発行履歴を記録');
+const bview=G.serveBadge_({ parameter:{ page:'badge', token:linkV.token } });   // 提出トークンのまま閲覧可（再発行不要）
+ok(bview._h.indexOf('data:image/png;base64,')>=0,'バッジはdata URIで配信（Drive共有リンク不使用）');
+ok(bview._h.indexOf('download=')>=0,'PNGダウンロード属性あり');
+const bbad=G.serveBadge_({ parameter:{ page:'badge', token:'WRONG-TOKEN' } });
+ok(bbad._h.indexOf('無効')>=0,'不正トークンはバッジ拒否');
+
+// 40. AI出力の無害化＋recommended_action（V2-016：数式インジェクション対策）
+geminiResponder=()=>({ overall_result:'REVIEW_REQUIRED', findings:[{ work_id:'WRK-ARK00012', rule_id:'=CMD()', severity:'MEDIUM',
+  result:'REVIEW_REQUIRED', page:1, evidence:'=HYPERLINK("http://evil")', recommended_action:'+SUM(A1)対応を推奨' }] });
+const linkAI=G.admin_sendUploadLink(contract.contract_id);
+const subAI=G.web_submitWork(linkAI.token,{ title:'AI無害化テスト', filename:'ai.pdf', mimeType:'application/pdf', dataBase64:b64 });
+const fAI=rows(OPS,'AI_Findings').slice(-1)[0];
+ok(fAI.evidence.charAt(0)==="'" && fAI.rule_id.charAt(0)==="'" && fAI.recommended_action.charAt(0)==="'",'AI出力の式文字を無害化（先頭引用符）');
+ok(fAI.recommended_action.indexOf('SUM')>=0,'recommended_action を保存');
+
+// 41. AI利用不能時（V2-016）：提出を失わず AI_UNAVAILABLE→人手審査へ
+geminiResponder=()=>{ throw new Error('Gemini unavailable'); };
+G.web_submitWork(linkAI.token,{ submission_id:subAI.submission_id, title:'AI失敗テスト', filename:'ai2.pdf', mimeType:'application/pdf', dataBase64:b64 });
+for(let ri2=0;ri2<5;ri2++){ try{ G.batch_runAiReviews_(); }catch(e){} }
+const deadJob=rows(OPS,'AI_Review_Jobs').slice(-1)[0];
+ok(deadJob.status==='ERROR' && deadJob.last_error,'AI失敗が再試行上限でERROR（理由記録）');
+ok(rows(OPS,'Submission_Versions').find(v=>v.version_id===deadJob.version_id).status==='AI_UNAVAILABLE','版は AI_UNAVAILABLE（提出は消失しない）');
+ok(rows(OPS,'Submissions').find(s=>s.submission_id===subAI.submission_id).status==='HUMAN_REVIEW_PENDING','人手審査へ回送');
+ok(rows(OPS,'Notification_Queue').some(n=>n.reference_id==='AIERR:'+deadJob.version_id),'人手対応の通知を起票');
+geminiResponder=()=>({ overall_result:'PASS_CANDIDATE', findings:[] });
+
+// 42. 報告期限監視（V2-017：契約条件から期限窓を判定・契約×期で1回）
+const t42=JSON.parse(rows(OPS,'Contracts').find(c=>c.contract_id===contract.contract_id).terms_snapshot||'{}');
+t42.requires_usage_report=true; t42.report_due_days=400;   // テスト実行日に依らず期限窓内にする
+G.updateRow_(OPS,'Contracts','contract_id',contract.contract_id,{ signed_at:'2020-01-15', terms_snapshot:JSON.stringify(t42) });
+const due42=G.notifyReportDue_();
+ok(rows(OPS,'Notification_Queue').some(n=>n.type==='REPORT_REQUEST'&&String(n.reference_id).indexOf(contract.contract_id)===0),'期限窓内の未報告契約へ REPORT_REQUEST 起票');
+const due42b=G.notifyReportDue_();
+ok(due42b.processed===0,'同一契約×期は重複起票しない');
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

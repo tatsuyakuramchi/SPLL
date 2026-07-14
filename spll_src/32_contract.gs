@@ -66,7 +66,7 @@ function snapshotContractTerms_(contractId, app){
 /** 締結後の発行処理（認証ACTIVE＋バッジ＋提出/報告トークン＋定額系の請求起票）。冪等。紐付け完了時に呼ぶ。 */
 function finishContractLinkage_(contractId){
   const cert = issueCert_(contractId);   // 平文コードはここでのみ取得可能（バッジQRへ焼き込む）
-  if(prop_('BADGE_AUTO') !== 'false'){ try{ issueBadge_(contractId, cert && cert.verify_url); }catch(e){ logEvent_('badge', contractId, 'system', null, { issue_error:String(e) }); } }
+  if(prop_('BADGE_AUTO') !== 'false'){ enqueueBadgeJob_(contractId, cert && cert.verify_url); }   // 失敗時はBadge_Jobsで再実行（V2-014-8）
   prepareSubmissionToken_(contractId);
   issueToken_(contractId, 'REPORT', 400, 24);              // 利用報告トークン（約13ヶ月・最大24回）
   enqueueNotification_(contractId, 'UPLOAD_GUIDE', contractId, { note:'締結完了。提出リンクを利用者へ案内してください（契約管理→提出リンク発行）' });
@@ -139,8 +139,12 @@ function issueBadge_(contractId, verifyUrl){
 
   const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === contractId; });
   if(!c) throw new Error('契約が見つかりません: ' + contractId);
-  // 複数原作：Contract_Works からまとめた表示名を使う（契約単位のバッジ）
-  const w = { work_name: contractWorkNames_(contractId).join('、'), credit_text:'', verify_url: verifyUrl || '' };
+  // 表示・クレジットは契約時スナップショットから生成（V2-014-1）
+  const cws = readRows_(ssOps_(),'Contract_Works').filter(function(x){ return x.contract_id === contractId; });
+  const names = cws.map(function(x){ return x.work_name_snapshot || x.work_id; });
+  const credits = cws.map(function(x){ return x.credit_snapshot; }).filter(Boolean)
+    .filter(function(v,i,a){ return a.indexOf(v)===i; });
+  const w = { work_name: names.join('、'), credit_text: credits.join(' ／ '), verify_url: verifyUrl || '' };
   const badgeId  = newId_('BDG');
   const issuedAt = new Date().toISOString().slice(0,10);
 
@@ -148,8 +152,7 @@ function issueBadge_(contractId, verifyUrl){
   const folder = badgeFolder_(c);
   const files = BADGE_SIZES.map(function(s){
     const blob = slideThumbnailPng_(presId, s.size).setName('SPLL_badge_' + badgeId + '_' + s.key + '.png');
-    const f = folder.createFile(blob);
-    try{ f.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); }catch(e){}
+    const f = folder.createFile(blob);   // 共有設定はしない（トークン検証後にGASが配信・V2-014-3/4）
     return { size:s.key, file_id:f.getId() };
   });
   try{ DriveApp.getFileById(presId).setTrashed(true); }catch(e){}   // 一時Slidesは破棄
@@ -190,11 +193,50 @@ function buildBadgeSlide_(badgeId, w, c, issuedAt){
   t = slide.insertTextBox(w.credit_text || '', 36, 285, 648, 40);
   t.getText().getTextStyle().setForegroundColor('#EDEAF4').setFontSize(12);
   if(w.verify_url){
-    t = slide.insertTextBox('検証: ' + w.verify_url, 36, 330, 648, 30);
+    t = slide.insertTextBox('検証: ' + w.verify_url, 36, 330, 500, 30);
     t.getText().getTextStyle().setForegroundColor('#A99FC4').setFontSize(9);
+    try{ const qr = fetchQrPng_(w.verify_url); if(qr) slide.insertImage(qr, 560, 260, 110, 110); }
+    catch(e){ logError_('EXTERNAL_API_ERROR','badgeQr', e); }   // QR取得失敗でも発行は継続
   }
   pres.saveAndClose();
   return pres.getId();
+}
+/** 検証URLのQRコードPNGを取得（V2-014-2）。既定は quickchart.io（QR_API_URLで変更可）。 */
+function fetchQrPng_(url){
+  const api = prop_('QR_API_URL') || 'https://quickchart.io/qr?size=220&text=';
+  const res = UrlFetchApp.fetch(api + encodeURIComponent(url), { muteHttpExceptions:true });
+  if(res.getResponseCode() >= 300) return null;
+  return res.getBlob();
+}
+
+// ---- バッジ発行ジョブ（V2-014-8）：失敗時に再実行可能 ----
+function enqueueBadgeJob_(contractId, verifyUrl){
+  const jobId = Utilities.getUuid();
+  appendRow_(ssOps_(),'Badge_Jobs',{ badge_job_id:jobId, contract_id:contractId, status:'QUEUED',
+    retry_count:0, last_error:'', created_at:new Date().toISOString(), finished_at:'' });
+  try{ runBadgeJob_(jobId, verifyUrl); }catch(e){ /* バッチ再試行に委ねる */ }
+  return jobId;
+}
+function runBadgeJob_(jobId, verifyUrl){
+  const job = readRows_(ssOps_(),'Badge_Jobs').find(function(j){ return j.badge_job_id === jobId; });
+  if(!job || job.status === 'ISSUED') return;
+  updateRow_(ssOps_(),'Badge_Jobs','badge_job_id',jobId,{ status:'GENERATING' });
+  try{
+    issueBadge_(job.contract_id, verifyUrl);
+    updateRow_(ssOps_(),'Badge_Jobs','badge_job_id',jobId,{ status:'ISSUED', finished_at:new Date().toISOString(), last_error:'' });
+  }catch(err){
+    const retry = num_(job.retry_count) + 1;
+    updateRow_(ssOps_(),'Badge_Jobs','badge_job_id',jobId,
+      { status:(retry >= 3 ? 'ERROR' : 'RETRY_WAIT'), retry_count:retry, last_error:String(err && err.message || err).slice(0,300) });
+    throw err;
+  }
+}
+/** RETRY_WAITのバッジジョブ再実行（5分バッチから） */
+function retryBadgeJobs_(){
+  const jobs = readRows_(ssOps_(),'Badge_Jobs').filter(function(j){ return j.status === 'RETRY_WAIT'; });
+  let done = 0;
+  jobs.forEach(function(j){ try{ runBadgeJob_(j.badge_job_id); done++; }catch(e){} });
+  return { processed:jobs.length, completed:done };
 }
 
 /** Slides REST の getThumbnail でPNG化（size: LARGE/MEDIUM/SMALL） */

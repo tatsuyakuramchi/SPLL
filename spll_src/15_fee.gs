@@ -45,6 +45,9 @@ function computeFeeTerms_(usageCategory, workCount){
     fee_amount_or_rate: feeText, licensed_uses: r.licensed_uses || '', payment_due: r.payment_due || '',
     reporting_requirement: r.reporting_requirement || '', report_due: r.report_due || '',
     threshold_or_cap: r.threshold_or_cap || '', reprint_rule: r.reprint_rule || '', special_terms: r.special_terms || '',
+    requires_usage_report: String(r.requires_usage_report) === 'true' || model === 'RATE',   // 構造化（V2-017）
+    report_frequency: r.report_frequency || '', report_due_days: num_(r.report_due_days) || 0,
+    report_due_base: r.report_due_base || 'PERIOD_END',
     found: true
   };
 }

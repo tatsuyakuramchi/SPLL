@@ -158,6 +158,14 @@
       </div>
     </div>
 
+    <div class="panel" id="certreq-panel" style="display:none;border-color:var(--brass);">
+      <div class="ph"><h3>🔏 認証状態変更の申請（承認待ち）</h3><span class="hint">Certificate_Change_Requests ／ 申請者本人は承認不可（職務分離）</span></div>
+      <div class="pbody">
+        <p class="setnote">失効・再有効化など重要な状態変更は申請→<b>別の担当者（LEGAL_ADMIN）</b>による承認で適用されます。緊急時のみ本人承認が可能で、EMERGENCY_OVERRIDE として監査記録に残ります。</p>
+        <table><thead><tr><th>申請ID</th><th>契約ID</th><th>変更先</th><th>理由</th><th>申請者</th><th>申請日</th><th>操作</th></tr></thead><tbody id="certreq-tbody"></tbody></table>
+      </div>
+    </div>
+
     <div class="panel">
       <div class="ph"><h3>契約一覧</h3><span class="hint">Applications / Contracts より</span></div>
       <table><thead><tr><th>契約ID</th><th>申込ID</th><th>対象原作</th><th>契約者</th><th>締結状態</th><th>認証</th><th>締結日</th><th>操作</th></tr></thead><tbody id="contract-tbody"></tbody></table>
@@ -869,9 +877,46 @@ function doLink(contractId, applicationId){
   call("admin_linkContract",[contractId, applicationId],function(){ toast("申込に紐付けました"); loadContract(); loadDashboard(); });
 }
 
+// ---- 認証状態変更の申請（承認待ち）----
+function loadCertRequests(){
+  call("admin_listCertChangeRequests",[],function(rows){
+    rows=rows||[];
+    var panel=$("certreq-panel"), tb=$("certreq-tbody"); tb.innerHTML="";
+    if(!rows.length){ panel.style.display="none"; return; }
+    panel.style.display="";
+    var stMap={REVOKED:"失効",ACTIVE:"再有効化",TERMINATED:"契約終了",PAYMENT_HOLD:"支払保留",SUSPENDED:"一時停止",EXPIRED:"期限切れ"};
+    rows.forEach(function(r){
+      var tr=document.createElement("tr");
+      tr.appendChild(td('<span class="id">'+esc(String(r.request_id).slice(0,8))+'…</span>'));
+      tr.appendChild(td('<span class="id">'+esc(r.contract_id)+'</span>'));
+      tr.appendChild(td(esc(stMap[String(r.requested_status)]||r.requested_status)));
+      tr.appendChild(td(esc(r.reason_text||"—")));
+      tr.appendChild(td(esc(r.requested_by)));
+      tr.appendChild(td('<span class="id">'+esc(r.requested_at||"—")+'</span>'));
+      var act=document.createElement("td"); act.className="actions";
+      act.appendChild(mkBtn("承認して適用","btn p",function(){
+        if(!confirm("この申請を承認し、認証状態を「"+(stMap[String(r.requested_status)]||r.requested_status)+"」に変更します。よろしいですか？")) return;
+        call("admin_approveCertChange",[r.request_id,true,""],function(){ toast("承認・適用しました"); loadContract(); }, function(e){
+          var msg=String(e&&e.message||e);
+          if(msg.indexOf("申請者本人")>=0){
+            var er=prompt("申請者本人による承認は原則できません。\n緊急時のみ、緊急理由を入力すると EMERGENCY_OVERRIDE として記録のうえ適用されます：","");
+            if(er&&er.trim()) call("admin_approveCertChange",[r.request_id,true,er],function(){ toast("緊急承認（EMERGENCY_OVERRIDE）として適用しました"); loadContract(); });
+          } else { toast("承認に失敗しました: "+msg, true); }
+        });
+      }));
+      act.appendChild(mkBtn("却下","btn d",function(){
+        if(!confirm("この申請を却下しますか？")) return;
+        call("admin_approveCertChange",[r.request_id,false,""],function(){ toast("却下しました"); loadCertRequests(); });
+      }));
+      tr.appendChild(act); tb.appendChild(tr);
+    });
+  });
+}
+
 // ---- 契約一覧 ----
 function loadContract(){
   loadUnlinked();
+  loadCertRequests();
   call("admin_listContracts",[],function(rows){
     var tb=$("contract-tbody"); tb.innerHTML=""; rows=rows||[];
     if(!rows.length){ emptyRow(tb,8,"契約がありません"); return; }
@@ -893,9 +938,9 @@ function loadContract(){
         act.appendChild(mkBtn("提出リンク発行","btn",function(){ call("admin_sendUploadLink",[c.contract_id],function(res){ showUploadLink(c.contract_id, res); }); }));
       }
       if(cs==="ACTIVE"){
-        act.appendChild(mkBtn("認証を失効","btn d",function(){ if(confirm("この認証を失効しますか？（検証ページが「無効」表示になります）")) call("admin_revokeCert",[c.contract_id],function(){ toast("認証を失効しました"); loadContract(); }); }));
+        act.appendChild(mkBtn("失効を申請","btn d",function(){ var reason=prompt("失効理由（必須）：",""); if(reason===null) return; if(!reason.trim()){ toast("理由は必須です", true); return; } call("admin_requestCertChange",[c.contract_id,"REVOKED","MANUAL_REVOKE",reason,""],function(){ toast("失効を申請しました（別の担当者の承認待ち）"); loadContract(); }); }));
       } else if(cs==="REVOKED"){
-        act.appendChild(mkBtn("再有効化","btn",function(){ if(confirm("この認証を再有効化しますか？")) call("admin_reactivateCert",[c.contract_id],function(){ toast("認証を再有効化しました"); loadContract(); }); }));
+        act.appendChild(mkBtn("再有効化を申請","btn",function(){ var reason=prompt("再有効化の理由（必須）：",""); if(reason===null) return; if(!reason.trim()){ toast("理由は必須です", true); return; } call("admin_requestCertChange",[c.contract_id,"ACTIVE","REACTIVATE",reason,""],function(){ toast("再有効化を申請しました（別の担当者の承認待ち）"); loadContract(); }); }));
       } else if(!hasContract){
         act.appendChild(mkBtn("CloudSign確認","btn",function(){ toast("CloudSign管理画面でご確認ください"); }));
       }
@@ -1048,8 +1093,14 @@ MOCK.admin_listLinkableApplications=function(){ return [
   {application_id:"APP-202607-0058",application_ref:"REF-202607-0058",status:"FORM_PENDING",works:"ソード・ワールド2.5",created_at:"2026-07-08"}
 ]; };
 MOCK.admin_linkContract=function(){ return true; };
-MOCK.admin_revokeCert=function(){ return true; };
-MOCK.admin_reactivateCert=function(){ return true; };
+var _mCertReqs=[
+  {request_id:"req-mock-0001",contract_id:"CTR-202606-0011",requested_status:"ACTIVE",reason_text:"入金確認済みのため再有効化",requested_by:"ops@example.com",requested_at:"2026-07-10"}
+];
+MOCK.admin_requestCertChange=function(contractId,status,code,reason){ var id="req-mock-"+(1000+_mCertReqs.length); _mCertReqs.push({request_id:id,contract_id:contractId,requested_status:status,reason_text:reason,requested_by:"you@example.com",requested_at:"2026-07-14"}); return { request_id:id }; };
+MOCK.admin_approveCertChange=function(requestId){ _mCertReqs=_mCertReqs.filter(function(r){ return r.request_id!==requestId; }); return true; };
+MOCK.admin_listCertChangeRequests=function(){ return _mCertReqs; };
+MOCK.admin_revokeCert=function(c){ return MOCK.admin_requestCertChange(c,"REVOKED","MANUAL_REVOKE","失効申請"); };
+MOCK.admin_reactivateCert=function(c){ return MOCK.admin_requestCertChange(c,"ACTIVE","REACTIVATE","再有効化の申請"); };
 MOCK.admin_listPayments=function(){ return [
   {invoice_id:"INV-202606-0001",contract_id:"CTR-202606-0017",work:"新クトゥルフ神話TRPG",amount:"売上の10％",status:"入金待ち",paid_at:""},
   {invoice_id:"INV-202606-0002",contract_id:"CTR-202606-0011",work:"インセイン",amount:"16,500円",status:"入金済",paid_at:"2026-06-24"}

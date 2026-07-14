@@ -65,10 +65,17 @@ function batch_runAiReviews_(){
 
 /** 1件のAI審査を実行：ファイル取得→Gemini（複数原作ルール）→Findings記録→人手審査へ */
 function runAiReview_(aiReviewId){
-  const job = readRows_(ssOps_(),'AI_Review_Jobs').find(j => j.ai_review_id===aiReviewId);
-  if(!job) throw new Error('AI review job not found: '+aiReviewId);
-  if(job.status==='COMPLETED') return 'COMPLETED';          // 冪等
-  updateRow_(ssOps_(),'AI_Review_Jobs','ai_review_id',aiReviewId,{status:'SCANNING', started_at:new Date().toISOString()});
+  // ジョブ排他（V2-016）：ロック内で取得・SCANNING遷移し、二重実行を防止
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  let job;
+  try{
+    job = readRows_(ssOps_(),'AI_Review_Jobs').find(j => j.ai_review_id===aiReviewId);
+    if(!job) throw new Error('AI review job not found: '+aiReviewId);
+    if(job.status==='COMPLETED') return 'COMPLETED';          // 冪等
+    if(job.status==='SCANNING' && job.started_at && (new Date() - new Date(job.started_at)) < 10*60*1000)
+      return 'RUNNING';                                       // 他実行が処理中（10分以内）
+    updateRow_(ssOps_(),'AI_Review_Jobs','ai_review_id',aiReviewId,{status:'SCANNING', started_at:new Date().toISOString()});
+  }finally{ lock.releaseLock(); }
   markVersionStatus_(job.version_id, 'AI_SCREENING');
   try{
     const blob = resolveSubmissionBlob_(job);
@@ -94,6 +101,16 @@ function runAiReview_(aiReviewId){
     const retry  = (parseInt(job.retry_count||'0',10)||0) + 1;
     const status = retry >= AI_MAX_RETRY ? 'ERROR' : 'QUEUED';
     updateRow_(ssOps_(),'AI_Review_Jobs','ai_review_id',aiReviewId,{status:status, retry_count:retry, last_error:String(err && err.message || err).slice(0,300)});
+    if(status === 'ERROR'){
+      // AI利用不能でも提出を消失させない（V2-016）：版=AI_UNAVAILABLE・人手審査へ回送
+      markVersionStatus_(job.version_id, 'AI_UNAVAILABLE');
+      if(job.submission_id){
+        updateRow_(ssOps_(),'Submissions','submission_id',job.submission_id,{ status:'HUMAN_REVIEW_PENDING' });
+        const sub = readRows_(ssOps_(),'Submissions').find(function(x){ return x.submission_id === job.submission_id; }) || {};
+        enqueueNotification_(sub.contract_id||'', 'REVIEW_SLA_OVERDUE', 'AIERR:'+job.version_id,
+          { submission_id:job.submission_id, note:'AI審査が失敗しました。人手審査で対応してください（MANUAL_REVIEW_REQUIRED）' });
+      }
+    }
     logEvent_('ai_review', aiReviewId, 'system', null, {error:String(err), retry_count:retry, status:status});
     throw err;
   }
@@ -157,10 +174,14 @@ function parseGeminiResult_(raw){
 
 /** Findings を AI_Findings へ記録（原作ごとに work_id を保持） */
 function writeFindings_(aiReviewId, findings){
+  // AI出力の全文字列を無害化して保存（V2-016：数式インジェクション対策）＋recommended_action保存
   (findings||[]).forEach(f => appendRow_(ssOps_(),'AI_Findings',{
-    finding_id: newId_('FND'), ai_review_id: aiReviewId, work_id: f.work_id||'',
-    rule_id: f.rule_id||'', severity: f.severity||'', result: f.result||'',
-    page: f.page||'', evidence: f.evidence||'', confidence: f.confidence||''
+    finding_id: newId_('FND'), ai_review_id: aiReviewId, work_id: sanitizeCell_(String(f.work_id||'')),
+    rule_id: sanitizeCell_(String(f.rule_id||'')), severity: sanitizeCell_(String(f.severity||'')),
+    result: sanitizeCell_(String(f.result||'')), page: f.page||'',
+    evidence: sanitizeCell_(String(f.evidence||'').slice(0,1000)),
+    recommended_action: sanitizeCell_(String(f.recommended_action||'').slice(0,500)),
+    confidence: f.confidence||''
   }));
 }
 

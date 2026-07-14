@@ -21,9 +21,10 @@ function batchRun_(name, fn){
   }
 }
 // ---- トリガー・ハンドラ（setup_triggers で作成） ----
-function trigger_every5min(){                     // Webhook再処理＋AI審査キュー
+function trigger_every5min(){                     // Webhook再処理＋AI審査キュー＋バッジ再試行
   batchRun_('processWebhookReceipts', processWebhookReceipts_);
   batchRun_('runAiReviews', batch_runAiReviews_);
+  batchRun_('retryBadgeJobs', retryBadgeJobs_);
 }
 function trigger_daily(){                         // 期限処理・みなし確認・SLA・データ削除
   batchRun_('expireAccessTokens', expireAccessTokens_);
@@ -37,36 +38,59 @@ function trigger_daily(){                         // 期限処理・みなし確
 function notifyReviewSla_(){
   const slaDays = num_(getConfig_('REVIEW_SLA_DAYS','5')) || 5;
   const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - slaDays);
+  // SLA起点は最新版の提出日時（V2-017-1/2：再提出で期限を再計算）
+  const latestBySub = {};
+  readRows_(ssOps_(),'Submission_Versions').forEach(function(v){
+    const cur = latestBySub[v.submission_id];
+    if(!cur || num_(v.version_no) > num_(cur.version_no)) latestBySub[v.submission_id] = v;
+  });
   let n = 0;
   readRows_(ssOps_(),'Submissions')
-    .filter(function(s){ return s.status === 'HUMAN_REVIEW_PENDING' && s.submitted_at && new Date(s.submitted_at) < cutoff; })
+    .filter(function(s){
+      const lv = latestBySub[s.submission_id];
+      const base = (lv && lv.submitted_at) || s.submitted_at;
+      return s.status === 'HUMAN_REVIEW_PENDING' && base && new Date(base) < cutoff;
+    })
     .forEach(function(s){
-      if(enqueueNotification_(s.contract_id, 'REVIEW_SLA_OVERDUE', s.submission_id,
-        { submission_id:s.submission_id, title:s.title, submitted_at:String(s.submitted_at||'').slice(0,10), sla_days:slaDays })) n++;
+      const lv = latestBySub[s.submission_id];
+      if(enqueueNotification_(s.contract_id, 'REVIEW_SLA_OVERDUE', s.submission_id + ':v' + ((lv&&lv.version_no)||1),
+        { submission_id:s.submission_id, title:s.title, version:(lv&&lv.version_no)||1,
+          submitted_at:String((lv&&lv.submitted_at)||s.submitted_at||'').slice(0,10), sla_days:slaDays,
+          action:'審査キューから人手判断を実施してください' })) n++;
     });
   return { processed:n };
 }
 
-/** 報告期限監視（§18）：半期終了後1ヶ月の報告期間中、未報告のRATE契約へ通知（契約×期で1回） */
+/**
+ * 報告期限監視（V2-017-3/4）：契約条件（terms_snapshot.requires_usage_report / report_due_days）
+ * に基づき、直近終了した期の報告期限窓内で未報告の契約へ REPORT_REQUEST を起票（契約×期で1回）。
+ */
 function notifyReportDue_(){
   const now = new Date();
-  const m = now.getMonth() + 1;   // 1-12
-  let period = '';
-  if(m === 1 || m === 2)      period = (now.getFullYear() - 1) + 'H2';   // 前年下期の報告期間
-  else if(m === 7 || m === 8) period = now.getFullYear() + 'H1';          // 当年上期の報告期間
-  else return { processed:0, skipped:'報告期間外' };
+  // 直近に終了した期とその終了日
+  const y = now.getFullYear();
+  let period, periodEnd;
+  if(now.getMonth() < 6){ period = (y-1) + 'H2'; periodEnd = new Date(y-1, 11, 31); }
+  else { period = y + 'H1'; periodEnd = new Date(y, 5, 30); }
   const reported = {};
   readRows_(ssOps_(),'Usage_Reports').forEach(function(r){
-    if(String(r.period) === period && r.status !== 'RETURNED') reported[r.contract_id] = true; });
+    if(String(r.period) === period && r.status !== 'RETURNED' && r.status !== 'SUPERSEDED') reported[r.contract_id] = true; });
   let n = 0;
   readRows_(ssOps_(),'Contracts')
     .filter(function(c){ return c.status === 'SIGNED' && c.link_status !== 'UNLINKED'; })
     .forEach(function(c){
       let t = {}; try{ t = JSON.parse(c.terms_snapshot||'{}'); }catch(e){}
-      if(String(t.fee_model).toUpperCase() !== 'RATE') return;   // 報告義務は売上連動のみ
-      if(reported[c.contract_id]) return;
+      const requires = t.requires_usage_report === true || String(t.requires_usage_report) === 'true' ||
+        String(t.fee_model).toUpperCase() === 'RATE';
+      if(!requires || reported[c.contract_id]) return;
+      if(c.signed_at && new Date(c.signed_at) > periodEnd) return;      // 期終了後に締結した契約は対象外
+      const dueDays = num_(t.report_due_days) || 30;
+      const due = new Date(periodEnd.getTime()); due.setDate(due.getDate() + dueDays);
+      const windowEnd = new Date(due.getTime()); windowEnd.setDate(windowEnd.getDate() + 30);   // 期限後30日まで督促
+      if(now < periodEnd || now > windowEnd) return;
       if(enqueueNotification_(c.contract_id, 'REPORT_REQUEST', c.contract_id + ':' + period,
-        { period:period, note:'利用報告が未提出です。報告リンクを案内してください（入金・清算→報告リンク）' })) n++;
+        { period:period, due_date:due.toISOString().slice(0,10),
+          action:'報告リンクを発行して利用者へ案内してください（報告・入金・清算→報告リンク）' })) n++;
     });
   return { processed:n };
 }
