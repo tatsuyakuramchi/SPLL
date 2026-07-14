@@ -98,12 +98,56 @@ function sanitizeCell_(v){
   return /^[=+\-@]/.test(v) ? "'" + v : v;
 }
 
-/** 公開：同意文（個人情報）・規約テンプレートを返す（管理コンソールから編集可能） */
+/**
+ * 公開：同意文（個人情報）・規約テンプレートを返す。
+ * 版管理（Legal_Documents・§7.2）の PUBLISHED 最新版を優先し、
+ * 無ければ Config → 既定文にフォールバック。版番号・文書IDも返す（同意証跡用）。
+ */
 function api_getLegalTexts(){
+  const p = publishedLegalDoc_('PRIVACY');
+  const t = publishedLegalDoc_('TERMS');
   return {
-    privacy:       getConfig_('LEGAL_PRIVACY_TEXT', DEFAULT_PRIVACY),
-    termsTemplate: getConfig_('LEGAL_TERMS_TEMPLATE', DEFAULT_TERMS_TEMPLATE)
+    privacy:         p ? p.content_html : getConfig_('LEGAL_PRIVACY_TEXT', DEFAULT_PRIVACY),
+    termsTemplate:   t ? t.content_html : getConfig_('LEGAL_TERMS_TEMPLATE', DEFAULT_TERMS_TEMPLATE),
+    privacy_version: p ? p.version : '', privacy_doc_id: p ? p.legal_document_id : '',
+    terms_version:   t ? t.version : '', terms_doc_id:   t ? t.legal_document_id : ''
   };
+}
+/** 指定種別の PUBLISHED 最新版（version降順） */
+function publishedLegalDoc_(type){
+  return readRows_(ssOps_(),'Legal_Documents')
+    .filter(function(d){ return d.document_type === type && d.status === 'PUBLISHED'; })
+    .sort(function(a,b){ return num_(b.version) - num_(a.version); })[0] || null;
+}
+
+/**
+ * 通知キュー（修正設計書 §10）：メール非保持方針のため、システムは「誰に何を通知すべきか」を
+ * 記録し、管理コンソールで人手対応（MANUAL_REQUIRED）する。referenceId で重複起票を防止。
+ */
+function enqueueNotification_(contractId, type, referenceId, payload){
+  const dup = readRows_(ssOps_(),'Notification_Queue').some(function(n){
+    return n.type === type && String(n.reference_id) === String(referenceId||''); });
+  if(dup) return null;
+  const id = Utilities.getUuid();
+  appendRow_(ssOps_(),'Notification_Queue',{ notification_id:id, contract_id:contractId||'',
+    type:type, reference_id:referenceId||'', payload_json:JSON.stringify(payload||{}).slice(0,2000),
+    status:'MANUAL_REQUIRED', created_at:new Date().toISOString(), sent_at:'', handled_by:'' });
+  return id;
+}
+
+/**
+ * レート制限（修正設計書 §6.4）。CacheServiceのカウンタ方式（ベストエフォート）。
+ * 上限到達で false。GASの制約上WAF代替ではない点は設計書どおり。
+ */
+function rateLimit_(key, max, windowSec){
+  try{
+    const cache = CacheService.getScriptCache();
+    const k = 'RL_' + key;
+    const cur = parseInt(cache.get(k) || '0', 10);
+    if(cur >= max) return false;
+    cache.put(k, String(cur + 1), windowSec || 3600);
+    return true;
+  }catch(e){ return true; }   // キャッシュ障害時は業務を止めない
 }
 /** 金額を三桁区切り＋「円」で整形（ICO非依存） */
 function yen_(v){

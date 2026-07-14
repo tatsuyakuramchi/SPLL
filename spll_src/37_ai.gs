@@ -68,25 +68,32 @@ function runAiReview_(aiReviewId){
   const job = readRows_(ssOps_(),'AI_Review_Jobs').find(j => j.ai_review_id===aiReviewId);
   if(!job) throw new Error('AI review job not found: '+aiReviewId);
   if(job.status==='COMPLETED') return 'COMPLETED';          // 冪等
-  updateRow_(ssOps_(),'AI_Review_Jobs','ai_review_id',aiReviewId,{status:'SCANNING'});
+  updateRow_(ssOps_(),'AI_Review_Jobs','ai_review_id',aiReviewId,{status:'SCANNING', started_at:new Date().toISOString()});
   markVersionStatus_(job.version_id, 'AI_SCREENING');
   try{
     const blob = resolveSubmissionBlob_(job);
     if(!blob) throw new Error('提出ファイルが見つかりません');
     const works = resolveJobWorks_(job);                            // 契約対象原作（複数）
     const rules = buildRulesMulti_(works);
-    const parsed = parseGeminiResult_(geminiReview_(blob, rules));  // 個人情報は送らず作品＋条件のみ
+    const raw = geminiReview_(blob, rules);                         // 個人情報は送らず作品＋条件のみ
+    // 生レスポンスを改変せずDriveへ保存（§9.3・審査証跡）。失敗してもジョブは継続。
+    let responseFileId = '';
+    try{ responseFileId = saveAiRawResponse_(job, aiReviewId, raw); }
+    catch(e){ logError_('PROCESSING_ERROR','saveAiRawResponse', e, { ai_review_id:aiReviewId }); }
+    const parsed = parseGeminiResult_(raw);
     writeFindings_(aiReviewId, parsed.findings);
     const overall = parsed.overall_result
       || (parsed.findings.length ? worstResult_(parsed.findings.map(f => ({severity:f.severity, result:f.result}))) : 'REVIEW_REQUIRED');
-    updateRow_(ssOps_(),'AI_Review_Jobs','ai_review_id',aiReviewId,{status:'COMPLETED'});
+    updateRow_(ssOps_(),'AI_Review_Jobs','ai_review_id',aiReviewId,{ status:'COMPLETED',
+      overall_result:overall, risk_score:(parsed.risk_score!=null?parsed.risk_score:''),
+      human_review_required:'true', response_file_id:responseFileId, completed_at:new Date().toISOString(), last_error:'' });
     logEvent_('ai_review', aiReviewId, 'gemini', null, {overall_result:overall, findings:parsed.findings.length});
     postReviewRouting_(job, overall);
     return overall;
   }catch(err){
     const retry  = (parseInt(job.retry_count||'0',10)||0) + 1;
     const status = retry >= AI_MAX_RETRY ? 'ERROR' : 'QUEUED';
-    updateRow_(ssOps_(),'AI_Review_Jobs','ai_review_id',aiReviewId,{status:status, retry_count:retry});
+    updateRow_(ssOps_(),'AI_Review_Jobs','ai_review_id',aiReviewId,{status:status, retry_count:retry, last_error:String(err && err.message || err).slice(0,300)});
     logEvent_('ai_review', aiReviewId, 'system', null, {error:String(err), retry_count:retry, status:status});
     throw err;
   }
@@ -180,4 +187,14 @@ function createComplianceAlert_(submissionId, overall){
     contract_id: sub.contract_id||'', submission_id: submissionId||'',
     severity:'HIGH', status:'OPEN', settlement_block:'' });
   logEvent_('compliance_alert', submissionId, 'system', null, {severity:'HIGH', overall_result:overall});
+}
+
+/** AI生レスポンスを契約フォルダ/03_AI_Reviews へJSON保存（§9.3）。file_id を返す。 */
+function saveAiRawResponse_(job, aiReviewId, raw){
+  const sub = readRows_(ssOps_(),'Submissions').find(function(x){ return x.submission_id === job.submission_id; });
+  const c = sub ? readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === sub.contract_id; }) : null;
+  if(!c) return '';
+  const folder = contractSubFolder_(c, '03_AI_Reviews');
+  const f = folder.createFile(Utilities.newBlob(JSON.stringify(raw), 'application/json', 'ai_' + aiReviewId + '.json'));
+  return f.getId();
 }

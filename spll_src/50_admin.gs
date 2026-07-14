@@ -113,11 +113,7 @@ function admin_generateInvoicesFromReports(period){
     if(String(t.fee_model).toUpperCase() !== 'RATE' || t.rate == null) return;
     const amount = Math.round(num_(r.net_sales) * num_(t.rate));
     if(amount <= 0) return;
-    const invId = newId_('INV');
-    appendRow_(ssOps_(),'Invoices',{ invoice_id:invId, contract_id:r.contract_id, period:period,
-      source_type:'REPORT', source_id:r.report_id, amount_rule:t.fee_amount_or_rate||'', amount:amount,
-      status:'入金待ち', issued_at:new Date().toISOString().slice(0,10) });
-    logEvent_('invoice', invId, actor.email, null, { contract_id:r.contract_id, report_id:r.report_id, amount:amount });
+    const invId = createInvoice_(r.contract_id, period, 'REPORT', r.report_id, t.fee_amount_or_rate||'', amount, actor.email);
     out.push({ invoice_id:invId, contract_id:r.contract_id, amount:amount });
   });
   return { period:period, generated:out.length, invoices:out };
@@ -215,6 +211,9 @@ function admin_setHumanReview(submissionId, result, comment, reviewer, versionId
     comments:sanitizeCell_(String(comment||'')), reviewed_at:new Date().toISOString() });
   updateRow_(ssOps_(),'Submissions','submission_id',submissionId,{ status:result });
   markVersionStatus_(targetVersion, result);
+  // 通知キュー（§10）：是正要求／審査結果を利用者へ伝えるべきことを記録（メール非保持のため人手対応）
+  const ntype = result === 'CORRECTION_REQUIRED' ? 'CORRECTION_REQUEST' : 'REVIEW_RESULT';
+  enqueueNotification_(sub.contract_id, ntype, targetVersion, { submission_id:submissionId, result:result, comment:String(comment||'').slice(0,300) });
   logEvent_('human_review', submissionId, actor.email, {status:sub.status}, {result:result, version_id:targetVersion});
   return true;
 }
@@ -315,32 +314,50 @@ function admin_listPayments(){ requireRole_([]);
   const ctrWorks  = contractWorksMap_();
   return invoices.map(v => {
     const pay = payments.find(p => String(p.invoice_id)===String(v.invoice_id) && p.status==='入金済');
+    const total = num_(v.total_amount) || num_(v.amount);
     return {
       invoice_id:v.invoice_id, contract_id:v.contract_id, work:contractWorkLabel_(ctrWorks, v.contract_id),
-      amount:String(v.amount||v.amount_rule||''), status: pay ? '入金済' : (v.status||'入金待ち'),
-      paid_at: pay ? String(pay.paid_at||'') : ''
+      amount:String(total || v.amount_rule || ''), due_date:String(v.due_date||''),
+      status: pay ? '入金済' : (v.status||'入金待ち'),
+      paid_at: pay ? String(pay.paid_at||'') : '',
+      diff: pay ? (num_(pay.amount) - total) : 0     // 過入金(+)／不足(−)
     };
   });
 }
 
 /** 入金記録（結果入力）。recordedBy/paidAt は未指定なら補完。 */
-function admin_recordPayment(contractId, invoiceId, amount, paidAt, recordedBy){ requireRole_(['ACCOUNTING']);
-  recordedBy = recordedBy || actor_();
-  paidAt = paidAt || new Date().toISOString().slice(0,10);
+function admin_recordPayment(contractId, invoiceId, amount, paidAt, recordedBy){
+  const actor = requireRole_(['ACCOUNTING']);
+  // §11.4：型検証・重複入金チェック・過入金/不足の検出
+  const amt = num_(amount);
+  if(amt <= 0) throw new Error('VALIDATION_ERROR: 入金額は正の数値で入力してください');
+  paidAt = String(paidAt || new Date().toISOString().slice(0,10));
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(paidAt)) throw new Error('VALIDATION_ERROR: 入金日は YYYY-MM-DD 形式で入力してください');
+  if(invoiceId){
+    const dup = readRows_(ssOps_(),'Payments').find(function(p){ return String(p.invoice_id)===String(invoiceId) && p.status==='入金済'; });
+    if(dup) throw new Error('DATA_CONFLICT: この請求には入金が記録済みです（' + dup.payment_id + '）。訂正する場合は先に取消してください。');
+  }
   appendRow_(ssOps_(),'Payments',{ payment_id:newId_('PAY'), invoice_id:invoiceId, contract_id:contractId,
-    amount:amount, paid_at:paidAt, status:'入金済', recorded_by:recordedBy });
-  if(invoiceId) updateRow_(ssOps_(),'Invoices','invoice_id',invoiceId,{status:'入金済'});
-  logEvent_('payment', contractId, recordedBy, null, {amount:amount, paid_at:paidAt});
+    amount:amt, paid_at:paidAt, status:'入金済', recorded_by:actor.email });
+  let diff = 0;
+  if(invoiceId){
+    updateRow_(ssOps_(),'Invoices','invoice_id',invoiceId,{status:'入金済'});
+    const inv = readRows_(ssOps_(),'Invoices').find(function(v){ return String(v.invoice_id)===String(invoiceId); });
+    if(inv) diff = amt - (num_(inv.total_amount) || num_(inv.amount));
+  }
+  logEvent_('payment', contractId, actor.email, null, {amount:amt, paid_at:paidAt, diff:diff});
   // 認証・バッジは締結時に発行済み（B経路固定）。入金では発行しない。
-  return true;
+  return { recorded:true, diff:diff };   // 過入金(+)／不足(−)は呼び出し側で表示
 }
 
 /** 入金の取消（請求は入金待ちへ戻す） */
-function admin_voidPayment(invoiceId){ requireRole_(['ACCOUNTING']);
+function admin_voidPayment(invoiceId, reason){
+  const actor = requireRole_(['ACCOUNTING']);
+  if(!String(reason||'').trim()) throw new Error('VALIDATION_ERROR: 取消理由は必須です');
   const pays = readRows_(ssOps_(),'Payments').filter(p => String(p.invoice_id)===String(invoiceId) && p.status==='入金済');
-  pays.forEach(p => updateRow_(ssOps_(),'Payments','payment_id',p.payment_id,{status:'取消'}));
+  pays.forEach(p => updateRow_(ssOps_(),'Payments','payment_id',p.payment_id,{status:'取消', void_reason:sanitizeCell_(String(reason))}));
   if(invoiceId) updateRow_(ssOps_(),'Invoices','invoice_id',invoiceId,{status:'入金待ち'});
-  logEvent_('payment', invoiceId, actor_(), {status:'入金済'}, {status:'取消'});
+  logEvent_('payment', invoiceId, actor.email, {status:'入金済'}, {status:'取消', reason:String(reason)});
   return true;
 }
 
@@ -657,4 +674,62 @@ function admin_reactivateCert(contractId){ return admin_setCertStatus(contractId
 function admin_getCertStatus(contractId){ requireRole_([]);
   const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.contract_id === contractId; });
   return cert ? { cert_id:cert.cert_id, status:cert.status, reason_code:cert.reason_code, issued_at:cert.issued_at } : { status:'NONE' };
+}
+
+// ---- 通知キュー管理（§10）----
+function admin_listNotifications(){ requireRole_([]);
+  const ctrWorks = contractWorksMap_();
+  return readRows_(ssOps_(),'Notification_Queue')
+    .filter(function(n){ return n.status === 'MANUAL_REQUIRED'; })
+    .map(function(n){ return { notification_id:n.notification_id, contract_id:n.contract_id,
+      work:contractWorkLabel_(ctrWorks, n.contract_id), type:n.type,
+      payload:parseJson_(n.payload_json, {}), created_at:String(n.created_at||'').slice(0,10) }; });
+}
+/** 通知の対応済み記録（誰がいつ対応したか） */
+function admin_markNotificationHandled(notificationId){
+  const actor = requireRole_(['OPERATIONS','ACCOUNTING','LEGAL_ADMIN']);
+  updateRow_(ssOps_(),'Notification_Queue','notification_id',notificationId,
+    { status:'SENT', sent_at:new Date().toISOString(), handled_by:actor.email });
+  logEvent_('notification', notificationId, actor.email, null, { handled:true });
+  return true;
+}
+/** 未解決システムエラー件数（ダッシュボード表示用） */
+function admin_countOpenErrors(){ requireRole_([]);
+  return readRows_(ssOps_(),'System_Errors').filter(function(e){ return e.status === 'OPEN'; }).length;
+}
+
+// ---- 規約・同意文の版管理（§7.2）----
+function admin_listLegalDocs(){ requireRole_([]);
+  return readRows_(ssOps_(),'Legal_Documents').map(function(d){ return {
+    legal_document_id:d.legal_document_id, document_type:d.document_type, version:d.version,
+    status:d.status, approved_by:d.approved_by||'', approved_at:String(d.approved_at||'').slice(0,10) }; });
+}
+/** 下書き保存（新しい版のDRAFTを作成）。公開は admin_publishLegalDoc で明示的に行う。 */
+function admin_saveLegalDraft(documentType, contentHtml){
+  const actor = requireRole_(['LEGAL_ADMIN']);
+  if(['PRIVACY','TERMS'].indexOf(documentType) < 0) throw new Error('VALIDATION_ERROR: 文書種別は PRIVACY / TERMS');
+  const rows = readRows_(ssOps_(),'Legal_Documents').filter(function(d){ return d.document_type === documentType; });
+  const nextVer = rows.reduce(function(m,d){ return Math.max(m, num_(d.version)); }, 0) + 1;
+  const id = Utilities.getUuid();
+  appendRow_(ssOps_(),'Legal_Documents',{ legal_document_id:id, document_type:documentType, version:nextVer,
+    content_html:String(contentHtml||''), content_hash:hash_(String(contentHtml||'')),
+    effective_from:'', effective_to:'', status:'DRAFT', approved_by:'', approved_at:'' });
+  logEvent_('legal_document', id, actor.email, null, { document_type:documentType, version:nextVer, status:'DRAFT' });
+  return { legal_document_id:id, version:nextVer };
+}
+/** 公開（DRAFT→PUBLISHED）。既存のPUBLISHEDはRETIREDへ。以後の申込はこの版に同意する。 */
+function admin_publishLegalDoc(legalDocumentId){
+  const actor = requireRole_(['LEGAL_ADMIN']);
+  const doc = readRows_(ssOps_(),'Legal_Documents').find(function(d){ return d.legal_document_id === legalDocumentId; });
+  if(!doc) throw new Error('DATA_NOT_FOUND: 文書が見つかりません');
+  if(doc.status !== 'DRAFT') throw new Error('DATA_CONFLICT: DRAFT のみ公開できます（現在: ' + doc.status + '）');
+  const now = new Date().toISOString();
+  readRows_(ssOps_(),'Legal_Documents')
+    .filter(function(d){ return d.document_type === doc.document_type && d.status === 'PUBLISHED'; })
+    .forEach(function(d){ updateRow_(ssOps_(),'Legal_Documents','legal_document_id',d.legal_document_id,
+      { status:'RETIRED', effective_to:now }); });
+  updateRow_(ssOps_(),'Legal_Documents','legal_document_id',legalDocumentId,
+    { status:'PUBLISHED', effective_from:now, approved_by:actor.email, approved_at:now });
+  logEvent_('legal_document', legalDocumentId, actor.email, {status:'DRAFT'}, { status:'PUBLISHED', document_type:doc.document_type, version:doc.version });
+  return true;
 }

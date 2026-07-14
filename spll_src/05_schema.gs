@@ -42,15 +42,15 @@ const SCHEMA_OPS = {
   Submissions:          ['submission_id','contract_id','title','status','submitted_at'],
   Submission_Versions:  ['version_id','submission_id','version_no','status','submitted_at'],
   Submission_Files:     ['submission_file_id','version_id','drive_file_id','mime_type','size','sha256','original_filename','magic_valid'],
-  AI_Review_Jobs:       ['ai_review_id','submission_id','version_id','model','prompt_version','status','retry_count'],
+  AI_Review_Jobs:       ['ai_review_id','submission_id','version_id','model','prompt_version','status','retry_count','overall_result','risk_score','human_review_required','response_file_id','started_at','completed_at','last_error'],
   AI_Findings:          ['finding_id','ai_review_id','work_id','rule_id','severity','result','page','evidence','confidence'],
   Human_Reviews:        ['human_review_id','submission_id','version_id','reviewer','result','comments','reviewed_at'],
   Compliance_Alerts:    ['alert_id','contract_id','submission_id','severity','status','settlement_block'],
   // 利用報告（FUN-01/§11.1）：SUBMITTED→RETURNED/APPROVED→LOCKED（→SUPERSEDED）
   Usage_Reports:        ['report_id','contract_id','period','channel','qty','gross_sales','returns','deductions','net_sales','sales_url','status','submitted_at','approved_by','approved_at','locked_at','returned_reason'],
   // 請求（FUN-02）：source_type=CONTRACT（FLAT/PER_WORK締結時）/ REPORT（RATE報告承認後）
-  Invoices:             ['invoice_id','contract_id','period','source_type','source_id','amount_rule','amount','status','issued_at'],
-  Payments:             ['payment_id','invoice_id','contract_id','amount','paid_at','method','status','recorded_by'],
+  Invoices:             ['invoice_id','contract_id','period','source_type','source_id','amount_rule','amount','tax_rate','tax_amount','total_amount','due_date','status','issued_at','void_reason'],
+  Payments:             ['payment_id','invoice_id','contract_id','amount','paid_at','method','status','recorded_by','void_reason'],
   Settlements:          ['settlement_id','partner_id','period','amount','status','hold_reason'],
   // 清算明細（FLOW-04/§12.2）：原作・権利者・配分方式・比率を明示
   Settlement_Details:   ['settlement_detail_id','settlement_id','contract_id','work_id','partner_id','allocation_scheme','allocation_ratio','rate_snapshot','amount'],
@@ -67,7 +67,12 @@ const SCHEMA_OPS = {
   Webhook_Receipts:     ['receipt_id','provider','external_event_id','payload_hash','payload_json','signature_valid','received_at','status','retry_count','last_error','processed_at'],
   System_Errors:        ['error_id','error_code','source','message','detail','occurred_at','status'],
   Batch_Runs:           ['batch_run_id','batch_name','started_at','finished_at','processed','errors','status','detail'],
-  X_Posts:              ['x_post_id','work_id','tweet_id','text','posted_by','posted_at']
+  X_Posts:              ['x_post_id','work_id','tweet_id','text','posted_by','posted_at'],
+  // 規約・同意文の版管理（§7.2）：DRAFT→PUBLISHED→RETIRED
+  Legal_Documents:      ['legal_document_id','document_type','version','content_html','content_hash','effective_from','effective_to','status','approved_by','approved_at'],
+  Application_Consents: ['consent_id','application_id','document_type','legal_document_id','content_hash','consented_at','consent_method'],
+  // 通知キュー（§10）：メール非保持方針下の「誰に何を通知すべきか」の記録
+  Notification_Queue:   ['notification_id','contract_id','type','reference_id','payload_json','status','created_at','sent_at','handled_by']
 };
 
 const SAMPLE_WORKS_SEED = [
@@ -166,6 +171,9 @@ function setup_bootstrap(opts){
   if(!prop_('FORM_MAX_WORKS'))               sp.setProperty('FORM_MAX_WORKS', '5');   // 契約書テンプレートの原作枠（当面5）
   if(!getConfig_('DEFAULT_ALLOCATION_SCHEME','')) setConfig_('DEFAULT_ALLOCATION_SCHEME','BY_WORK_EQUAL');  // 配分方式（FLOW-04）
   if(!getConfig_('APPLICATION_RETENTION_DAYS','')) setConfig_('APPLICATION_RETENTION_DAYS','365');           // 未成立申込の保有期間
+  if(!getConfig_('TAX_RATE',''))                  setConfig_('TAX_RATE','0.10');                             // 消費税率（請求）
+  if(!getConfig_('INVOICE_DUE_DAYS',''))          setConfig_('INVOICE_DUE_DAYS','30');                       // 支払期日（発行から日数）
+  if(!getConfig_('REVIEW_SLA_DAYS',''))           setConfig_('REVIEW_SLA_DAYS','5');                         // 人手審査SLA（営業日相当・暦日）
 
   // 5) サンプル投入（既定ON・既存があればスキップ）
   if(opts.seed !== false) setup_seedSamples_();

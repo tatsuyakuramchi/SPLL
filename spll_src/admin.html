@@ -128,6 +128,10 @@
       <div class="ph"><h3>直近の要対応</h3><span class="hint">Compliance_Alerts / Contracts より</span></div>
       <table><thead><tr><th>区分</th><th>対象</th><th>作品</th><th>状態</th><th>発生</th></tr></thead><tbody id="dash-alerts"></tbody></table>
     </div>
+    <div class="panel">
+      <div class="ph"><h3>📮 要対応の通知（利用者への案内）</h3><span class="hint">Notification_Queue（メール非保持のため人手対応）<span id="err-count" style="margin-left:10px;color:var(--fail);"></span></span></div>
+      <table><thead><tr><th>種別</th><th>契約</th><th>対象原作</th><th>内容</th><th>起票日</th><th>操作</th></tr></thead><tbody id="notify-tbody"></tbody></table>
+    </div>
   </section>
 
   <!-- REVIEW -->
@@ -208,8 +212,13 @@
         <div class="pbody">
           <p class="setnote">差込トークン： <span class="mono">{{name}}</span> 作品名 ／ <span class="mono">{{pub}}</span> 出版社 ／ <span class="mono">{{ok}}</span> 許諾要素 ／ <span class="mono">{{no}}</span> 禁止要素 ／ <span class="mono">{{media}}</span> 媒体 ／ <span class="mono">{{fee}}</span> 許諾料 ／ <span class="mono">{{credit}}</span> クレジット。作品ごとに自動で差し込まれます。</p>
           <div class="fld"><textarea id="set-terms" class="code" placeholder="利用規約テンプレート（HTML・差込トークン可）"></textarea></div>
+          <p class="setnote" id="legal-versions">公開中の版：—</p>
         </div>
-        <div class="pfoot"><button class="save" onclick="saveLegal()">同意文・規約を保存</button></div>
+        <div class="pfoot">
+          <button class="btn" onclick="saveLegalDrafts()">下書き保存（新しい版）</button>
+          <button class="save" onclick="publishLegalDrafts()">下書きを公開する（法務承認）</button>
+          <button class="btn" onclick="saveLegal()" title="版管理を使わない簡易保存（後方互換）">簡易保存</button>
+        </div>
       </div>
     </div>
 
@@ -487,8 +496,31 @@ var settingsLoaded = false;
 function loadSettings(){ if(settingsLoaded) return; settingsLoaded=true; loadLegal(); loadWorksPane(); loadFeePane(); loadIntegration(); loadXConfig(); loadBadgeConfig(); loadAdminAccess(); }
 
 // 同意文・規約
-function loadLegal(){ call("admin_getLegalTexts",[],function(l){ if(!l) return; $("set-privacy").value=l.privacy||""; $("set-terms").value=l.termsTemplate||""; }); }
-function saveLegal(){ call("admin_saveLegalTexts",[$("set-privacy").value,$("set-terms").value],function(){ toast("同意文・規約を保存しました"); }); }
+function loadLegal(){ call("admin_getLegalTexts",[],function(l){ if(!l) return; $("set-privacy").value=l.privacy||""; $("set-terms").value=l.termsTemplate||""; }); loadLegalVersions(); }
+function saveLegal(){ call("admin_saveLegalTexts",[$("set-privacy").value,$("set-terms").value],function(){ toast("同意文・規約を保存しました（簡易・版管理なし）"); }); }
+// 版管理（§7.2）：下書き保存 → 公開（PUBLISHED。以後の申込はこの版に同意）
+var _draftIds={};
+function saveLegalDrafts(){
+  call("admin_saveLegalDraft",["PRIVACY",$("set-privacy").value],function(r1){ _draftIds.PRIVACY=r1.legal_document_id;
+    call("admin_saveLegalDraft",["TERMS",$("set-terms").value],function(r2){ _draftIds.TERMS=r2.legal_document_id;
+      toast("下書きを保存しました（同意文 v"+r1.version+" / 規約 v"+r2.version+"）"); loadLegalVersions();
+    });
+  });
+}
+function publishLegalDrafts(){
+  if(!_draftIds.PRIVACY || !_draftIds.TERMS){ toast("先に「下書き保存」を実行してください", true); return; }
+  if(!confirm("下書きを公開します。以後の申込はこの版に同意した記録になります。よろしいですか？")) return;
+  call("admin_publishLegalDoc",[_draftIds.PRIVACY],function(){
+    call("admin_publishLegalDoc",[_draftIds.TERMS],function(){ toast("公開しました"); _draftIds={}; loadLegalVersions(); });
+  });
+}
+function loadLegalVersions(){
+  call("admin_listLegalDocs",[],function(rows){ rows=rows||[];
+    var pub=rows.filter(function(d){return d.status==="PUBLISHED";});
+    var pv=pub.find(function(d){return d.document_type==="PRIVACY";}), tv=pub.find(function(d){return d.document_type==="TERMS";});
+    var el=$("legal-versions"); if(el) el.innerHTML="公開中の版：同意文 "+(pv?("v"+pv.version+"（"+esc(pv.approved_at||"")+" 承認: "+esc(pv.approved_by||"")+"）"):"（版管理未使用）")+" ／ 規約 "+(tv?("v"+tv.version):"（版管理未使用）");
+  });
+}
 
 // データソース
 var DSKEYS = ["SS_MASTER","SS_OPS","DRIVE_ROOT","GCP_PROJECT","GCP_REGION","GEMINI_MODEL"];
@@ -726,8 +758,32 @@ function reportPill(s){
 }
 function pill(p){ return '<span class="pill '+p.cls+'">'+esc(p.label)+'</span>'; }
 
+// ---- 通知キュー（§10）----
+var NOTIFY_LABEL={UPLOAD_GUIDE:"提出案内",CORRECTION_REQUEST:"是正要求の連絡",REVIEW_RESULT:"審査結果の連絡",REVIEW_SLA_OVERDUE:"審査SLA超過",REPORT_REQUEST:"利用報告の依頼"};
+function loadNotifications(){
+  call("admin_listNotifications",[],function(rows){
+    var tb=$("notify-tbody"); if(!tb) return; tb.innerHTML=""; rows=rows||[];
+    if(!rows.length){ emptyRow(tb,6,"要対応の通知はありません"); return; }
+    rows.forEach(function(n){
+      var p=n.payload||{};
+      var detail=p.comment||p.note||(p.period?("対象期: "+p.period):"")||(p.title?("作品: "+p.title):"");
+      var tr=document.createElement("tr");
+      tr.appendChild(td('<span class="pill review">'+esc(NOTIFY_LABEL[n.type]||n.type)+'</span>'));
+      tr.appendChild(td('<span class="id">'+esc(n.contract_id||"—")+'</span>'));
+      tr.appendChild(td(esc(n.work||"")));
+      tr.appendChild(td('<span class="evi">'+esc(detail||"—")+'</span>'));
+      tr.appendChild(td('<span class="id">'+esc(n.created_at||"")+'</span>'));
+      var act=document.createElement("td"); act.className="actions";
+      act.appendChild(mkBtn("対応済みにする","btn p",function(){ call("admin_markNotificationHandled",[n.notification_id],function(){ toast("対応済みにしました"); loadNotifications(); }); }));
+      tr.appendChild(act); tb.appendChild(tr);
+    });
+  });
+  call("admin_countOpenErrors",[],function(n){ var el=$("err-count"); if(el) el.textContent=(n>0?("⚠ 未解決エラー "+n+" 件（System_Errors）"):""); });
+}
+
 // ---- ダッシュボード ----
 function loadDashboard(){
+  loadNotifications();
   call("admin_dashboard",[],function(d){
     if(!d) return; var k=d.kpis||{};
     setText("kpi-review",k.reviewPending); setText("kpi-high",k.highRisk);
@@ -863,7 +919,8 @@ function loadPay(){
       tr.appendChild(td('<span class="id">'+esc(v.paid_at||"—")+'</span>'));
       var act=document.createElement("td"); act.className="actions";
       if(paid){
-        act.appendChild(mkBtn("取消","btn d",function(){ if(confirm("入金記録を取り消しますか？")) call("admin_voidPayment",[v.invoice_id],function(){ toast("入金を取り消しました"); loadPay(); loadDashboard(); }); }));
+        if(v.diff && Number(v.diff)!==0){ tr.style.background="var(--warn-bg)"; }
+        act.appendChild(mkBtn("取消","btn d",function(){ var reason=prompt("取消理由（必須）：",""); if(!reason) return; call("admin_voidPayment",[v.invoice_id,reason],function(){ toast("入金を取り消しました"); loadPay(); loadDashboard(); }); }));
       } else {
         act.appendChild(mkBtn("入金を記録","btn p",function(){ recordPay(v); }));
       }
@@ -931,7 +988,10 @@ function recordPay(v){
   if(amount===null) return;
   var today=new Date(); var paidAt=prompt("入金日（YYYY-MM-DD）：", today.getFullYear()+"-"+("0"+(today.getMonth()+1)).slice(-2)+"-"+("0"+today.getDate()).slice(-2));
   if(paidAt===null) return;
-  call("admin_recordPayment",[v.contract_id,v.invoice_id,amount,paidAt],function(){ toast("入金を記録しました"); loadPay(); loadDashboard(); });
+  call("admin_recordPayment",[v.contract_id,v.invoice_id,amount,paidAt],function(r){
+    var d=(r&&r.diff)||0;
+    toast(d===0?"入金を記録しました":("入金を記録しました（"+(d>0?"過入金 +":"不足 ")+d.toLocaleString()+"円）"), d!==0);
+    loadPay(); loadDashboard(); });
 }
 
 function mkBtn(label,cls,fn){ var b=document.createElement("button"); b.className=cls; b.textContent=label; b.onclick=fn; return b; }
@@ -992,7 +1052,7 @@ MOCK.admin_listPayments=function(){ return [
   {invoice_id:"INV-202606-0001",contract_id:"CTR-202606-0017",work:"新クトゥルフ神話TRPG",amount:"売上の10％",status:"入金待ち",paid_at:""},
   {invoice_id:"INV-202606-0002",contract_id:"CTR-202606-0011",work:"インセイン",amount:"16,500円",status:"入金済",paid_at:"2026-06-24"}
 ]; };
-MOCK.admin_recordPayment=function(){ return true; };
+MOCK.admin_recordPayment=function(){ return {recorded:true, diff:0}; };
 MOCK.admin_voidPayment=function(){ return true; };
 MOCK.admin_listSettlements=function(){ return [
   {statement_id:"STM-202606-0001",period:"2026H1",partner:"どらこにあん",amount:"＊＊＊円",status:"DRAFT",objection_due:""},
@@ -1030,6 +1090,17 @@ var _mAdminUsers=[
   {email:"keiri@example.com",role:"ACCOUNTING",status:"DISABLED",added_by:"admin@example.com",added_at:"2026-07-02"}
 ];
 MOCK.admin_listAdminUsers=function(){ return _mAdminUsers; };
+var _mNotify=[
+  {notification_id:"N1",contract_id:"CTR-202607-0012",work:"新クトゥルフ神話TRPG、インセイン",type:"CORRECTION_REQUEST",payload:{comment:"クレジット表記が欠落しています"},created_at:"2026-07-14"},
+  {notification_id:"N2",contract_id:"CTR-202607-0009",work:"ソード・ワールド2.5",type:"REPORT_REQUEST",payload:{period:"2026H1"},created_at:"2026-07-13"}
+];
+MOCK.admin_listNotifications=function(){ return _mNotify; };
+MOCK.admin_markNotificationHandled=function(id){ _mNotify=_mNotify.filter(function(n){return n.notification_id!==id;}); return true; };
+MOCK.admin_countOpenErrors=function(){ return 0; };
+var _mLegalDocs=[{legal_document_id:"LD1",document_type:"PRIVACY",version:1,status:"PUBLISHED",approved_by:"legal@example.com",approved_at:"2026-07-01"},{legal_document_id:"LD2",document_type:"TERMS",version:1,status:"PUBLISHED",approved_by:"legal@example.com",approved_at:"2026-07-01"}];
+MOCK.admin_listLegalDocs=function(){ return _mLegalDocs; };
+MOCK.admin_saveLegalDraft=function(t){ var v=_mLegalDocs.filter(function(d){return d.document_type===t;}).length+1; var id="LD"+(_mLegalDocs.length+1); _mLegalDocs.push({legal_document_id:id,document_type:t,version:v,status:"DRAFT"}); return {legal_document_id:id,version:v}; };
+MOCK.admin_publishLegalDoc=function(id){ _mLegalDocs.forEach(function(d){ var target=_mLegalDocs.find(function(x){return x.legal_document_id===id;}); if(d.document_type===target.document_type&&d.status==="PUBLISHED") d.status="RETIRED"; }); _mLegalDocs.find(function(x){return x.legal_document_id===id;}).status="PUBLISHED"; return true; };
 MOCK.admin_saveAdminUser=function(email,role,status){ var i=-1; for(var k=0;k<_mAdminUsers.length;k++){ if(_mAdminUsers[k].email===email) i=k; } if(i>=0){ _mAdminUsers[i].role=role; _mAdminUsers[i].status=status; } else { _mAdminUsers.push({email:email,role:role,status:status,added_by:"admin@example.com",added_at:""}); } return true; };
 MOCK.admin_saveAdminAccess=function(c){ _mAccess.emails=c.emails; _mAccess.enforce=!!c.enforce; return true; };
 MOCK.api_getViewerRole=function(){ return {email:_mAccess.viewer,identified:true,isAdmin:true,bootstrap:!_mAccess.emails,adminUrl:"?page=admin",homeUrl:"?"}; };

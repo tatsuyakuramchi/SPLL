@@ -36,6 +36,7 @@ function api_getApplyConfig(){
  * 突合キーは application_ref（メールハッシュ突合は廃止）。
  */
 function web_createApplication(workIds, usageCategory){
+  if(!rateLimit_('createApp', 100, 3600)) throw new Error('現在申込が混み合っています。時間をおいて再度お試しください。');   // §6.4 大量生成対策
   const ids = (workIds || []).filter(Boolean).map(String).filter(function(v,i,a){ return a.indexOf(v)===i; });   // 重複除去
   if(!ids.length) throw new Error('原作が選択されていません');
   const maxW = formMaxWorks_();
@@ -59,6 +60,11 @@ function web_createApplication(workIds, usageCategory){
     status:'APPLICATION_CREATED', created_at:new Date().toISOString() });
   ids.forEach(function(wid){ appendRow_(ssOps_(),'Application_Works',{
     application_work_id:newId_('AW'), application_id:appId, work_id:wid }); });
+  // 同意証跡（§7.2）：同意時点の文書版・ハッシュを Application_Consents へ記録
+  [['PRIVACY', legal.privacy, legal.privacy_doc_id], ['TERMS', legal.termsTemplate, legal.terms_doc_id]]
+    .forEach(function(x){ appendRow_(ssOps_(),'Application_Consents',{ consent_id:Utilities.getUuid(),
+      application_id:appId, document_type:x[0], legal_document_id:x[2]||'',
+      content_hash:hash_(String(x[1]||'')), consented_at:new Date().toISOString(), consent_method:'PORTAL_CHECKBOX' }); });
   updateRow_(ssOps_(),'Applications','application_id',appId,{ status:'FORM_PENDING' });
   logEvent_('application', appId, 'portal', null, { application_ref:ref, works:ids.length, usage_category:usageCategory });
   return { application_id:appId, application_ref:ref };

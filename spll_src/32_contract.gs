@@ -62,6 +62,7 @@ function finishContractLinkage_(contractId){
   if(prop_('BADGE_AUTO') !== 'false'){ try{ issueBadge_(contractId, cert && cert.verify_url); }catch(e){ logEvent_('badge', contractId, 'system', null, { issue_error:String(e) }); } }
   prepareSubmissionToken_(contractId);
   issueToken_(contractId, 'REPORT', 400, 24);              // 利用報告トークン（約13ヶ月・最大24回）
+  enqueueNotification_(contractId, 'UPLOAD_GUIDE', contractId, { note:'締結完了。提出リンクを利用者へ案内してください（契約管理→提出リンク発行）' });
   try{ createInvoiceOnSigning_(contractId); }              // FLAT / PER_WORK は締結時に請求起票（FUN-02）
   catch(e){ logError_('PROCESSING_ERROR','createInvoiceOnSigning', e, { contract_id:contractId }); }
 }
@@ -76,11 +77,20 @@ function createInvoiceOnSigning_(contractId){
   if(model !== 'FLAT' && model !== 'PER_WORK') return null;    // RATE は利用報告承認後に起票
   const amount = num_(t.amount);
   if(amount <= 0){ logEvent_('invoice', contractId, 'system', null, { skipped:'NOT_REQUIRED（無償）' }); return null; }
+  return createInvoice_(contractId, currentPeriod_(), 'CONTRACT', contractId, t.fee_amount_or_rate||'', amount, 'system');
+}
+
+/** 請求起票の共通処理（§11.3）：税額・税込合計・支払期日を計算して記帳。 */
+function createInvoice_(contractId, period, sourceType, sourceId, amountRule, amount, actorEmail){
+  const taxRate = num_(getConfig_('TAX_RATE','0.10'));
+  const taxAmount = Math.round(amount * taxRate);
+  const dueDays = num_(getConfig_('INVOICE_DUE_DAYS','30')) || 30;
   const invId = newId_('INV');
-  appendRow_(ssOps_(),'Invoices',{ invoice_id:invId, contract_id:contractId, period:currentPeriod_(),
-    source_type:'CONTRACT', source_id:contractId, amount_rule:t.fee_amount_or_rate||'', amount:amount,
-    status:'入金待ち', issued_at:new Date().toISOString().slice(0,10) });
-  logEvent_('invoice', invId, 'system', null, { contract_id:contractId, amount:amount, model:model });
+  appendRow_(ssOps_(),'Invoices',{ invoice_id:invId, contract_id:contractId, period:period,
+    source_type:sourceType, source_id:sourceId, amount_rule:amountRule, amount:amount,
+    tax_rate:taxRate, tax_amount:taxAmount, total_amount:amount + taxAmount,
+    due_date:addDaysIso_(dueDays).slice(0,10), status:'入金待ち', issued_at:new Date().toISOString().slice(0,10) });
+  logEvent_('invoice', invId, actorEmail||'system', null, { contract_id:contractId, amount:amount, tax:taxAmount, source:sourceType });
   return invId;
 }
 

@@ -88,7 +88,8 @@ const PropertiesService={ getScriptProperties:()=>({
   setProperty:(k,v)=>{scriptProps[k]=String(v);},
   deleteProperty:k=>{delete scriptProps[k];}
 })};
-const CacheService={ getScriptCache:()=>({ get:()=>null, put:()=>{} }) };
+const _cache={};
+const CacheService={ getScriptCache:()=>({ get:k=>(k in _cache?_cache[k]:null), put:(k,v)=>{_cache[k]=String(v);} }) };
 const LockService={ getScriptLock:()=>({ waitLock:()=>{}, releaseLock:()=>{} }) };
 const SlidesApp={ create:function(n){ const id='PRES'+Math.random().toString(36).slice(2,7); return { getId:()=>id, getSlides:()=>[{ getObjectId:()=>'p1', getBackground:()=>({setSolidFill:()=>{}}), insertTextBox:()=>({ getText:()=>({ getTextStyle:()=>({ setForegroundColor:function(){return this;}, setBold:function(){return this;}, setFontSize:function(){return this;} }) }) }) }], saveAndClose:()=>{} }; }, openById:function(id){ return { getSlides:()=>[{ getObjectId:()=>'p1' }], replaceAllText:()=>{}, saveAndClose:()=>{}, getId:()=>id }; } };
 const ScriptApp={ getService:()=>({ getUrl:()=>'https://script.example/exec' }), getOAuthToken:()=>'oauth-tok' };
@@ -420,6 +421,72 @@ const ctx2=G.web_getSubmitContext(linkV.token);
 const subCtx=ctx2.submissions.find(x=>x.submission_id===sub1.submission_id);
 ok(subCtx && subCtx.correction && /クレジット表記/.test(subCtx.correction.comment),'提出ページに是正コメントが返る');
 ok(ctx2.badge_url && ctx2.badge_url.indexOf('page=badge')>=0,'提出ページにバッジ取得URLが返る');
+
+// ============ A-中（通知・SLA・AI証跡・請求・版管理・レート制限） ============
+// 27. 通知キュー（§10）
+ok(rows(OPS,'Notification_Queue').some(n=>n.type==='UPLOAD_GUIDE'),'締結時に提出案内の通知を起票');
+ok(rows(OPS,'Notification_Queue').some(n=>n.type==='CORRECTION_REQUEST'),'是正要求で通知を起票');
+const nq=rows(OPS,'Notification_Queue').find(n=>n.type==='CORRECTION_REQUEST');
+ok(nq.status==='MANUAL_REQUIRED','通知は人手対応（MANUAL_REQUIRED）');
+G.admin_markNotificationHandled(nq.notification_id);
+ok(rows(OPS,'Notification_Queue').find(n=>n.notification_id===nq.notification_id).status==='SENT','対応済み記録（handled_by付き）');
+const dupN=rows(OPS,'Notification_Queue').filter(n=>n.type==='UPLOAD_GUIDE'&&n.reference_id===contract.contract_id).length;
+G.enqueueNotification_(contract.contract_id,'UPLOAD_GUIDE',contract.contract_id,{});
+ok(rows(OPS,'Notification_Queue').filter(n=>n.type==='UPLOAD_GUIDE'&&n.reference_id===contract.contract_id).length===dupN,'同一参照の通知は重複起票しない');
+
+// 28. SLA監視（§18）
+// 審査待ち提出の submitted_at を過去に改ざんしてSLA超過を再現
+G.updateRow_(OPS,'Submissions','submission_id',sub1.submission_id,{ status:'HUMAN_REVIEW_PENDING', submitted_at:'2020-01-01T00:00:00.000Z' });
+const sla=G.notifyReviewSla_();
+ok(sla.processed>=1,'審査SLA超過を通知キューへ: '+sla.processed);
+ok(rows(OPS,'Notification_Queue').some(n=>n.type==='REVIEW_SLA_OVERDUE'),'REVIEW_SLA_OVERDUE 起票');
+const due=G.notifyReportDue_();
+ok(typeof due.processed==='number'||due.skipped,'報告期限監視が実行できる: '+JSON.stringify(due));
+
+// 29. AI審査の証跡（§9.3）
+const jobDone=rows(OPS,'AI_Review_Jobs').find(j=>j.status==='COMPLETED');
+ok(jobDone.overall_result,'ジョブに overall_result 記録: '+jobDone.overall_result);
+ok(jobDone.response_file_id,'AI生レスポンスをDrive保存（response_file_id）');
+ok(jobDone.started_at && jobDone.completed_at,'開始・完了日時を記録');
+
+// 30. 請求の税・期日・入金検証（§11.3/§11.4）
+const invT=rows(OPS,'Invoices').find(v=>v.source_type==='CONTRACT');
+ok(num_ll(invT.tax_amount)===Math.round(num_ll(invT.amount)*0.10),'税額=本体×10%: '+invT.tax_amount);
+ok(num_ll(invT.total_amount)===num_ll(invT.amount)+num_ll(invT.tax_amount),'税込合計が一致');
+ok(invT.due_date && /^\d{4}-\d{2}-\d{2}$/.test(invT.due_date),'支払期日を設定: '+invT.due_date);
+function num_ll(v){ return parseFloat(String(v))||0; }
+// 過入金の検出
+const payR=G.admin_recordPayment(invT.contract_id, invT.invoice_id, num_ll(invT.total_amount)+500, '2026-07-14');
+ok(payR.diff===500,'過入金 +500 を検出');
+// 重複入金の拒否
+let dupPay=false; try{ G.admin_recordPayment(invT.contract_id, invT.invoice_id, 100, '2026-07-14'); }catch(e){ dupPay=/入金が記録済み/.test(String(e.message)); }
+ok(dupPay,'重複入金は拒否');
+// 取消は理由必須
+let vrErr=false; try{ G.admin_voidPayment(invT.invoice_id,''); }catch(e){ vrErr=/取消理由は必須/.test(String(e.message)); }
+ok(vrErr,'取消理由なしは拒否');
+G.admin_voidPayment(invT.invoice_id,'金額誤り（過入金の訂正）');
+ok(rows(OPS,'Payments').some(p=>p.status==='取消'&&p.void_reason),'取消理由を記録');
+
+// 31. 規約の版管理（§7.2）
+const d1=G.admin_saveLegalDraft('PRIVACY','<p>新しい同意文 v-next</p>');
+const d2=G.admin_saveLegalDraft('TERMS','<p>新しい規約 v-next</p>');
+ok(d1.version>=1 && d2.version>=1,'DRAFT作成（版番号採番）');
+// 公開前は既定文のまま
+ok(G.api_getLegalTexts().privacy.indexOf('v-next')<0,'公開前のDRAFTは申込に使われない');
+G.admin_publishLegalDoc(d1.legal_document_id); G.admin_publishLegalDoc(d2.legal_document_id);
+const lt=G.api_getLegalTexts();
+ok(lt.privacy.indexOf('v-next')>=0 && lt.privacy_version===d1.version,'公開後は新版が配信される（版番号つき）');
+// 申込の同意証跡に文書IDが紐付く
+const appC=G.web_createApplication(['WRK-ARK00012'],'書籍');
+const cons=rows(OPS,'Application_Consents').filter(c=>c.application_id===appC.application_id);
+ok(cons.length===2 && cons.every(c=>c.legal_document_id),'同意証跡2件（文書ID・ハッシュ付き）');
+
+// 32. レート制限（§6.4）
+ok(G.rateLimit_('t1',3,60) && G.rateLimit_('t1',3,60) && G.rateLimit_('t1',3,60),'上限内は許可');
+ok(!G.rateLimit_('t1',3,60),'上限超過で拒否');
+for(var ri=0;ri<30;ri++) G.rateLimit_('verify:'+rot.cert_id,30,3600);
+const vLim=G.serveVerify_({ parameter:{ page:'verify', id:rot.cert_id, c:'x' } });
+ok(vLim._h.indexOf('照会回数が上限')>=0,'検証ポータルの照会回数制限');
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

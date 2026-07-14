@@ -24,6 +24,7 @@ function report_getContext(token){
 function report_submit(token, data){
   const tok = resolveToken_(token, 'REPORT');
   if(!tok) throw new Error('報告用リンクが無効か、有効期限が切れています。');
+  if(!rateLimit_('report:' + tok.token_id, 10, 3600)) throw new Error('報告の試行回数が上限に達しました。時間をおいて再度お試しください。');
   data = data || {};
   const gross = num_(data.gross), returns = num_(data.returns), deductions = num_(data.deductions), qty = num_(data.qty);
   if(gross < 0 || returns < 0 || deductions < 0 || qty < 0) throw new Error('VALIDATION_ERROR: 数量・金額は0以上で入力してください。');
@@ -127,6 +128,7 @@ function validateUpload_(data){
 function web_submitWork(token, data){
   const tok = resolveToken_(token, 'SUBMISSION');
   if(!tok) throw new Error('提出用リンクが無効か、有効期限が切れているか、提出回数の上限に達しています。');
+  if(!rateLimit_('submit:' + tok.token_id, 10, 3600)) throw new Error('提出の試行回数が上限に達しました。時間をおいて再度お試しください。');
   data = data || {};
   if(!data.dataBase64) throw new Error('作品ファイルが添付されていません。');
   const checked = validateUpload_(data);                       // サーバー側検証（SEC-05）
@@ -197,6 +199,9 @@ function serveBadge_(e){
 function serveVerify_(e){
   const p = e.parameter || {};
   if(!p.id) return verifyInputHtml_();
+  // レート制限（§6.4）：認証ID単位の照会回数（総当たり対策）
+  if(!rateLimit_('verify:' + String(p.id), 30, 3600))
+    return verifyHtml_('gray', '確認できません', '照会回数が上限に達しました。時間をおいて再度お試しください。', '');
   const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.cert_id === p.id; });
   const codeOk = cert && cert.check_code_hash && String(cert.check_code_hash) === hash_(String(p.c||''));
   if(!cert || !codeOk){

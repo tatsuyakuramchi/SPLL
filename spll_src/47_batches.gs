@@ -25,10 +25,50 @@ function trigger_every5min(){                     // Webhook再処理＋AI審査
   batchRun_('processWebhookReceipts', processWebhookReceipts_);
   batchRun_('runAiReviews', batch_runAiReviews_);
 }
-function trigger_daily(){                         // 期限処理・みなし確認・データ削除
+function trigger_daily(){                         // 期限処理・みなし確認・SLA・データ削除
   batchRun_('expireAccessTokens', expireAccessTokens_);
   batchRun_('closeObjectionPeriods', function(){ confirmDeemed_(); return {}; });
+  batchRun_('notifyReviewSla', notifyReviewSla_);
+  batchRun_('notifyReportDue', notifyReportDue_);
   batchRun_('purgeExpiredData', purgeExpiredData_);
+}
+
+/** 審査SLA監視（§18）：人手審査待ちがSLA日数を超過→通知キューへ（提出単位で1回） */
+function notifyReviewSla_(){
+  const slaDays = num_(getConfig_('REVIEW_SLA_DAYS','5')) || 5;
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - slaDays);
+  let n = 0;
+  readRows_(ssOps_(),'Submissions')
+    .filter(function(s){ return s.status === 'HUMAN_REVIEW_PENDING' && s.submitted_at && new Date(s.submitted_at) < cutoff; })
+    .forEach(function(s){
+      if(enqueueNotification_(s.contract_id, 'REVIEW_SLA_OVERDUE', s.submission_id,
+        { submission_id:s.submission_id, title:s.title, submitted_at:String(s.submitted_at||'').slice(0,10), sla_days:slaDays })) n++;
+    });
+  return { processed:n };
+}
+
+/** 報告期限監視（§18）：半期終了後1ヶ月の報告期間中、未報告のRATE契約へ通知（契約×期で1回） */
+function notifyReportDue_(){
+  const now = new Date();
+  const m = now.getMonth() + 1;   // 1-12
+  let period = '';
+  if(m === 1 || m === 2)      period = (now.getFullYear() - 1) + 'H2';   // 前年下期の報告期間
+  else if(m === 7 || m === 8) period = now.getFullYear() + 'H1';          // 当年上期の報告期間
+  else return { processed:0, skipped:'報告期間外' };
+  const reported = {};
+  readRows_(ssOps_(),'Usage_Reports').forEach(function(r){
+    if(String(r.period) === period && r.status !== 'RETURNED') reported[r.contract_id] = true; });
+  let n = 0;
+  readRows_(ssOps_(),'Contracts')
+    .filter(function(c){ return c.status === 'SIGNED' && c.link_status !== 'UNLINKED'; })
+    .forEach(function(c){
+      let t = {}; try{ t = JSON.parse(c.terms_snapshot||'{}'); }catch(e){}
+      if(String(t.fee_model).toUpperCase() !== 'RATE') return;   // 報告義務は売上連動のみ
+      if(reported[c.contract_id]) return;
+      if(enqueueNotification_(c.contract_id, 'REPORT_REQUEST', c.contract_id + ':' + period,
+        { period:period, note:'利用報告が未提出です。報告リンクを案内してください（入金・清算→報告リンク）' })) n++;
+    });
+  return { processed:n };
 }
 /** トリガーの冪等セットアップ（Apps Scriptエディタから1回 Run） */
 function setup_triggers(){
