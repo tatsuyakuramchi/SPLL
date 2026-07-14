@@ -910,12 +910,14 @@ function loadPay(){
     var tb=$("pay-tbody"); tb.innerHTML=""; rows=rows||[];
     if(!rows.length){ emptyRow(tb,6,"請求がありません"); }
     else rows.forEach(function(v){
-      var paid=String(v.status)==="入金済";
+      var stMap={ISSUED:{cls:"unpaid",label:"入金待ち"},UNPAID:{cls:"unpaid",label:"入金待ち"},PARTIALLY_PAID:{cls:"review",label:"一部入金"},PAID:{cls:"paid",label:"入金済"},OVERPAID:{cls:"fail",label:"過入金"},VOID:{cls:"wait",label:"取消"},DRAFT:{cls:"wait",label:"DRAFT"}};
+      var stp=stMap[String(v.status)]||{cls:"unpaid",label:String(v.status)||"入金待ち"};
+      var paid=["PAID","OVERPAID","PARTIALLY_PAID"].indexOf(String(v.status))>=0;
       var tr=document.createElement("tr");
       tr.appendChild(td('<span class="id">'+esc(v.contract_id)+'</span>'));
       tr.appendChild(td(esc(v.work)));
       tr.appendChild(td(esc(v.amount)));
-      tr.appendChild(td(pill(paid?{cls:"paid",label:"入金済"}:{cls:"unpaid",label:"入金待ち"})));
+      tr.appendChild(td(pill(stp)+(v.balance&&Number(v.balance)!==0?' <span style="font-size:10px;color:var(--soft)">残 '+Number(v.balance).toLocaleString()+'</span>':'')));
       tr.appendChild(td('<span class="id">'+esc(v.paid_at||"—")+'</span>'));
       var act=document.createElement("td"); act.className="actions";
       if(paid){

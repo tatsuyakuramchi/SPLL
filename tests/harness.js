@@ -50,7 +50,7 @@ let fSeq=0, fileSeq=0;
 function Folder(name){ this.name=name; this.id='FLD'+(++fSeq); this.folders=[]; this.files=[]; }
 Folder.prototype.createFolder=function(n){ const f=new Folder(n); this.folders.push(f); return f; };
 Folder.prototype.getFoldersByName=function(n){ const arr=this.folders.filter(f=>f.name===n); let i=0; return { hasNext:()=>i<arr.length, next:()=>arr[i++] }; };
-Folder.prototype.createFile=function(blob){ const f={ id:'FILE'+(++fileSeq), blob, name:blob.name, getId:function(){return this.id;}, getBlob:function(){return this.blob;}, getSize:function(){return (blob.bytes?blob.bytes.length:0);}, setSharing:function(){return this;}, setTrashed:function(){this.trashed=true;return this;} }; this.files.push(f); driveFiles[f.id]=f; return f; };
+Folder.prototype.createFile=function(blob){ const f={ id:'FILE'+(++fileSeq), blob, name:blob.name, getId:function(){return this.id;}, getBlob:function(){return this.blob;}, getName:function(){return this.name;}, getSize:function(){return (blob.bytes?blob.bytes.length:0);}, setSharing:function(){return this;}, setTrashed:function(){this.trashed=true;return this;} }; this.files.push(f); driveFiles[f.id]=f; return f; };
 Folder.prototype.getId=function(){ return this.id; };
 const driveFolders={}, driveFiles={};
 const DriveApp={
@@ -78,6 +78,8 @@ const Utilities={
   computeDigest:function(alg,val){ // deterministic: char codes
     const s=String(val); const out=[]; for(let i=0;i<Math.min(s.length,32);i++) out.push(s.charCodeAt(i)%256); while(out.length<32)out.push(0); return out; },
   computeHmacSignature:function(a,b,c){ return Array.from(Buffer.from(b+c).slice(0,20)); },
+  computeHmacSha256Signature:function(payload,secret){ const crypto=require('crypto'); return Array.from(crypto.createHmac('sha256',String(secret)).update(String(payload)).digest()); },
+  base64EncodeWebSafe:function(x){ const b=Array.isArray(x)?Buffer.from(x):Buffer.from(String(x),'utf8'); return b.toString('base64').replace(/\+/g,'-').replace(/\//g,'_'); },
   DigestAlgorithm:{SHA_256:1}, MacAlgorithm:{HMAC_SHA_1:1}
 };
 
@@ -109,6 +111,12 @@ const UrlFetchApp={ fetch:function(url, params){
     const body={ candidates:[{ content:{ parts:[{ text:JSON.stringify(obj) }] } }] };
     return { getResponseCode:()=>200, getContentText:()=>JSON.stringify(body) };
   }
+  if(String(url).indexOf('cloudsign.jp')>=0){
+    if(String(url).indexOf('/token')>=0) return { getResponseCode:()=>200, getContentText:()=>JSON.stringify({access_token:'cs-tok',expires_in:3000}) };
+    if(params && String(params.method).toLowerCase()==='post' && String(url).endsWith('/documents'))
+      return { getResponseCode:()=>200, getContentText:()=>JSON.stringify({id:'CSDOC-'+(++fileSeq)}) };
+    return { getResponseCode:()=>200, getContentText:()=>'{}', getBlob:()=>Blob('pdf','application/pdf','f.pdf') };
+  }
   return { getResponseCode:()=>200, getContentText:()=>'{}', getBlob:()=>Blob('img','image/png','b.png') };
 }};
 
@@ -119,9 +127,13 @@ vm.createContext(sandbox);
 // 分割後：spll_src/*.gs を辞書順に結合（GASと同じロード規則）
 const gsDir=path.join(__dirname,'..','spll_src');
 const gsFiles=fs.readdirSync(gsDir).filter(f=>f.endsWith('.gs')).sort();
-const code=gsFiles.map(f=>fs.readFileSync(gsDir+'/'+f,'utf8')).join('\n');
+const code=gsFiles.map(f=>fs.readFileSync(gsDir+'/'+f,'utf8')).join('\n')
+  + '\n' + fs.readFileSync(path.join(__dirname,'..','apps','workflow','entry.gs'),'utf8');   // doGet/doPost（GAS②）
 vm.runInContext(code, sandbox, {filename:'spll_src(combined)'});
 const G=sandbox;
+
+scriptProps.ENVIRONMENT='development';
+scriptProps.ALLOW_DEV_BOOTSTRAP='true';
 
 // ---- assertions ----
 let pass=0, fail=0;
@@ -136,7 +148,9 @@ ok(rows(MAS,'Works_Master').length>=3,'sample works seeded');
 
 // 2. application (multi-work)
 G.updateRow_(MAS,'Works_Master','work_id','WRK-BKK00019',{publish_status:'PUBLISHED'});   // 検証用に公開
-const appRes=G.web_createApplication(['WRK-ARK00012','WRK-BKK00019'],'電子出版物');
+function mkApp(workIds,usage,extra){ return G.web_createApplication(Object.assign({ workIds:workIds, usageCategory:usage,
+  privacyConsent:true, termsConsent:true, consentSessionId:'sess-test', displayHash:'fnv1a:test' }, extra||{})); }
+const appRes=mkApp(['WRK-ARK00012','WRK-BKK00019'],'電子出版物');
 ok(appRes.application_ref && /REF-\d{6}-[A-Z0-9]{6}/.test(appRes.application_ref),'application_ref format: '+appRes.application_ref);
 ok(rows(OPS,'Application_Works').length===2,'2 application_works rows');
 const appRow=rows(OPS,'Applications')[0];
@@ -236,11 +250,12 @@ ok(rows(OPS,'Settlement_Statements').find(s=>s.statement_id===stmt.statement_id)
 // 14. 未紐付け締結（ref無し）→ 手動紐付けフォールバック
 geminiResponder=()=>({overall_result:'PASS_CANDIDATE',findings:[]});
 // 別の申込を作成（複数原作）
-const app2=G.web_createApplication(['WRK-BKK00019'],'書籍');
+const app2=mkApp(['WRK-BKK00019'],'書籍');
 // ref無しの締結Webhook（status=2, textにREF含まず、application_ref無し）
 const before=rows(OPS,'Contracts').length;
 const whU=G.doPost({ parameter:{}, postData:{ contents:JSON.stringify({ documentID:'DOC-NOREF', status:2, userID:'u', email:'sender@corp.jp', text:'COMPLETED : 名称未設定の契約 sent by Jane' }) } });
-ok(String(whU.getContent())==='ok-unlinked','ref無し締結は ok-unlinked を返す');
+ok(String(whU.getContent())==='accepted-manual-review','ref無し締結は手動確認キューへ（accepted-manual-review）');
+ok(rows(OPS,'Webhook_Receipts').some(r=>r.status==='MANUAL_REVIEW'&&r.manual_review_reason),'受信が MANUAL_REVIEW＋理由つきで残る');
 const unlinkedC=rows(OPS,'Contracts')[rows(OPS,'Contracts').length-1];
 ok(unlinkedC.status==='SIGNED' && unlinkedC.link_status==='UNLINKED','未紐付け契約がSIGNED/UNLINKEDで記録される');
 ok(!unlinkedC.application_id,'未紐付け契約は application_id 空');
@@ -272,15 +287,15 @@ G.doPost({ parameter:{}, postData:{ contents:JSON.stringify({ documentID:'DOC-CA
 ok(rows(OPS,'Contracts').length===c_before,'status=3(取消)は契約を作らない');
 
 // 15. 原作上限（最大5件・契約書テンプレート枠）と重複除去、申込導線設定
-let capErr=false; try{ G.web_createApplication(['W1','W2','W3','W4','W5','W6']); }catch(e){ capErr=/最大5件|最大 5/.test(String(e.message||e)); }
+let capErr=false; try{ mkApp(['W1','W2','W3','W4','W5','W6'],'書籍'); }catch(e){ capErr=/最大5件|最大 5/.test(String(e.message||e)); }
 ok(capErr,'6件選択はエラー（最大5件）');
-const dedup=G.web_createApplication(['WRK-ARK00012','WRK-ARK00012','WRK-BKK00019'],'電子出版物');
+const dedup=mkApp(['WRK-ARK00012','WRK-ARK00012','WRK-BKK00019'],'電子出版物');
 ok(rows(OPS,'Application_Works').filter(x=>x.application_id===dedup.application_id).length===2,'重複原作は除去して2件');
 const acfg=G.api_getApplyConfig();
 ok(acfg.maxWorks===5 && typeof acfg.hiddenMap==='object','api_getApplyConfig: maxWorks=5 / hiddenMap object');
 // 上限を設定で3に変更したら3件超はエラー
 scriptProps.FORM_MAX_WORKS='3';
-let cap3=false; try{ G.web_createApplication(['A','B','C','D']); }catch(e){ cap3=/最大3件|最大 3/.test(String(e.message||e)); }
+let cap3=false; try{ mkApp(['A','B','C','D'],'書籍'); }catch(e){ cap3=/最大3件|最大 3/.test(String(e.message||e)); }
 ok(cap3,'設定変更で最大3件に反映');
 ok(G.api_getApplyConfig().maxWorks===3,'api_getApplyConfig maxWorks=3 に反映');
 scriptProps.FORM_MAX_WORKS='5';
@@ -297,7 +312,7 @@ ok(/×\s*3件/.test(tPer.fee_amount_or_rate),'PER_WORK 表示に×3件: '+tPer.f
 const tFlat=G.api_previewFeeTerms('イベント',2);
 ok(tFlat.fee_model==='FLAT' && tFlat.amount===0,'FLAT: 定額0');
 // 申込に usage_category を保存 → 締結でスナップショット
-const appR=G.web_createApplication(['WRK-ARK00012'],'電子出版物');
+const appR=mkApp(['WRK-ARK00012'],'電子出版物');
 ok(rows(OPS,'Applications').find(a=>a.application_id===appR.application_id).usage_category==='電子出版物','申込にusage_category保存');
 G.doPost({ parameter:{hook:'formrun'}, postData:{ contents:JSON.stringify({ application_ref:appR.application_ref, columns:[] }) } });
 G.doPost({ parameter:{}, postData:{ contents:JSON.stringify({ documentID:'DOC-FEE', status:2, application_ref:appR.application_ref }) } });
@@ -307,9 +322,12 @@ const snap=JSON.parse(feeCtr.terms_snapshot||'{}');
 ok(snap.fee_model==='RATE' && snap.rate===0.10,'terms_snapshot に RATE/率0.10');
 // 清算：契約のスナップショット率(0.10)が使われる（既定と別の率で検証）
 G.setConfig_('DEFAULT_ROYALTY_RATE','0.99');   // 既定を極端値に→スナップショット率が優先されることを確認
-const rptF=G.report_submit(G.admin_sendReportLink(feeCtr.contract_id).token, { period:'2099H1', channel:'DL', qty:1, gross:10000, returns:0, deductions:0, url:'' });
+const rptF=G.report_submit(G.admin_sendReportLink(feeCtr.contract_id).token, { period:G.currentPeriod_(), channel:'DL', qty:1, gross:10000, returns:0, deductions:0, url:'' });
 G.updateRow_(OPS,'Usage_Reports','report_id',rptF,{ status:'APPROVED' });
-const genF=G.generateStatements_('2099H1');
+const genF=G.generateStatements_(G.currentPeriod_());   // 追加清算（per-report冪等・V2-011）
+ok(genF.generated>=1,'後から承認された報告だけを追加清算できる: '+genF.generated);
+const genAgain=G.generateStatements_(G.currentPeriod_());
+ok(genAgain.generated===0,'再実行では二重清算しない（report_id単位の冪等）');
 const detF=rows(OPS,'Settlement_Details').filter(d=>d.contract_id===feeCtr.contract_id);
 ok(detF.length>=1,'清算明細が作成される');
 const snapF=JSON.parse(detF[0].rate_snapshot||'{}');
@@ -374,12 +392,16 @@ ok(mimeErr,'MIME不一致は拒否');
 
 // 21. 利用報告の入力検証・重複
 const rl2=G.admin_sendReportLink(contract.contract_id);
-let negErr=false; try{ G.report_submit(rl2.token,{ period:'2098H1', channel:'DL', qty:-1, gross:100, returns:0, deductions:0 }); }catch(e){ negErr=/0以上/.test(String(e.message)); }
+let negErr=false; try{ G.report_submit(rl2.token,{ period:G.currentPeriod_(), channel:'委託販売', qty:-1, gross:100, returns:0, deductions:0 }); }catch(e){ negErr=/0以上/.test(String(e.message)); }
 ok(negErr,'負数は拒否');
-let dedErr=false; try{ G.report_submit(rl2.token,{ period:'2098H1', channel:'DL', qty:1, gross:100, returns:60, deductions:50 }); }catch(e){ dedErr=/超えています/.test(String(e.message)); }
+let dedErr=false; try{ G.report_submit(rl2.token,{ period:G.currentPeriod_(), channel:'委託販売', qty:1, gross:100, returns:60, deductions:50 }); }catch(e){ dedErr=/超えています/.test(String(e.message)); }
+let futErr=false; try{ G.report_submit(rl2.token,{ period:'2098H1', channel:'委託販売', qty:1, gross:100, returns:0, deductions:0 }); }catch(e){ futErr=/報告できない期/.test(String(e.message)); }
+ok(futErr,'将来期の報告は拒否');
+let fmtErr=false; try{ G.report_submit(rl2.token,{ period:'2026-上期', channel:'委託販売', qty:1, gross:100, returns:0, deductions:0 }); }catch(e){ fmtErr=/期の形式/.test(String(e.message)); }
+ok(fmtErr,'期の形式違反は拒否');
 ok(dedErr,'控除+返品>総売上は拒否');
-const rpt98=G.report_submit(rl2.token,{ period:'2098H1', channel:'DL', qty:1, gross:100000, returns:0, deductions:0 });
-let dupErr2=false; try{ G.report_submit(rl2.token,{ period:'2098H1', channel:'DL', qty:1, gross:200, returns:0, deductions:0 }); }catch(e){ dupErr2=/既に提出/.test(String(e.message)); }
+const rpt98=G.report_submit(rl2.token,{ period:G.currentPeriod_(), channel:'委託販売', qty:1, gross:100000, returns:0, deductions:0 });
+let dupErr2=false; try{ G.report_submit(rl2.token,{ period:G.currentPeriod_(), channel:'委託販売', qty:1, gross:200, returns:0, deductions:0 }); }catch(e){ dupErr2=/既に提出/.test(String(e.message)); }
 ok(dupErr2,'同一期間・チャネルの重複報告は拒否');
 
 // 22. トークン期限・失効
@@ -393,9 +415,9 @@ ok(exp.processed>=1,'期限切れトークンをEXPIREDへ: '+exp.processed);
 // 23. 請求起票（FUN-02）
 // FLAT/PER_WORK: 書籍(PER_WORK)契約=app2由来 → 締結時起票済みのはず
 ok(rows(OPS,'Invoices').some(v=>v.source_type==='CONTRACT'),'PER_WORK契約の請求が締結時に起票');
-// RATE: 承認→起票（2098H1 の新規報告を承認して起票）
+// RATE: 承認→起票
 G.admin_approveReport(rpt98);
-const gen2=G.admin_generateInvoicesFromReports('2098H1');
+const gen2=G.admin_generateInvoicesFromReports(G.currentPeriod_());
 ok(gen2.generated>=1,'RATE請求を承認済み報告から起票: '+gen2.generated);
 ok(rows(OPS,'Invoices').some(v=>v.source_type==='REPORT'),'REPORT由来の請求が存在');
 
@@ -456,16 +478,24 @@ ok(num_ll(invT.total_amount)===num_ll(invT.amount)+num_ll(invT.tax_amount),'税�
 ok(invT.due_date && /^\d{4}-\d{2}-\d{2}$/.test(invT.due_date),'支払期日を設定: '+invT.due_date);
 function num_ll(v){ return parseFloat(String(v))||0; }
 // 過入金の検出
-const payR=G.admin_recordPayment(invT.contract_id, invT.invoice_id, num_ll(invT.total_amount)+500, '2026-07-14');
-ok(payR.diff===500,'過入金 +500 を検出');
-// 重複入金の拒否
-let dupPay=false; try{ G.admin_recordPayment(invT.contract_id, invT.invoice_id, 100, '2026-07-14'); }catch(e){ dupPay=/入金が記録済み/.test(String(e.message)); }
-ok(dupPay,'重複入金は拒否');
+// 一部入金→残額→全額→過入金（V2-010）
+const half=Math.floor(num_ll(invT.total_amount)/2);
+const p1=G.admin_recordPayment(invT.contract_id, invT.invoice_id, half, '2026-07-14', 'BANK-001');
+ok(p1.status==='PARTIALLY_PAID' && p1.balance===num_ll(invT.total_amount)-half,'一部入金で PARTIALLY_PAID＋残額');
+let refDup=false; try{ G.admin_recordPayment(invT.contract_id, invT.invoice_id, 1, '2026-07-14', 'BANK-001'); }catch(e){ refDup=/入金参照番号/.test(String(e.message)); }
+ok(refDup,'同一入金参照番号は拒否');
+const p2=G.admin_recordPayment(invT.contract_id, invT.invoice_id, num_ll(invT.total_amount)-half+500, '2026-07-15', 'BANK-002');
+ok(p2.status==='OVERPAID' && p2.diff===500,'累計で過入金 +500 を検出（OVERPAID）');
+let wrongC=false; try{ G.admin_recordPayment('CTR-WRONG', invT.invoice_id, 1, '2026-07-15', 'BANK-003'); }catch(e){ wrongC=/契約が一致しません/.test(String(e.message)); }
+ok(wrongC,'別契約の請求への入金は拒否');
+let noInv=false; try{ G.admin_recordPayment(invT.contract_id, 'INV-NONE', 1, '2026-07-15'); }catch(e){ noInv=/請求が見つかりません/.test(String(e.message)); }
+ok(noInv,'存在しない請求への入金は拒否');
 // 取消は理由必須
 let vrErr=false; try{ G.admin_voidPayment(invT.invoice_id,''); }catch(e){ vrErr=/取消理由は必須/.test(String(e.message)); }
 ok(vrErr,'取消理由なしは拒否');
 G.admin_voidPayment(invT.invoice_id,'金額誤り（過入金の訂正）');
-ok(rows(OPS,'Payments').some(p=>p.status==='取消'&&p.void_reason),'取消理由を記録');
+ok(rows(OPS,'Payments').some(p=>p.status==='VOID'&&p.void_reason&&p.voided_by),'取消理由・取消者を記録');
+ok(rows(OPS,'Invoices').find(v=>v.invoice_id===invT.invoice_id).status==='UNPAID','取消後に UNPAID へ再計算');
 
 // 31. 規約の版管理（§7.2）
 const d1=G.admin_saveLegalDraft('PRIVACY','<p>新しい同意文 v-next</p>');
@@ -477,7 +507,7 @@ G.admin_publishLegalDoc(d1.legal_document_id); G.admin_publishLegalDoc(d2.legal_
 const lt=G.api_getLegalTexts();
 ok(lt.privacy.indexOf('v-next')>=0 && lt.privacy_version===d1.version,'公開後は新版が配信される（版番号つき）');
 // 申込の同意証跡に文書IDが紐付く
-const appC=G.web_createApplication(['WRK-ARK00012'],'書籍');
+const appC=mkApp(['WRK-ARK00012'],'書籍',{ privacyDocumentId:d1.legal_document_id, termsDocumentId:d2.legal_document_id });
 const cons=rows(OPS,'Application_Consents').filter(c=>c.application_id===appC.application_id);
 ok(cons.length===2 && cons.every(c=>c.legal_document_id),'同意証跡2件（文書ID・ハッシュ付き）');
 
@@ -487,6 +517,75 @@ ok(!G.rateLimit_('t1',3,60),'上限超過で拒否');
 for(var ri=0;ri<30;ri++) G.rateLimit_('verify:'+rot.cert_id,30,3600);
 const vLim=G.serveVerify_({ parameter:{ page:'verify', id:rot.cert_id, c:'x' } });
 ok(vLim._h.indexOf('照会回数が上限')>=0,'検証ポータルの照会回数制限');
+
+// ============ 修正設計書v2 追加検証 ============
+// 33. ENVIRONMENT必須（V2-002）
+delete scriptProps.ENVIRONMENT;
+let envErr=false; try{ G.env_(); }catch(e){ envErr=/ENVIRONMENT is required/.test(String(e.message)); }
+ok(envErr,'ENVIRONMENT未設定は停止');
+scriptProps.ENVIRONMENT='invalid-env';
+let envErr2=false; try{ G.env_(); }catch(e){ envErr2=/Invalid ENVIRONMENT/.test(String(e.message)); }
+ok(envErr2,'不正なENVIRONMENTは停止');
+scriptProps.ENVIRONMENT='development';
+
+// 34. 同意の厳格化（V2-005/006）
+let cErr=false; try{ G.web_createApplication({ workIds:['WRK-ARK00012'], usageCategory:'書籍', termsConsent:true }); }catch(e){ cErr=/個人情報の取扱いへの同意/.test(String(e.message)); }
+ok(cErr,'privacyConsent無しは拒否');
+let staleErr=false; try{ mkApp(['WRK-ARK00012'],'書籍',{ privacyDocumentId:'OLD-DOC', termsDocumentId:d2.legal_document_id }); }catch(e){ staleErr=/更新されました/.test(String(e.message)); }
+ok(staleErr,'古い文書IDの申込は拒否（再表示を促す）');
+const consC=rows(OPS,'Application_Consents').filter(c=>c.application_id===appC.application_id);
+ok(consC.every(c=>c.consent_session_id==='sess-test'&&c.evidence_version==='v2'&&c.accepted==='true'),'同意証跡にセッション・版・accepted記録');
+// production で公開版必須：一旦 RETIRED にして確認
+scriptProps.ENVIRONMENT='production';
+G.updateRow_(OPS,'Legal_Documents','legal_document_id',d1.legal_document_id,{status:'RETIRED'});
+let pubErr=false; try{ mkApp(['WRK-ARK00012'],'書籍',{ privacyDocumentId:d1.legal_document_id, termsDocumentId:d2.legal_document_id }); }catch(e){ pubErr=/受け付けられません/.test(String(e.message)); }
+ok(pubErr,'production: 公開済み法務文書なしでは申込拒否');
+G.updateRow_(OPS,'Legal_Documents','legal_document_id',d1.legal_document_id,{status:'PUBLISHED'});
+scriptProps.ENVIRONMENT='development';
+
+// 35. handoff_token（フォーム項目設計 §4.1.1）
+scriptProps.HANDOFF_SECRET='handoff-secret';
+const appH=mkApp(['WRK-ARK00012'],'書籍',{ privacyDocumentId:d1.legal_document_id, termsDocumentId:d2.legal_document_id });
+ok(appH.handoff_token && appH.handoff_token.length>=16,'handoff_token発行');
+const appHrow=rows(OPS,'Applications').find(a=>a.application_id===appH.application_id);
+const okTok=G.verifyHandoffToken_(appHrow, ['WRK-ARK00012'], appH.handoff_token);
+ok(okTok.ok===true,'正しいhandoff_tokenは検証通過');
+const ngTok=G.verifyHandoffToken_(appHrow, ['WRK-ARK00012'], 'TAMPERED');
+ok(ngTok.ok===false,'改変されたhandoff_tokenは拒否');
+// formrun経由の改変検知 → MANUAL_REVIEW
+const frBad=G.doPost({ parameter:{hook:'formrun'}, postData:{ contents:JSON.stringify({ application_ref:appH.application_ref, columns:[{name:'handoff',value:'x'}], handoff_token:'TAMPERED' }) } });
+delete scriptProps.HANDOFF_SECRET;
+
+// 36. スキーマ移行（V2-003）
+const m1=G.ensureSheetColumns_(OPS,'Migration_Test',['a','b']);
+ok(m1.createdSheet===true,'移行: 新規シート作成');
+const m2=G.ensureSheetColumns_(OPS,'Migration_Test',['a','b','c','d']);
+ok(m2.addedColumns.length===2 && m2.addedColumns[0]==='c','移行: 不足列を末尾に追加');
+const m3=G.ensureSheetColumns_(OPS,'Migration_Test',['a','b','c','d']);
+ok(m3.addedColumns.length===0,'移行: 2回実行しても列が重複しない');
+const mig=G.migrateSchema_();
+ok(rows(OPS,'Migration_Runs').some(r=>r.status==='DONE'),'Migration_Runs に DONE 記録');
+ok(rows(OPS,'Schema_Versions').length>=2,'Schema_Versions に MASTER/OPS 記録');
+// production では setup_reset 禁止（V2-004）
+scriptProps.ENVIRONMENT='production';
+let resetErr=false; try{ G.setup_reset(); }catch(e){ resetErr=/production では setup_reset/.test(String(e.message)); }
+ok(resetErr,'production: setup_reset禁止');
+scriptProps.ENVIRONMENT='development';
+
+// 37. 清算送信の冪等（V2-012）
+scriptProps.CLOUDSIGN_CLIENT_ID='cs-test-client';
+const apStmts=rows(OPS,'Settlement_Statements').filter(x=>x.status==='APPROVED');
+if(apStmts.length){
+  const s1=G.batch_sendApprovedStatements_();
+  ok(s1.sent>=1,'承認済み計算書を送信: '+s1.sent);
+  const stSent=rows(OPS,'Settlement_Statements').find(x=>x.send_status==='SENT');
+  ok(stSent && stSent.send_attempt_id,'送信試行ID・send_statusを記録');
+  G.updateRow_(OPS,'Settlement_Statements','statement_id',stSent.statement_id,{status:'APPROVED'});   // 台帳更新失敗を再現
+  const s2=G.batch_sendApprovedStatements_();
+  ok(rows(OPS,'Settlement_Statements').filter(x=>x.statement_id===stSent.statement_id&&x.cloudsign_document_id).length===1 && s2.sent===0,
+    '外部書類ID保持により二重送信しない');
+}
+delete scriptProps.CLOUDSIGN_CLIENT_ID;
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

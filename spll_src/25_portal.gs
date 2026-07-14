@@ -35,37 +35,66 @@ function api_getApplyConfig(){
  * Applications ＋ Application_Works を登録して application_ref を返す。
  * 突合キーは application_ref（メールハッシュ突合は廃止）。
  */
-function web_createApplication(workIds, usageCategory){
-  if(!rateLimit_('createApp', 100, 3600)) throw new Error('現在申込が混み合っています。時間をおいて再度お試しください。');   // §6.4 大量生成対策
-  const ids = (workIds || []).filter(Boolean).map(String).filter(function(v,i,a){ return a.indexOf(v)===i; });   // 重複除去
+/**
+ * 申込作成（修正設計書v2 P0-03）。params:
+ *   { workIds, usageCategory, privacyConsent, termsConsent,
+ *     privacyDocumentId, termsDocumentId, consentSessionId, displayHash }
+ * サーバー側で同意・文書版・原作・利用目的を検証し、同意証跡を保存。
+ * production では公開済み法務文書（PUBLISHED）が無い場合は受付停止。
+ */
+function web_createApplication(params){
+  if(!rateLimit_('createApp', 100, 3600)) throw new Error('現在申込が混み合っています。時間をおいて再度お試しください。');   // §6.4
+  params = params || {};
+  if(Array.isArray(params)) throw new Error('VALIDATION_ERROR: 旧形式の申込APIは廃止されました（同意情報が必要です）');
+  const ids = (params.workIds || []).filter(Boolean).map(String).filter(function(v,i,a){ return a.indexOf(v)===i; });
+  const usageCategory = String(params.usageCategory || '');
   if(!ids.length) throw new Error('原作が選択されていません');
   const maxW = formMaxWorks_();
   if(ids.length > maxW) throw new Error('対象原作は最大' + maxW + '件までです（契約書テンプレートの制約）');
-  // サーバー側検証（修正設計書 §7.1）：実在・公開中の原作のみ／利用目的は有効な料金表に存在
+  // 同意チェック（サーバー側必須・P0-03）
+  if(params.privacyConsent !== true) throw new Error('VALIDATION_ERROR: 個人情報の取扱いへの同意が必要です');
+  if(params.termsConsent !== true) throw new Error('VALIDATION_ERROR: 利用規約への同意が必要です');
+  // 文書版の照合：公開版がある場合、画面表示時の文書IDと一致しなければ再表示を促す
+  const pubP = publishedLegalDoc_('PRIVACY'), pubT = publishedLegalDoc_('TERMS');
+  if(isProd_() && (!pubP || !pubT))
+    throw new Error('SERVICE_UNAVAILABLE: 現在申込を受け付けられません（規約・個人情報通知の公開版が未設定です）');
+  if(pubP && String(params.privacyDocumentId||'') !== String(pubP.legal_document_id))
+    throw new Error('VALIDATION_ERROR: 個人情報通知が更新されました。ページを再読み込みして内容をご確認ください。');
+  if(pubT && String(params.termsDocumentId||'') !== String(pubT.legal_document_id))
+    throw new Error('VALIDATION_ERROR: 利用規約が更新されました。ページを再読み込みして内容をご確認ください。');
+  // 原作・利用目的のサーバー検証（§7.1）
   const master = readRows_(ssMaster_(),'Works_Master');
   ids.forEach(function(wid){
     const w = master.find(function(x){ return x.work_id === wid; });
     if(!w) throw new Error('VALIDATION_ERROR: 存在しない原作です: ' + wid);
     if(w.publish_status !== 'PUBLISHED') throw new Error('VALIDATION_ERROR: 公開されていない原作です: ' + wid);
   });
-  usageCategory = String(usageCategory || '');
   if(!usageCategory || !feeRuleFor_(usageCategory))
     throw new Error('VALIDATION_ERROR: 利用目的が未選択か、料金表に存在しません: ' + usageCategory);
-  // 同意証跡：申込時点の同意文・規約のハッシュを保存（§7.2 の最小実装）
+
   const legal = api_getLegalTexts();
   const appId = newId_('APP');
   const ref   = newRef_();
+  const termsHash = hash_(String(legal.termsTemplate||''));
+  const handoffExpires = addDaysIso_(14);   // フォーム入力の引継ぎ有効期限
   appendRow_(ssOps_(),'Applications',{ application_id:appId, application_ref:ref, usage_category:sanitizeCell_(usageCategory),
-    privacy_hash: hash_(String(legal.privacy||'')), terms_hash: hash_(String(legal.termsTemplate||'')),
+    privacy_hash: hash_(String(legal.privacy||'')), terms_hash: termsHash, handoff_expires_at:handoffExpires,
     status:'APPLICATION_CREATED', created_at:new Date().toISOString() });
   ids.forEach(function(wid){ appendRow_(ssOps_(),'Application_Works',{
     application_work_id:newId_('AW'), application_id:appId, work_id:wid }); });
-  // 同意証跡（§7.2）：同意時点の文書版・ハッシュを Application_Consents へ記録
-  [['PRIVACY', legal.privacy, legal.privacy_doc_id], ['TERMS', legal.termsTemplate, legal.terms_doc_id]]
+  // 同意証跡（P0-03）：版番号・セッション・表示ハッシュつき
+  const sess = sanitizeCell_(String(params.consentSessionId||'').slice(0,64));
+  const disp = sanitizeCell_(String(params.displayHash||'').slice(0,128));
+  const now = new Date().toISOString();
+  [['PRIVACY', legal.privacy, pubP], ['TERMS', legal.termsTemplate, pubT]]
     .forEach(function(x){ appendRow_(ssOps_(),'Application_Consents',{ consent_id:Utilities.getUuid(),
-      application_id:appId, document_type:x[0], legal_document_id:x[2]||'',
-      content_hash:hash_(String(x[1]||'')), consented_at:new Date().toISOString(), consent_method:'PORTAL_CHECKBOX' }); });
+      application_id:appId, document_type:x[0], legal_document_id:(x[2]?x[2].legal_document_id:''),
+      legal_document_version:(x[2]?x[2].version:''), content_hash:hash_(String(x[1]||'')),
+      display_hash:disp, consent_session_id:sess, accepted:'true', accepted_at:now,
+      consented_at:now, consent_method:'PORTAL_CHECKBOX', evidence_version:'v2' }); });
   updateRow_(ssOps_(),'Applications','application_id',appId,{ status:'FORM_PENDING' });
   logEvent_('application', appId, 'portal', null, { application_ref:ref, works:ids.length, usage_category:usageCategory });
-  return { application_id:appId, application_ref:ref };
+  // 引継ぎ改変検知トークン（フォーム項目設計 §4.1.1）
+  const handoff = makeHandoffToken_(appId, ref, ids, usageCategory, termsHash, handoffExpires);
+  return { application_id:appId, application_ref:ref, handoff_token:handoff, handoff_expires_at:handoffExpires };
 }

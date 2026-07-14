@@ -53,12 +53,12 @@ function requireRole_(allowed){
   var email = ''; try{ email = Session.getActiveUser().getEmail() || ''; }catch(e){}
   const registered = readRows_(ssOps_(),'Admin_Users').length > 0 || adminEmails_().length > 0;
   if(!email){
-    if(!isProd_() && !registered) return { email:'dev-anonymous', role:'SYSTEM_ADMIN' };  // 開発初期のみ
+    if(devBootstrapAllowed_() && !registered) return { email:'dev-anonymous', role:'SYSTEM_ADMIN' };  // development＋ALLOW_DEV_BOOTSTRAP=true のみ
     throw new Error('AUTHENTICATION_ERROR: ログインユーザーを確認できません（匿名では管理操作できません）');
   }
   var role = roleOf_(email);
   if(!role){
-    if(!isProd_() && !registered) return { email:email, role:'SYSTEM_ADMIN' };            // 開発初期のみ
+    if(devBootstrapAllowed_() && !registered) return { email:email, role:'SYSTEM_ADMIN' };
     throw new Error('AUTHORIZATION_ERROR: 管理者として登録されていません: ' + email);
   }
   if(role !== 'SYSTEM_ADMIN' && allowed && allowed.length && allowed.indexOf(role) < 0)

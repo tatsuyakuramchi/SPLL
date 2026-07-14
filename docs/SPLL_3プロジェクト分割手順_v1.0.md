@@ -14,8 +14,9 @@
 | **GAS② workflow** | Webhook受信・提出・報告・バッジ・検証・バッチ | 匿名公開（トークン/Webhook検証で防御） | admin_関数・setup_bootstrap |
 | **GAS③ admin** | 管理コンソール・セットアップ | **組織内限定（DOMAIN）** | Webhook受信・匿名提出処理 |
 
-> 移行期間は従来の単一プロジェクト（`spll_src` 全体を push する `npm run push`）も併存できます。
-> 単一プロジェクトのエントリは `90_main.gs`（3分割ビルドには含まれません）。
+> **モノリス（単一プロジェクト）デプロイ経路は廃止しました（修正設計書v2 P0-01）。**
+> `npm run push` 等のルート直下pushスクリプトは存在せず、配布は `push:portal/workflow/admin/all` のみです。
+> 旧エントリは `reference/90_main.gs.reference`（参照用・配布対象外）。
 
 ## 2. 初回セットアップ（ローカルPCで実施）
 
@@ -62,13 +63,16 @@ npm run push:all        # build → portal/workflow/admin を順に push
 | `CLOUDSIGN_CLIENT_ID` ほかCloudSign系 | — | ✔ | ✔ |
 | `FORMRUN_WEBHOOK_SECRET` / `CLOUDSIGN_WEBHOOK_KEY` | — | ✔ | — |
 | `X_API_KEY` ほかX系 | — | — | ✔ |
-| `ENVIRONMENT`（production で全フェイルクローズ） | ✔ | ✔ | ✔ |
+| `ENVIRONMENT`（**必須**。development / staging / production。未設定は起動停止） | ✔ | ✔ | ✔ |
+| `ALLOW_DEV_BOOTSTRAP`（development で管理者未登録時の暫定操作を許可する場合のみ true） | — | — | ✔ |
+| `HANDOFF_SECRET`（フォーム引継ぎ改変検知・HMAC鍵） | ✔ | ✔ | — |
 
 ### 実行する関数（GASエディタから1回ずつ）
 
 | 関数 | 実行場所 | 内容 |
 |---|---|---|
-| `setup_bootstrap` | **admin** | 台帳・マスタ・Drive作成＋初期設定（既存を作り直す場合は `setup_reset`） |
+| `setup_bootstrap` | **admin** | 台帳・マスタ・Drive作成＋初期設定＋スキーマ移行（作り直しは `setup_reset`※devのみ） |
+| `setup_migrate` | **admin** | **既存シートへ不足列を追加**（スキーマ更新時。productionでも実行可・冪等） |
 | `setup_setInitialAdmin("you@example.com","SYSTEM_ADMIN")` | **admin** | 初期管理者登録（2人目以降はSYSTEM_ADMIN権限が必要） |
 | `setup_triggers` | **workflow** | 5分毎（Webhook再処理・AI審査）＋日次（期限・みなし確認・削除）トリガー作成（冪等） |
 

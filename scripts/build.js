@@ -36,6 +36,7 @@ const GAS_GLOBALS = new Set(['SpreadsheetApp','DriveApp','Utilities','Properties
 function definedNames(code){
   const names = new Set();
   for(const m of code.matchAll(/^(?:function\s+([A-Za-z0-9_]+)|const\s+([A-Za-z0-9_]+)|var\s+([A-Za-z0-9_]+))/gm)) names.add(m[1]||m[2]||m[3]);
+  for(const m of code.matchAll(/\bfunction\s+([A-Za-z0-9_]+)\s*\(/g)) names.add(m[1]);   // ネスト定義も認識
   return names;
 }
 function referencedPrivate(code){
@@ -45,6 +46,12 @@ function referencedPrivate(code){
   return refs;
 }
 
+// 各distに含まれてはならない関数（修正設計書v2 P0-01）
+const FORBIDDEN = {
+  portal:   [/function admin_/, /function setup_/, /function receiveWebhook_/, /function web_submitWork/, /function report_submit/, /function issueToken_/],
+  workflow: [/function admin_save/, /function setup_reset/, /function setup_setInitialAdmin/, /function serveAdmin_/, /function setup_bootstrap/],
+  admin:    [/function receiveWebhook_/, /function web_submitWork/, /function report_submit/],
+};
 let failed = false;
 for(const [app, mf] of Object.entries(MANIFEST)){
   const appDir = path.join(ROOT, 'apps', app);
@@ -68,6 +75,17 @@ for(const [app, mf] of Object.entries(MANIFEST)){
   fs.copyFileSync(path.join(appDir, 'appsscript.json'), path.join(dist, 'appsscript.json'));
 
   // クローズドチェック：私有関数・定数の未解決参照を検出
+  // 禁止関数の混入検査（P0-01）
+  for(const re of (FORBIDDEN[app] || [])){
+    if(re.test(combined)){ console.error('[' + app + '] 禁止関数が混入: ' + re); failed = true; }
+  }
+  // マニフェスト検査：admin=DOMAIN限定、portal=最小スコープ
+  const manifest = JSON.parse(fs.readFileSync(path.join(appDir, 'appsscript.json'), 'utf8'));
+  if(app === 'admin' && manifest.webapp.access !== 'DOMAIN'){ console.error('[admin] webapp.access は DOMAIN 必須'); failed = true; }
+  if(app === 'portal' && manifest.oauthScopes.some(s => /drive|cloud-platform|external_request|presentations/.test(s))){
+    console.error('[portal] OAuthスコープが過大'); failed = true; }
+  if(fs.existsSync(path.join(dist, '90_main.gs'))){ console.error('[' + app + '] モノリスエントリが混入'); failed = true; }
+
   const defined = definedNames(combined);
   const unresolved = [...referencedPrivate(combined)]
     .filter(n => !defined.has(n) && !GAS_GLOBALS.has(n));

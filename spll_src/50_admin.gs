@@ -146,7 +146,7 @@ function admin_dashboard(){ requireRole_([]);
     highRisk:      findings.filter(isHighRisk_).length,
     unscreened:    jobs.filter(j => j.status==='QUEUED' || j.status==='SCANNING').length,
     signing:       apps.filter(a => a.status && a.status!=='SIGNED' && a.status!=='CANCELLED').length,
-    unpaid:        invoices.filter(v => v.status && v.status!=='入金済' && v.status!=='取消').length,
+    unpaid:        invoices.filter(v => ['PAID','VOID','OVERPAID'].indexOf(String(v.status)) < 0).length,
     reporting:     reports.filter(r => r.status && r.status!=='SUBMITTED' && r.status!=='APPROVED' && r.status!=='LOCKED').length
   };
 
@@ -156,8 +156,9 @@ function admin_dashboard(){ requireRole_([]);
     kind:'審査', target:a.submission_id||a.contract_id||'', work:contractWorkLabel_(ctrWorks, a.contract_id||subCtr[a.submission_id]),
     status:String(a.severity||'ALERT'), cls:isHighRisk_(a)?'fail':'review', at:String(a.occurred_at||'')
   }));
-  invoices.filter(v => v.status==='入金待ち').forEach(v => rows.push({
-    kind:'入金', target:v.contract_id, work:contractWorkLabel_(ctrWorks, v.contract_id), status:'入金待ち', cls:'unpaid', at:String(v.issued_at||'')
+  invoices.filter(v => ['ISSUED','UNPAID','PARTIALLY_PAID'].indexOf(String(v.status)) >= 0).forEach(v => rows.push({
+    kind:'入金', target:v.contract_id, work:contractWorkLabel_(ctrWorks, v.contract_id),
+    status:(v.status==='PARTIALLY_PAID' ? '一部入金' : '入金待ち'), cls:'unpaid', at:String(v.issued_at||'')
   }));
   rows.sort((a,b) => String(b.at).localeCompare(String(a.at)));
   return { kpis: kpis, alerts: rows.slice(0,8) };
@@ -302,6 +303,11 @@ function admin_linkContract(contractId, applicationId){ requireRole_(['OPERATION
   snapshotContractTerms_(contractId, app);
   updateRow_(ssOps_(),'Applications','application_id',applicationId,{ status:'SIGNED' });
   finishContractLinkage_(contractId);
+  // 手動確認キューの解消（V2-008）：該当書類の受信を PROCESSED に更新
+  readRows_(ssOps_(),'Webhook_Receipts')
+    .filter(function(r){ return r.status === 'MANUAL_REVIEW' && String(r.external_event_id) === String(c.cloudsign_document_id); })
+    .forEach(function(r){ updateRow_(ssOps_(),'Webhook_Receipts','receipt_id',r.receipt_id,
+      { status:'PROCESSED', processed_at:new Date().toISOString() }); });
   logEvent_('contract', contractId, actor_(), { link_status:'UNLINKED' },
     { link_status:'LINKED', application_id:applicationId, application_ref:app.application_ref||'' });
   return true;
@@ -313,51 +319,69 @@ function admin_listPayments(){ requireRole_([]);
   const payments  = readRows_(ssOps_(),'Payments');
   const ctrWorks  = contractWorksMap_();
   return invoices.map(v => {
-    const pay = payments.find(p => String(p.invoice_id)===String(v.invoice_id) && p.status==='入金済');
+    const pays = payments.filter(p => String(p.invoice_id)===String(v.invoice_id) && p.status !== 'VOID');
     const total = num_(v.total_amount) || num_(v.amount);
+    const lastPay = pays.slice().sort((a,b)=>String(b.paid_at||'').localeCompare(String(a.paid_at||'')))[0];
     return {
       invoice_id:v.invoice_id, contract_id:v.contract_id, work:contractWorkLabel_(ctrWorks, v.contract_id),
       amount:String(total || v.amount_rule || ''), due_date:String(v.due_date||''),
-      status: pay ? '入金済' : (v.status||'入金待ち'),
-      paid_at: pay ? String(pay.paid_at||'') : '',
-      diff: pay ? (num_(pay.amount) - total) : 0     // 過入金(+)／不足(−)
+      status:v.status || 'ISSUED', paid_amount:num_(v.paid_amount), balance:num_(v.balance_amount),
+      paid_at: lastPay ? String(lastPay.paid_at||'') : '',
+      diff: -num_(v.balance_amount)
     };
   });
 }
 
 /** 入金記録（結果入力）。recordedBy/paidAt は未指定なら補完。 */
-function admin_recordPayment(contractId, invoiceId, amount, paidAt, recordedBy){
+function admin_recordPayment(contractId, invoiceId, amount, paidAt, paymentReference){
   const actor = requireRole_(['ACCOUNTING']);
-  // §11.4：型検証・重複入金チェック・過入金/不足の検出
-  const amt = num_(amount);
+  // V2-010：請求存在→契約照合→VOID拒否→参照重複→累計→状態決定（一部入金・過入金対応）
+  if(!invoiceId) throw new Error('VALIDATION_ERROR: 請求IDは必須です');
+  const inv = readRows_(ssOps_(),'Invoices').find(function(v){ return String(v.invoice_id)===String(invoiceId); });
+  if(!inv) throw new Error('DATA_NOT_FOUND: 請求が見つかりません: ' + invoiceId);
+  if(contractId && String(inv.contract_id) !== String(contractId))
+    throw new Error('DATA_CONFLICT: 請求の契約と入金対象の契約が一致しません');
+  if(inv.status === 'VOID') throw new Error('DATA_CONFLICT: 取消済み（VOID）の請求には入金できません');
+  const amt = requireNonNegativeNumber_(amount, '入金額');
   if(amt <= 0) throw new Error('VALIDATION_ERROR: 入金額は正の数値で入力してください');
   paidAt = String(paidAt || new Date().toISOString().slice(0,10));
   if(!/^\d{4}-\d{2}-\d{2}$/.test(paidAt)) throw new Error('VALIDATION_ERROR: 入金日は YYYY-MM-DD 形式で入力してください');
-  if(invoiceId){
-    const dup = readRows_(ssOps_(),'Payments').find(function(p){ return String(p.invoice_id)===String(invoiceId) && p.status==='入金済'; });
-    if(dup) throw new Error('DATA_CONFLICT: この請求には入金が記録済みです（' + dup.payment_id + '）。訂正する場合は先に取消してください。');
-  }
-  appendRow_(ssOps_(),'Payments',{ payment_id:newId_('PAY'), invoice_id:invoiceId, contract_id:contractId,
-    amount:amt, paid_at:paidAt, status:'入金済', recorded_by:actor.email });
-  let diff = 0;
-  if(invoiceId){
-    updateRow_(ssOps_(),'Invoices','invoice_id',invoiceId,{status:'入金済'});
-    const inv = readRows_(ssOps_(),'Invoices').find(function(v){ return String(v.invoice_id)===String(invoiceId); });
-    if(inv) diff = amt - (num_(inv.total_amount) || num_(inv.amount));
-  }
-  logEvent_('payment', contractId, actor.email, null, {amount:amt, paid_at:paidAt, diff:diff});
-  // 認証・バッジは締結時に発行済み（B経路固定）。入金では発行しない。
-  return { recorded:true, diff:diff };   // 過入金(+)／不足(−)は呼び出し側で表示
+  const ref = String(paymentReference||'').slice(0,64);
+  if(ref && readRows_(ssOps_(),'Payments').some(function(p){ return p.payment_reference === ref && p.status !== 'VOID'; }))
+    throw new Error('DATA_CONFLICT: 同一の入金参照番号が登録済みです: ' + ref);
+  appendRow_(ssOps_(),'Payments',{ payment_id:newId_('PAY'), invoice_id:invoiceId, contract_id:inv.contract_id,
+    amount:amt, paid_at:paidAt, payment_reference:sanitizeCell_(ref), status:'RECORDED', recorded_by:actor.email });
+  const st = recalcInvoiceStatus_(invoiceId);
+  logEvent_('payment', inv.contract_id, actor.email, null, {invoice_id:invoiceId, amount:amt, paid_at:paidAt, status:st.status, balance:st.balance});
+  return { recorded:true, status:st.status, paid_amount:st.paid, balance:st.balance, diff:-st.balance };
+}
+/** 請求の累計入金・残額・状態を再計算（V2-010）。UNPAID/PARTIALLY_PAID/PAID/OVERPAID。 */
+function recalcInvoiceStatus_(invoiceId){
+  const inv = readRows_(ssOps_(),'Invoices').find(function(v){ return String(v.invoice_id)===String(invoiceId); });
+  if(!inv) return { status:'', paid:0, balance:0 };
+  const total = num_(inv.total_amount) || num_(inv.amount);
+  const paid = readRows_(ssOps_(),'Payments')
+    .filter(function(p){ return String(p.invoice_id)===String(invoiceId) && p.status !== 'VOID'; })
+    .reduce(function(s,p){ return s + num_(p.amount); }, 0);
+  const balance = total - paid;
+  const status = inv.status === 'VOID' ? 'VOID'
+    : paid === 0 ? 'UNPAID' : (balance > 0 ? 'PARTIALLY_PAID' : (balance === 0 ? 'PAID' : 'OVERPAID'));
+  updateRow_(ssOps_(),'Invoices','invoice_id',invoiceId,
+    { paid_amount:paid, balance_amount:balance, status:status, payment_status_updated_at:new Date().toISOString() });
+  return { status:status, paid:paid, balance:balance };
 }
 
 /** 入金の取消（請求は入金待ちへ戻す） */
 function admin_voidPayment(invoiceId, reason){
   const actor = requireRole_(['ACCOUNTING']);
   if(!String(reason||'').trim()) throw new Error('VALIDATION_ERROR: 取消理由は必須です');
-  const pays = readRows_(ssOps_(),'Payments').filter(p => String(p.invoice_id)===String(invoiceId) && p.status==='入金済');
-  pays.forEach(p => updateRow_(ssOps_(),'Payments','payment_id',p.payment_id,{status:'取消', void_reason:sanitizeCell_(String(reason))}));
-  if(invoiceId) updateRow_(ssOps_(),'Invoices','invoice_id',invoiceId,{status:'入金待ち'});
-  logEvent_('payment', invoiceId, actor.email, {status:'入金済'}, {status:'取消', reason:String(reason)});
+  const now = new Date().toISOString();
+  const pays = readRows_(ssOps_(),'Payments').filter(p => String(p.invoice_id)===String(invoiceId) && p.status !== 'VOID');
+  if(!pays.length) throw new Error('DATA_NOT_FOUND: 取消対象の入金がありません');
+  pays.forEach(p => updateRow_(ssOps_(),'Payments','payment_id',p.payment_id,
+    { status:'VOID', void_reason:sanitizeCell_(String(reason)), voided_at:now, voided_by:actor.email }));
+  const st = recalcInvoiceStatus_(invoiceId);   // 残額・状態を再計算（V2-010-9）
+  logEvent_('payment', invoiceId, actor.email, {status:'RECORDED'}, {status:'VOID', reason:String(reason), invoice_status:st.status});
   return true;
 }
 
@@ -375,9 +399,11 @@ function admin_listSettlements(){ requireRole_([]);
 }
 
 /** 計算書の承認（DRAFT→APPROVED）。送信は admin_sendApprovedStatements で実施。 */
-function admin_approveStatement(statementId){ requireRole_(['ACCOUNTING']);
-  updateRow_(ssOps_(),'Settlement_Statements','statement_id',statementId,{status:'APPROVED'});
-  logEvent_('settlement_statement', statementId, actor_(), null, {status:'APPROVED'});
+function admin_approveStatement(statementId){
+  const actor = requireRole_(['ACCOUNTING']);
+  updateRow_(ssOps_(),'Settlement_Statements','statement_id',statementId,
+    {status:'APPROVED', approved_by:actor.email, approved_at:new Date().toISOString()});
+  logEvent_('settlement_statement', statementId, actor.email, null, {status:'APPROVED'});
   return true;
 }
 
@@ -731,5 +757,16 @@ function admin_publishLegalDoc(legalDocumentId){
   updateRow_(ssOps_(),'Legal_Documents','legal_document_id',legalDocumentId,
     { status:'PUBLISHED', effective_from:now, approved_by:actor.email, approved_at:now });
   logEvent_('legal_document', legalDocumentId, actor.email, {status:'DRAFT'}, { status:'PUBLISHED', document_type:doc.document_type, version:doc.version });
+  return true;
+}
+
+/** 送信失敗した計算書を手動で再送可能に戻す（CloudSign側の書類有無を確認してから実行すること） */
+function admin_retryStatementSend(statementId){
+  const actor = requireRole_(['ACCOUNTING']);
+  const st = readRows_(ssOps_(),'Settlement_Statements').find(function(x){ return x.statement_id === statementId; });
+  if(!st) throw new Error('DATA_NOT_FOUND: 計算書が見つかりません');
+  if(st.status !== 'SEND_FAILED') throw new Error('DATA_CONFLICT: SEND_FAILED のみ再送に戻せます（現在: ' + st.status + '）');
+  updateRow_(ssOps_(),'Settlement_Statements','statement_id',statementId,{ status:'APPROVED', send_error:'' });
+  logEvent_('settlement_statement', statementId, actor.email, {status:'SEND_FAILED'}, {status:'APPROVED', retry:true});
   return true;
 }

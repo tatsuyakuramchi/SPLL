@@ -6,23 +6,12 @@
   "scripts": {
     "login": "clasp login",
     "logout": "clasp logout",
-    "create": "clasp create --type webapp --title \"SPLL 利用申込窓口\" --rootDir spll_src",
-    "setup": "clasp create --type webapp --title \"SPLL 利用申込窓口\" --rootDir spll_src && git checkout -- spll_src/appsscript.json && clasp push -f",
-    "clone": "clasp clone",
-    "push": "clasp push",
-    "push:watch": "clasp push --watch",
     "build": "node scripts/build.js",
     "test": "node tests/harness.js && node scripts/build.js && node tests/sec01.js",
     "push:portal": "npm run build && cd apps/portal && clasp push -f",
     "push:workflow": "npm run build && cd apps/workflow && clasp push -f",
     "push:admin": "npm run build && cd apps/admin && clasp push -f",
-    "push:all": "npm run build && cd apps/portal && clasp push -f && cd ../workflow && clasp push -f && cd ../admin && clasp push -f",
-    "deploy": "clasp deploy",
-    "deployments": "clasp deployments",
-    "open": "clasp open",
-    "open:web": "clasp open --webapp",
-    "logs": "clasp logs",
-    "status": "clasp status"
+    "push:all": "npm run build && cd apps/portal && clasp push -f && cd ../workflow && clasp push -f && cd ../admin && clasp push -f"
   },
   "devDependencies": {
     "@google/clasp": "^2.4.2"

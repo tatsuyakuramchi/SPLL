@@ -136,6 +136,15 @@
         document.getElementById("ctxId").textContent=c.contract_id||"";
         document.getElementById("ctxFee").textContent=c.fee||"";
         document.getElementById("ctxPeriod").textContent=c.period||"";
+        // 報告可能期はサーバー提示（V2-009）。選択UIがあれば差し替え。
+        window._periods=(c.periods&&c.periods.length)?c.periods:[c.period];
+        var pe=document.getElementById("ctxPeriod");
+        if(pe && pe.tagName!=="SELECT" && window._periods.length>1){
+          var sel=document.createElement("select"); sel.id="ctxPeriod";
+          sel.style.cssText="border:1px solid #DAD7E2;border-radius:7px;padding:6px 10px;font-size:13px;";
+          window._periods.forEach(function(p){ var o=document.createElement("option"); o.value=p; o.textContent=p; sel.appendChild(o); });
+          sel.value=c.period; pe.replaceWith(sel);
+        }
       }).report_getContext(TOKEN);
     }
   }
@@ -143,7 +152,7 @@
   /** report_submit(token,data) へ送信（スタンドアロン時は完了表示のみ） */
   function submitReport(){
     const data={
-      period:document.getElementById("ctxPeriod").textContent,
+      period:(document.getElementById("ctxPeriod").tagName==="SELECT"?document.getElementById("ctxPeriod").value:document.getElementById("ctxPeriod").textContent),
       channel:document.getElementById("channel").value,
       qty:+document.getElementById("qty").value||0,
       gross:+document.getElementById("gross").value||0,

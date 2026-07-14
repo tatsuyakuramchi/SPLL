@@ -30,13 +30,14 @@ const SCHEMA_MASTER = {
 const SCHEMA_OPS = {
   // 申込：複数原作は中間テーブル Application_Works で管理（B経路固定・A/B分岐なし）
   //   usage_category：利用目的（別紙2の料金計算キー）／privacy_hash・terms_hash：同意時文書ハッシュ（§7.2）
-  Applications:         ['application_id','application_ref','usage_category','privacy_hash','terms_hash','status','created_at'],
+  Applications:         ['application_id','application_ref','usage_category','privacy_hash','terms_hash','handoff_expires_at','status','created_at'],
   Application_Works:    ['application_work_id','application_id','work_id'],
   // 契約：締結時に対象原作を Contract_Works へスナップショット（法務証跡）
   //   link_status: LINKED（申込突合済）/ UNLINKED（未突合＝手動紐付け待ち）
   //   contract_file_id/hash：締結済原本PDF（FUN-04）
   Contracts:            ['contract_id','cloudsign_document_id','cloudsign_title','application_id','application_ref','usage_category','terms_snapshot','status','link_status','signed_at','contract_file_id','contract_file_hash','folder_id'],
-  Contract_Works:       ['contract_work_id','contract_id','work_id','work_name_snapshot','publisher_snapshot','credit_snapshot','partner_id_snapshot'],
+  // 清算は契約時スナップショットを正本とする（V2-011）：権利者・登録番号・料率・配分方式まで固定
+  Contract_Works:       ['contract_work_id','contract_id','work_id','work_name_snapshot','publisher_snapshot','credit_snapshot','partner_id_snapshot','partner_name_snapshot','invoice_reg_number_snapshot','allocation_scheme_snapshot','royalty_rate_snapshot','handling_fee_rate_snapshot'],
   // 用途別アクセストークン（SEC-06/§9.1）：SUBMISSION / REPORT / BADGE_DOWNLOAD
   Access_Tokens:        ['token_id','contract_id','purpose','token_hash','status','expires_at','max_uses','used_count','last_used_at','issued_at','revoked_at'],
   Submissions:          ['submission_id','contract_id','title','status','submitted_at'],
@@ -47,15 +48,16 @@ const SCHEMA_OPS = {
   Human_Reviews:        ['human_review_id','submission_id','version_id','reviewer','result','comments','reviewed_at'],
   Compliance_Alerts:    ['alert_id','contract_id','submission_id','severity','status','settlement_block'],
   // 利用報告（FUN-01/§11.1）：SUBMITTED→RETURNED/APPROVED→LOCKED（→SUPERSEDED）
-  Usage_Reports:        ['report_id','contract_id','period','channel','qty','gross_sales','returns','deductions','net_sales','sales_url','status','submitted_at','approved_by','approved_at','locked_at','returned_reason'],
+  Usage_Reports:        ['report_id','contract_id','period','channel','qty','gross_sales','returns','deductions','net_sales','sales_url','status','submitted_at','approved_by','approved_at','locked_at','returned_reason','supersedes_report_id'],
   // 請求（FUN-02）：source_type=CONTRACT（FLAT/PER_WORK締結時）/ REPORT（RATE報告承認後）
-  Invoices:             ['invoice_id','contract_id','period','source_type','source_id','amount_rule','amount','tax_rate','tax_amount','total_amount','due_date','status','issued_at','void_reason'],
-  Payments:             ['payment_id','invoice_id','contract_id','amount','paid_at','method','status','recorded_by','void_reason'],
+  // 請求は累計残高方式（V2-010）：ISSUED/UNPAID/PARTIALLY_PAID/PAID/OVERPAID/VOID
+  Invoices:             ['invoice_id','invoice_number','contract_id','period','source_type','source_id','amount_rule','amount','tax_rate','tax_amount','total_amount','paid_amount','balance_amount','currency','due_date','status','payment_status_updated_at','issued_at','void_reason'],
+  Payments:             ['payment_id','invoice_id','contract_id','amount','paid_at','method','payment_reference','note','status','recorded_by','void_reason','voided_at','voided_by'],
   Settlements:          ['settlement_id','partner_id','period','amount','status','hold_reason'],
   // 清算明細（FLOW-04/§12.2）：原作・権利者・配分方式・比率を明示
-  Settlement_Details:   ['settlement_detail_id','settlement_id','contract_id','work_id','partner_id','allocation_scheme','allocation_ratio','rate_snapshot','amount'],
+  Settlement_Details:   ['settlement_detail_id','settlement_id','contract_id','report_id','work_id','partner_id','allocation_scheme','allocation_ratio','rate_snapshot','amount'],
   // 清算ステータスは CONFIRMED を使わず OBJECTION_PERIOD→NO_OBJECTION_RECORDED→FINALIZED
-  Settlement_Statements:['statement_id','settlement_id','partner_id','period','type','reg_number_snapshot','status','effective_date','objection_due','pdf_file_id','sheet_id','version','sent_at','finalized_at'],
+  Settlement_Statements:['statement_id','settlement_id','partner_id','period','type','reg_number_snapshot','status','effective_date','objection_due','pdf_file_id','sheet_id','version','sent_at','finalized_at','cloudsign_document_id','send_attempt_id','send_status','send_error','approved_by','approved_at','objection_note','objection_received_at'],
   Partners:             ['partner_id','name','invoice_reg_number','is_qualified_issuer','bank','contact'],
   Badges:               ['badge_id','contract_id','issued_at','png_l','png_m','png_s','token_hash','status'],
   // 認証：状態＋変更理由・承認記録
@@ -64,15 +66,19 @@ const SCHEMA_OPS = {
   Config:               ['config_key','value','environment','updated_at'],
   // ---- 修正設計書 §15.1 追加テーブル ----
   Admin_Users:          ['admin_user_id','email','role','status','added_by','added_at'],
-  Webhook_Receipts:     ['receipt_id','provider','external_event_id','payload_hash','payload_json','signature_valid','received_at','status','retry_count','last_error','processed_at'],
+  // 受信キュー（V2-007）：RECEIVED→PROCESSING→PROCESSED／RETRY_WAIT／MANUAL_REVIEW／REJECTED／DEAD_LETTER
+  Webhook_Receipts:     ['receipt_id','provider','external_event_id','idempotency_key','payload_hash','payload_json','signature_valid','received_at','status','retry_count','last_error','processed_at','processing_started_at','processing_owner','manual_review_reason','next_retry_at'],
   System_Errors:        ['error_id','error_code','source','message','detail','occurred_at','status'],
   Batch_Runs:           ['batch_run_id','batch_name','started_at','finished_at','processed','errors','status','detail'],
   X_Posts:              ['x_post_id','work_id','tweet_id','text','posted_by','posted_at'],
   // 規約・同意文の版管理（§7.2）：DRAFT→PUBLISHED→RETIRED
   Legal_Documents:      ['legal_document_id','document_type','version','content_html','content_hash','effective_from','effective_to','status','approved_by','approved_at'],
-  Application_Consents: ['consent_id','application_id','document_type','legal_document_id','content_hash','consented_at','consent_method'],
+  Application_Consents: ['consent_id','application_id','document_type','legal_document_id','legal_document_version','content_hash','display_hash','consent_session_id','accepted','accepted_at','consented_at','consent_method','evidence_version'],
   // 通知キュー（§10）：メール非保持方針下の「誰に何を通知すべきか」の記録
-  Notification_Queue:   ['notification_id','contract_id','type','reference_id','payload_json','status','created_at','sent_at','handled_by']
+  Notification_Queue:   ['notification_id','contract_id','type','reference_id','payload_json','status','created_at','sent_at','handled_by'],
+  // スキーマ移行（V2-003）
+  Schema_Versions:      ['schema_name','version','applied_at','applied_by','checksum'],
+  Migration_Runs:       ['migration_run_id','migration_name','started_at','finished_at','status','before_snapshot','after_snapshot','error_detail']
 };
 
 const SAMPLE_WORKS_SEED = [
@@ -134,6 +140,7 @@ function initSheets_(ss, schema){
 function setup_bootstrap(opts){
   opts = opts || {};
   const sp = PropertiesService.getScriptProperties();
+  if(!sp.getProperty('ENVIRONMENT')) sp.setProperty('ENVIRONMENT','development');   // 明示値を必ず持つ（V2-002）
   const out = { created:{}, reused:{} };
 
   // 1) 作品マスタ
@@ -178,6 +185,9 @@ function setup_bootstrap(opts){
   // 5) サンプル投入（既定ON・既存があればスキップ）
   if(opts.seed !== false) setup_seedSamples_();
 
+  // 既存シートへの不足列追加（V2-003）。新規作成時も冪等に実行。
+  try{ migrateSchema_(); }catch(e){ logError_('PROCESSING_ERROR','bootstrap:migrate', e); }
+
   out.properties = { SS_MASTER:masterId, SS_OPS:opsId, DRIVE_ROOT:rootId };
   out.urls = {
     SS_MASTER:'https://docs.google.com/spreadsheets/d/'+masterId,
@@ -194,6 +204,7 @@ function setup_bootstrap(opts){
 
 /** サンプル作品・パートナーを投入（各シートが空のときのみ） */
 function setup_seedSamples_(){
+  if(isProd_()) return;   // productionではサンプル投入を常に禁止（V2-004）
   if(readRows_(ssMaster_(),'Works_Master').length === 0){
     SAMPLE_WORKS_SEED.forEach(w => appendRow_(ssMaster_(),'Works_Master', w));
   }
@@ -205,12 +216,98 @@ function setup_seedSamples_(){
   }
 }
 
+// ---- スキーマ移行（修正設計書v2 V2-003）----
+const SCHEMA_VERSION = 2;   // 列定義を変えたら加算する
+
+/**
+ * 既存スプレッドシートへ不足シート・不足列を追加する（既存列の削除・並び替えはしない）。
+ * LockServiceで排他し、Migration_Runs に前後スナップショット（シート数・総行数）を記録。冪等。
+ */
+function migrateSchema_(){
+  const lock = LockService.getScriptLock(); lock.waitLock(30000);
+  const runId = Utilities.getUuid();
+  try{
+    // Migration_Runs / Schema_Versions 自身を先に用意
+    [['Migration_Runs', SCHEMA_OPS.Migration_Runs], ['Schema_Versions', SCHEMA_OPS.Schema_Versions]]
+      .forEach(function(x){ ensureSheetColumns_(ssOps_(), x[0], x[1]); });
+    appendRow_(ssOps_(),'Migration_Runs',{ migration_run_id:runId, migration_name:'migrateSchema v'+SCHEMA_VERSION,
+      started_at:new Date().toISOString(), finished_at:'', status:'RUNNING',
+      before_snapshot:JSON.stringify(schemaSnapshot_()), after_snapshot:'', error_detail:'' });
+    let added = { sheets:0, columns:0, warnings:[] };
+    [[ssMaster_(), SCHEMA_MASTER, 'MASTER'], [ssOps_(), SCHEMA_OPS, 'OPS']].forEach(function(t){
+      const ss = t[0], schema = t[1], name = t[2];
+      Object.keys(schema).forEach(function(sheetName){
+        const r = ensureSheetColumns_(ss, sheetName, schema[sheetName]);
+        added.sheets += r.createdSheet ? 1 : 0; added.columns += r.addedColumns.length;
+        added.warnings = added.warnings.concat(r.warnings);
+      });
+      const patch = { version:SCHEMA_VERSION, applied_at:new Date().toISOString(), applied_by:actor_(),
+        checksum:hash_(JSON.stringify(schema)) };
+      if(!updateRow_(ssOps_(),'Schema_Versions','schema_name',name,patch))
+        appendRow_(ssOps_(),'Schema_Versions', Object.assign({ schema_name:name }, patch));
+    });
+    updateRow_(ssOps_(),'Migration_Runs','migration_run_id',runId,{ finished_at:new Date().toISOString(),
+      status:'DONE', after_snapshot:JSON.stringify(schemaSnapshot_()),
+      error_detail:added.warnings.length ? ('警告: ' + added.warnings.join(' / ')).slice(0,500) : '' });
+    logEvent_('batch','migrateSchema',actor_(),null,added);
+    return added;
+  }catch(err){
+    try{ updateRow_(ssOps_(),'Migration_Runs','migration_run_id',runId,{ finished_at:new Date().toISOString(),
+      status:'ERROR', error_detail:String(err).slice(0,500) }); }catch(e){}
+    throw err;
+  }finally{ lock.releaseLock(); }
+}
+/** シートが無ければ作成、あれば不足列だけをヘッダ末尾へ追加。重複・空ヘッダは警告。 */
+function ensureSheetColumns_(ss, name, headers){
+  let sh = ss.getSheetByName(name);
+  const out = { createdSheet:false, addedColumns:[], warnings:[] };
+  if(!sh){
+    sh = ss.insertSheet(name);
+    sh.getRange(1,1,1,headers.length).setValues([headers]);
+    sh.setFrozenRows(1);
+    out.createdSheet = true;
+    return out;
+  }
+  const lastCol = Math.max(1, sh.getLastColumn());
+  const cur = sh.getRange(1,1,1,lastCol).getValues()[0].map(String);
+  const curSet = {};
+  cur.forEach(function(h,i){
+    if(h === ''){ if(i < lastCol-1) out.warnings.push(name+': 空ヘッダ列'+(i+1)); return; }
+    if(curSet[h] !== undefined) out.warnings.push(name+': ヘッダ重複 '+h);
+    curSet[h] = i;
+  });
+  const missing = headers.filter(function(h){ return curSet[h] === undefined; });
+  if(missing.length){
+    const start = (cur[cur.length-1] === '' && cur.length === 1) ? 1 : cur.filter(String).length + 1;
+    sh.getRange(1, start, 1, missing.length).setValues([missing]);
+    out.addedColumns = missing;
+  }
+  headers.length && cur.filter(String).forEach(function(h){
+    if(headers.indexOf(h) < 0) out.warnings.push(name+': スキーマ外の列 '+h);
+  });
+  return out;
+}
+/** 移行前後スナップショット：シートごとの行数 */
+function schemaSnapshot_(){
+  const snap = {};
+  [[ssMaster_(),'M'],[ssOps_(),'O']].forEach(function(t){
+    t[0].getSheets().forEach(function(sh){ snap[t[1]+':'+sh.getName()] = sh.getLastRow(); });
+  });
+  return snap;
+}
+/** エディタ実行用：スキーマ移行（管理者登録済みなら SYSTEM_ADMIN 必須） */
+function setup_migrate(){
+  if(readRows_(ssOps_(),'Admin_Users').length > 0) requireRole_(['SYSTEM_ADMIN']);
+  return migrateSchema_();
+}
+
 /**
  * 作り直し：既存IDを無視して SS_MASTER / SS_OPS / DRIVE_ROOT を新規に作成し直す。
  * 本番データが無い前提。Apps Scriptエディタで setup_reset を選んで Run。
  * ※ 旧スプレッドシート/フォルダはDriveに残るため、不要なら手動でゴミ箱へ。
  */
 function setup_reset(){
+  if(isProd_()) throw new Error('AUTHORIZATION_ERROR: production では setup_reset は実行できません（V2-004）。スキーマ変更は setup_migrate を使用してください。');
   if(readRows_(ssOps_(),'Admin_Users').length > 0) requireRole_(['SYSTEM_ADMIN']);   // 初回のみ無条件
   return setup_bootstrap({ force:true });
 }

@@ -469,6 +469,10 @@ const DEFAULT_TERMS_TEMPLATE=`
 <h4>第7条（準拠法・管轄）</h4><ol><li>日本法に準拠し、当社所在地を管轄する裁判所を専属的合意管轄とします。</li></ol>`;
 
 let LEGAL = { privacy: DEFAULT_PRIVACY, termsTemplate: DEFAULT_TERMS_TEMPLATE };
+let LEGAL_META = { privacy_doc_id:"", terms_doc_id:"", privacy_version:"", terms_version:"" };
+const CONSENT_SESSION_ID = "cs-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2,10);
+function fnv1a(s){ let h=0x811c9dc5; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=(h*0x01000193)>>>0; } return ("0000000"+h.toString(16)).slice(-8); }
+function displayHash(){ return "fnv1a:" + fnv1a(String(LEGAL.privacy)) + "-" + fnv1a(String(LEGAL.termsTemplate)); }
 let APPLY = { formUrl:"", refParam:"application_ref", hiddenMap:{}, maxWorks:5 };
 
 function loadLegal(){
@@ -476,6 +480,8 @@ function loadLegal(){
     google.script.run.withSuccessHandler(l=>{
       if(l && l.privacy) LEGAL.privacy=l.privacy;
       if(l && l.termsTemplate) LEGAL.termsTemplate=l.termsTemplate;
+      if(l){ LEGAL_META.privacy_doc_id=l.privacy_doc_id||""; LEGAL_META.terms_doc_id=l.terms_doc_id||"";
+             LEGAL_META.privacy_version=l.privacy_version||""; LEGAL_META.terms_version=l.terms_version||""; }
     }).api_getLegalTexts();
     google.script.run.withSuccessHandler(c=>{ if(c){
       APPLY.formUrl=c.formUrl||""; APPLY.refParam=c.refParam||"application_ref";
@@ -486,17 +492,22 @@ function loadLegal(){
 }
 function updateMaxHint(){ const el=document.getElementById("maxHint"); if(el) el.textContent="（複数選択可・最大"+APPLY.maxWorks+"件）"; }
 
-/** クラウドサインフォームへの遷移URL：application_ref と 対象原作(work_id/title×N) を hidden項目で引き継ぐ */
-function buildFormUrl(ref){
+/** クラウドサインフォームへの遷移URL（フォーム項目設計 §7）：ref・handoff・原作・条件・文書版を引き継ぐ */
+function buildFormUrl(res){
+  const ref=(res&&res.application_ref)||"";
   const base=APPLY.formUrl; if(!base) return "";
   const map=APPLY.hiddenMap||{};
   const params=[];
   const add=(k,v)=>{ if(k) params.push(encodeURIComponent(k)+"="+encodeURIComponent(v||"")); };
   add(map.application_ref||APPLY.refParam, ref);
+  if(res){ add(map.handoff_token, res.handoff_token||""); add(map.handoff_expires_at, res.handoff_expires_at||""); }
+  add(map.work_count, String(cart.length));
+  add(map.privacy_document_id, LEGAL_META.privacy_doc_id); add(map.terms_document_id, LEGAL_META.terms_doc_id);
   for(let i=0;i<APPLY.maxWorks;i++){
     const w=cart[i]?workById(cart[i]):null;
-    if(map["work_id_"+(i+1)])    add(map["work_id_"+(i+1)],    w?w.id:"");
-    if(map["work_title_"+(i+1)]) add(map["work_title_"+(i+1)], w?w.name:"");
+    if(map["work_id_"+(i+1)])     add(map["work_id_"+(i+1)],     w?w.id:"");
+    if(map["work_title_"+(i+1)])  add(map["work_title_"+(i+1)],  w?w.name:"");
+    if(map["work_credit_"+(i+1)]) add(map["work_credit_"+(i+1)], w?(w.credit||""):"");
   }
   // 別紙2（利用料条件）を hidden項目で引き継ぐ
   if(TERMS){
@@ -559,11 +570,15 @@ function updateGates(){
 function submitApplication(){
   const btn=document.getElementById("submit"); btn.disabled=true; btn.textContent="申込を作成中…";
   const ids=cart.slice();
+  const params={ workIds:ids, usageCategory:selectedUsage,
+    privacyConsent:true, termsConsent:true,                       // チェックボックスは updateGates で担保済み
+    privacyDocumentId:LEGAL_META.privacy_doc_id, termsDocumentId:LEGAL_META.terms_doc_id,
+    consentSessionId:CONSENT_SESSION_ID, displayHash:displayHash() };
   if(hasGas){
     google.script.run
       .withSuccessHandler(res=>onCreated(res))
       .withFailureHandler(err=>{ btn.disabled=false; btn.textContent="申込を作成してクラウドサインへ進む →"; alert("申込の作成に失敗しました：\n"+(err&&err.message||err)); })
-      .web_createApplication(ids, selectedUsage);
+      .web_createApplication(params);
   } else {
     // standalone mock
     const ym=new Date(); const mm=(""+ym.getFullYear()+String(ym.getMonth()+1).padStart(2,"0")).slice(2);
@@ -576,7 +591,7 @@ function onCreated(res){
   document.getElementById("doneMsg").innerHTML=
     "続けてクラウドサインフォームで申込者情報・同意を入力し、CloudSignで契約を締結してください。<br>この参照番号（application_ref）で申込と契約が紐付きます。控えとして保管してください。";
   const toForm=document.getElementById("toForm");
-  const url=buildFormUrl(ref);
+  const url=buildFormUrl(res);
   if(url){
     toForm.onclick=()=>{ window.open(url,"_blank"); };
     toForm.style.display="";

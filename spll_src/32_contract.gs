@@ -37,12 +37,19 @@ function snapshotContractWorks_(contractId, applicationId){
   const already = readRows_(ssOps_(),'Contract_Works').some(function(x){ return x.contract_id === contractId; });
   if(already) return;
   const master = {}; readRows_(ssMaster_(),'Works_Master').forEach(function(w){ master[w.work_id] = w; });
+  const partners = readRows_(ssOps_(),'Partners');
+  const scheme = String(getConfig_('DEFAULT_ALLOCATION_SCHEME','BY_WORK_EQUAL')).toUpperCase();
+  const handling = getConfig_('HANDLING_FEE_RATE','0.30');
   readRows_(ssOps_(),'Application_Works').filter(function(x){ return x.application_id === applicationId; })
     .forEach(function(x){
       const w = master[x.work_id] || {};
+      const p = resolveWorkPartner_(w, partners);   // 権利者は契約時点で確定（V2-011）
       appendRow_(ssOps_(),'Contract_Works',{ contract_work_id:newId_('CW'), contract_id:contractId, work_id:x.work_id,
         work_name_snapshot:sanitizeCell_(w.work_name||''), publisher_snapshot:sanitizeCell_(w.publisher||''),
-        credit_snapshot:sanitizeCell_(w.credit_text||''), partner_id_snapshot:w.partner_id||'' });
+        credit_snapshot:sanitizeCell_(w.credit_text||''), partner_id_snapshot:p.partner_id||'',
+        partner_name_snapshot:sanitizeCell_(p.name||''), invoice_reg_number_snapshot:p.invoice_reg_number||'',
+        allocation_scheme_snapshot:scheme, royalty_rate_snapshot:(w.royalty_rate!==undefined?w.royalty_rate:''),
+        handling_fee_rate_snapshot:handling });
     });
 }
 
@@ -86,10 +93,12 @@ function createInvoice_(contractId, period, sourceType, sourceId, amountRule, am
   const taxAmount = Math.round(amount * taxRate);
   const dueDays = num_(getConfig_('INVOICE_DUE_DAYS','30')) || 30;
   const invId = newId_('INV');
-  appendRow_(ssOps_(),'Invoices',{ invoice_id:invId, contract_id:contractId, period:period,
+  appendRow_(ssOps_(),'Invoices',{ invoice_id:invId, invoice_number:invId, contract_id:contractId, period:period,
     source_type:sourceType, source_id:sourceId, amount_rule:amountRule, amount:amount,
     tax_rate:taxRate, tax_amount:taxAmount, total_amount:amount + taxAmount,
-    due_date:addDaysIso_(dueDays).slice(0,10), status:'入金待ち', issued_at:new Date().toISOString().slice(0,10) });
+    paid_amount:0, balance_amount:amount + taxAmount, currency:'JPY',
+    due_date:addDaysIso_(dueDays).slice(0,10), status:'ISSUED',
+    payment_status_updated_at:'', issued_at:new Date().toISOString().slice(0,10) });
   logEvent_('invoice', invId, actorEmail||'system', null, { contract_id:contractId, amount:amount, tax:taxAmount, source:sourceType });
   return invId;
 }

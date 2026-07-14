@@ -78,10 +78,54 @@ function logEvent_(entityType, entityId, actor, before, after){
   });
 }
 
-// ---- 環境（修正設計書 §22）：development / staging / production ----
+// ---- 環境（修正設計書v2 V2-002）：ENVIRONMENT は必須。未設定・不正値は起動時に停止 ----
 // production ではフェイルクローズ（Webhook検証必須・匿名管理操作拒否・サンプル表示なし）。
-function env_(){ return prop_('ENVIRONMENT') || 'development'; }
+function env_(){
+  const v = prop_('ENVIRONMENT');
+  if(!v) throw new Error('ENVIRONMENT is required（ScriptProperties に development / staging / production を設定してください）');
+  if(['development','staging','production'].indexOf(v) < 0) throw new Error('Invalid ENVIRONMENT: ' + v);
+  return v;
+}
 function isProd_(){ return env_() === 'production'; }
+/** 開発用の匿名bootstrapは development かつ ALLOW_DEV_BOOTSTRAP=true の双方が必要（V2-002） */
+function devBootstrapAllowed_(){ return env_() === 'development' && prop_('ALLOW_DEV_BOOTSTRAP') === 'true'; }
+
+/** 公開入力の厳格数値変換（V2-009）。num_()の寛容変換を公開入力に使わない。 */
+function requireNonNegativeNumber_(value, fieldName){
+  if(value === '' || value === null || value === undefined) throw new Error('VALIDATION_ERROR: ' + fieldName + ' は必須です');
+  const n = Number(value);
+  if(!isFinite(n) || n < 0) throw new Error('VALIDATION_ERROR: ' + fieldName + ' は0以上の数値で入力してください');
+  return n;
+}
+
+// ---- 引継ぎ改変検知（フォーム項目設計 §4.1.1）：handoff_token = HMAC-SHA256 ----
+function handoffSecret_(){ return prop_('HANDOFF_SECRET') || ''; }
+function makeHandoffToken_(appId, ref, workIds, usage, termsHash, expiresAt){
+  const secret = handoffSecret_(); if(!secret) return '';
+  const payload = [appId, ref, (workIds||[]).join(','), usage, termsHash, expiresAt].join('|');
+  return Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(payload, secret)).slice(0, 32);
+}
+function verifyHandoffToken_(app, workIds, token){
+  const secret = handoffSecret_(); if(!secret) return { ok:true, skipped:true };   // 未設定時は検証スキップ（devのみ想定）
+  if(!token) return { ok:false, reason:'handoff_token欠落' };
+  const expect = makeHandoffToken_(app.application_id, app.application_ref, workIds, app.usage_category, app.terms_hash || '', app.handoff_expires_at || '');
+  if(String(token) !== expect) return { ok:false, reason:'handoff_token不一致（改変の疑い）' };
+  if(app.handoff_expires_at && new Date(app.handoff_expires_at) < new Date()) return { ok:false, reason:'handoff有効期限切れ' };
+  return { ok:true };
+}
+
+/** 署名失敗等の大量イベントは1件ずつシートへ書かず、集約カウンタ＋サンプリング記録（V2-007/§3.6） */
+function recordRejectedAggregate_(kind, detail){
+  try{
+    const cache = CacheService.getScriptCache();
+    const k = 'AGG_' + kind;
+    const n = parseInt(cache.get(k) || '0', 10) + 1;
+    cache.put(k, String(n), 21600);
+    Logger.log('[REJECTED] %s #%s %s', kind, n, detail || '');
+    if(n === 1 || n === 10 || n === 100 || n % 1000 === 0)
+      logError_('AUTHENTICATION_ERROR', 'webhook:' + kind, '検証失敗の集約記録（直近6hで' + n + '件目）', { sample:detail });
+  }catch(e){}
+}
 
 /** 障害記録（修正設計書 §21）。失敗を握りつぶさず System_Errors へ記録する。 */
 function logError_(code, where, message, detail){
