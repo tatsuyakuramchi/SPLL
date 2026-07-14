@@ -12,6 +12,7 @@
     "push": "clasp push",
     "push:watch": "clasp push --watch",
     "build": "node scripts/build.js",
+    "test": "node tests/harness.js && node scripts/build.js && node tests/sec01.js",
     "push:portal": "npm run build && cd apps/portal && clasp push -f",
     "push:workflow": "npm run build && cd apps/workflow && clasp push -f",
     "push:admin": "npm run build && cd apps/admin && clasp push -f",

@@ -63,11 +63,20 @@ function web_getSubmitContext(token){
   if(!tok) throw new Error('提出用リンクが無効か、有効期限が切れています。');
   const contractId = tok.contract_id;
   const versions = readRows_(ssOps_(),'Submission_Versions');
+  const reviews  = readRows_(ssOps_(),'Human_Reviews');
   const subs = readRows_(ssOps_(),'Submissions').filter(s => s.contract_id===contractId).map(function(s){
     const vs = versions.filter(v => v.submission_id===s.submission_id)
       .sort(function(a,b){ return num_(a.version_no)-num_(b.version_no); })
       .map(function(v){ return { version_no:v.version_no, status:v.status, submitted_at:String(v.submitted_at||'') }; });
-    return { submission_id:s.submission_id, title:s.title, status:s.status, versions:vs };
+    // 是正要求の内容を利用者へ提示（修正設計書 §17.2）。最新の人手審査が是正/上申の場合のみ。
+    const latestReview = reviews.filter(function(h){ return h.submission_id === s.submission_id; })
+      .sort(function(a,b){ return String(b.reviewed_at||'').localeCompare(String(a.reviewed_at||'')); })[0];
+    let correction = null;
+    if(latestReview && (s.status === 'CORRECTION_REQUIRED' || s.status === 'ESCALATED') &&
+       (latestReview.result === 'CORRECTION_REQUIRED' || latestReview.result === 'ESCALATED')){
+      correction = { comment:String(latestReview.comments||''), requested_at:String(latestReview.reviewed_at||'').slice(0,10) };
+    }
+    return { submission_id:s.submission_id, title:s.title, status:s.status, versions:vs, correction:correction };
   });
   // バッジ取得導線（FUN-03）：発行済みならBADGE_DOWNLOADトークンを払い出してURLを返す
   let badgeUrl = '';

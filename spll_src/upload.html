@@ -148,6 +148,14 @@ function renderCtx(ctx){
       var latest=s.versions&&s.versions.length?s.versions[s.versions.length-1]:null;
       var st=(latest&&latest.status)||s.status||"";
       h.innerHTML+='<div class="row"><span>'+esc(s.title||s.submission_id)+' <span class="mono" style="color:#999;font-size:10px">v'+((latest&&latest.version_no)||1)+'</span></span><span class="st '+esc(st)+'">'+esc(st)+'</span></div>';
+      // 是正要求・上申の内容を表示（この提出を選んで再提出できる）
+      if(s.correction){
+        h.innerHTML+='<div style="background:var(--warn-bg);border:1px solid #E0B4B0;border-radius:8px;padding:10px 12px;margin:6px 0 10px;font-size:12px;">'+
+          '<b style="color:var(--warn)">'+(s.status==='ESCALATED'?'審査中（上申）':'是正のお願い')+'</b>（'+esc(s.correction.requested_at||'')+'）<br>'+
+          esc(s.correction.comment||'')+
+          (s.status==='CORRECTION_REQUIRED'?'<br><span style="color:var(--soft)">下のフォームで「再提出：'+esc(s.title||s.submission_id)+'」を選び、修正版を提出してください。</span>':'')+
+          '</div>';
+      }
       var o=document.createElement("option"); o.value=s.submission_id; o.textContent="再提出：「"+(s.title||s.submission_id)+"」"; sel.appendChild(o);
     });
   }

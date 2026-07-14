@@ -196,17 +196,26 @@ function admin_reviewQueue(){ requireRole_([]);
 }
 
 /** 人手判断の記録（CLEARED / CORRECTION_REQUIRED / ESCALATED）。版・提出状態も更新。 */
-function admin_setHumanReview(submissionId, result, comment, reviewer, versionId){ requireRole_(['OPERATIONS','LEGAL_ADMIN']);
-  reviewer = reviewer || actor_();
+function admin_setHumanReview(submissionId, result, comment, reviewer, versionId){
+  const actor = requireRole_(['OPERATIONS','LEGAL_ADMIN']);
+  // 修正設計書 §9.4：列挙値・最新版・コメント必須をサーバー側で検証
+  const ALLOWED = ['CLEARED','CORRECTION_REQUIRED','ESCALATED'];
+  if(ALLOWED.indexOf(result) < 0) throw new Error('VALIDATION_ERROR: 不正な審査結果です: ' + result);
+  if((result === 'CORRECTION_REQUIRED' || result === 'ESCALATED') && !String(comment||'').trim())
+    throw new Error('VALIDATION_ERROR: 是正要求・上申にはコメント（理由）が必須です');
+  const sub = readRows_(ssOps_(),'Submissions').find(function(s){ return s.submission_id === submissionId; });
+  if(!sub) throw new Error('DATA_NOT_FOUND: 提出が見つかりません: ' + submissionId);
+  const latest = latestVersionId_(submissionId);
+  if(versionId && String(versionId) !== String(latest))
+    throw new Error('DATA_CONFLICT: 指定された版は最新版ではありません（最新: ' + latest + '）。新しい版が提出されています。');
+  const targetVersion = versionId || latest;
+  // 審査者はクライアント入力ではなく認証済み操作者から取得（§9.4）
   appendRow_(ssOps_(),'Human_Reviews',{ human_review_id:newId_('HRV'), submission_id:submissionId,
-    version_id:versionId||latestVersionId_(submissionId), reviewer:reviewer, result:result,
-    comments:comment||'', reviewed_at:new Date().toISOString() });
-  const subStatus = result==='CLEARED' ? 'CLEARED'
-    : (result==='CORRECTION_REQUIRED' ? 'CORRECTION_REQUIRED'
-    : (result==='ESCALATED' ? 'ESCALATED' : 'HUMAN_REVIEW_PENDING'));
-  updateRow_(ssOps_(),'Submissions','submission_id',submissionId,{ status:subStatus });
-  markVersionStatus_(versionId||latestVersionId_(submissionId), result==='CLEARED' ? 'CLEARED' : result);
-  logEvent_('human_review', submissionId, reviewer, null, {result:result});
+    version_id:targetVersion, reviewer:actor.email, result:result,
+    comments:sanitizeCell_(String(comment||'')), reviewed_at:new Date().toISOString() });
+  updateRow_(ssOps_(),'Submissions','submission_id',submissionId,{ status:result });
+  markVersionStatus_(targetVersion, result);
+  logEvent_('human_review', submissionId, actor.email, {status:sub.status}, {result:result, version_id:targetVersion});
   return true;
 }
 

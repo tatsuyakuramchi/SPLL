@@ -377,7 +377,19 @@
     <!-- ADMIN ACCESS -->
     <div class="setpane" id="p-access">
       <div class="panel">
-        <div class="ph"><h3>管理者（許可リスト）</h3><span class="hint">ScriptProperties: ADMIN_EMAILS</span></div>
+        <div class="ph"><h3>管理者とロール（RBAC）</h3><span class="hint">Admin_Users ／ 全 admin_ 関数はサーバー側で権限を強制</span></div>
+        <div class="pbody">
+          <p class="setnote">ロール別に管理者を登録します：<span class="mono">SYSTEM_ADMIN</span>（全設定）／<span class="mono">LEGAL_ADMIN</span>（規約・審査・認証）／<span class="mono">OPERATIONS</span>（作品・提出・審査）／<span class="mono">ACCOUNTING</span>（報告承認・請求・入金・清算）／<span class="mono">AUDITOR</span>（閲覧のみ）。初回登録はGASエディタで <span class="mono">setup_setInitialAdmin("メール","SYSTEM_ADMIN")</span> を実行してください（公開URLからの初回登録は廃止）。</p>
+          <table><thead><tr><th>メール</th><th>ロール</th><th>状態</th><th>登録者</th><th>操作</th></tr></thead><tbody id="au-tbody"></tbody></table>
+          <div class="grid2" style="margin-top:12px;">
+            <div class="fld"><label>メールアドレス</label><input id="au-email" placeholder="user@example.com"></div>
+            <div class="fld"><label>ロール</label><select id="au-role"><option>SYSTEM_ADMIN</option><option>LEGAL_ADMIN</option><option>OPERATIONS</option><option>ACCOUNTING</option><option>AUDITOR</option></select></div>
+          </div>
+        </div>
+        <div class="pfoot"><button class="save" onclick="saveAdminUser()">管理者を追加・更新</button></div>
+      </div>
+      <div class="panel">
+        <div class="ph"><h3>管理者（簡易許可リスト・後方互換）</h3><span class="hint">ScriptProperties: ADMIN_EMAILS</span></div>
         <div class="pbody">
           <p class="setnote">ここに登録したGoogleアカウント（メール）のログインユーザーには、公開申込窓口のヘッダーに「管理コンソール →」ボタンが表示され、ワンクリックでこの画面へ切り替えできます。カンマまたは改行区切りで複数登録できます。</p>
           <div class="fld"><label>管理者メールアドレス <span class="h">例）hanako@example.com, taro@example.com</span></label><textarea id="ac-emails" class="code" placeholder="admin1@example.com&#10;admin2@example.com"></textarea></div>
@@ -622,9 +634,37 @@ function loadAdminAccess(){
     $("ac-emails").value=c.emails||""; $("ac-enforce").checked=!!c.enforce;
     $("ac-viewer").textContent=c.viewer||"（匿名アクセス：識別できません）";
   });
+  loadAdminUsers();
 }
 function saveAdminAccess(){
   call("admin_saveAdminAccess",[{emails:$("ac-emails").value, enforce:$("ac-enforce").checked}],function(){ toast("管理者設定を保存しました"); });
+}
+// ---- Admin_Users（RBAC）----
+var ROLE_LABEL={SYSTEM_ADMIN:"全設定",LEGAL_ADMIN:"法務",OPERATIONS:"事務局",ACCOUNTING:"経理",AUDITOR:"閲覧のみ"};
+function loadAdminUsers(){
+  call("admin_listAdminUsers",[],function(rows){
+    var tb=$("au-tbody"); if(!tb) return; tb.innerHTML=""; rows=rows||[];
+    if(!rows.length){ emptyRow(tb,5,"管理者が未登録です（GASエディタで setup_setInitialAdmin を実行）"); return; }
+    rows.forEach(function(u){
+      var tr=document.createElement("tr");
+      tr.appendChild(td('<span class="id">'+esc(u.email)+'</span>'));
+      tr.appendChild(td('<span class="pill">'+esc(u.role)+'</span> <span style="font-size:11px;color:var(--soft)">'+esc(ROLE_LABEL[u.role]||"")+'</span>'));
+      tr.appendChild(td(String(u.status)==="DISABLED"?'<span class="pill fail">無効</span>':'<span class="pill pass">有効</span>'));
+      tr.appendChild(td(esc(u.added_by||"—")));
+      var act=document.createElement("td"); act.className="actions";
+      if(String(u.status)==="DISABLED"){
+        act.appendChild(mkBtn("再有効化","btn",function(){ call("admin_saveAdminUser",[u.email,u.role,"ACTIVE"],function(){ toast("再有効化しました"); loadAdminUsers(); }); }));
+      } else {
+        act.appendChild(mkBtn("無効化","btn d",function(){ if(confirm(u.email+" を無効化しますか？")) call("admin_saveAdminUser",[u.email,u.role,"DISABLED"],function(){ toast("無効化しました"); loadAdminUsers(); }); }));
+      }
+      tr.appendChild(act); tb.appendChild(tr);
+    });
+  });
+}
+function saveAdminUser(){
+  var email=$("au-email").value.trim(), role=$("au-role").value;
+  if(!email){ toast("メールアドレスを入力してください", true); return; }
+  call("admin_saveAdminUser",[email,role,"ACTIVE"],function(){ toast("管理者を登録しました： "+email+"（"+role+"）"); $("au-email").value=""; loadAdminUsers(); });
 }
 function testCloudSign(){
   var el=$("cs-test-result"); el.style.color="var(--soft)"; el.textContent="接続テスト中…";
@@ -984,6 +1024,13 @@ MOCK.admin_generateStatements=function(){ return {period:"2026H1",reports:5,gene
 MOCK.admin_sendApprovedStatements=function(){ return {sent:1}; };
 var _mAccess={emails:"",enforce:false,viewer:"admin@example.com（デモ）"};
 MOCK.admin_getAdminAccess=function(){ return _mAccess; };
+var _mAdminUsers=[
+  {email:"admin@example.com",role:"SYSTEM_ADMIN",status:"ACTIVE",added_by:"setup",added_at:"2026-07-01"},
+  {email:"legal@example.com",role:"LEGAL_ADMIN",status:"ACTIVE",added_by:"admin@example.com",added_at:"2026-07-02"},
+  {email:"keiri@example.com",role:"ACCOUNTING",status:"DISABLED",added_by:"admin@example.com",added_at:"2026-07-02"}
+];
+MOCK.admin_listAdminUsers=function(){ return _mAdminUsers; };
+MOCK.admin_saveAdminUser=function(email,role,status){ var i=-1; for(var k=0;k<_mAdminUsers.length;k++){ if(_mAdminUsers[k].email===email) i=k; } if(i>=0){ _mAdminUsers[i].role=role; _mAdminUsers[i].status=status; } else { _mAdminUsers.push({email:email,role:role,status:status,added_by:"admin@example.com",added_at:""}); } return true; };
 MOCK.admin_saveAdminAccess=function(c){ _mAccess.emails=c.emails; _mAccess.enforce=!!c.enforce; return true; };
 MOCK.api_getViewerRole=function(){ return {email:_mAccess.viewer,identified:true,isAdmin:true,bootstrap:!_mAccess.emails,adminUrl:"?page=admin",homeUrl:"?"}; };
 
