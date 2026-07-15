@@ -29,17 +29,21 @@
 <script type="text/plain" id="md">
 # SPLL 業務フロー確認資料（事業部すり合わせ用）
 
-**版** v0.3（ドラフト） / **対象** 現行運用フローとのすり合わせ / **作成** 法務部
-**関連** SPLL-SYS-BD-001（実装仕様書）／SPLL推奨設計書（B経路固定）
+**版** v0.4（ドラフト） / **対象** 現行運用フローとのすり合わせ / **作成** 法務部
+**関連** SPLL-SYS-BD-001（実装仕様書）／SPLL推奨設計書（B経路固定）／修正設計書 v2.0（SPLL-SYS-RD-002）
 
 > この資料は、新SPLLシステム（Google Workspace + GAS で実装）の**業務フロー**を、
 > 事業部の**現行運用**と突き合わせて確認するためのものです。図は**スイムレーン（レーン＝担当）**。
 > 各表の右端「**現行運用／確認・修正**」欄に、事業部側で気づき・相違点・決定事項をご記入ください。
 >
-> **v0.3 主な変更点（修正設計書 SPLL-SYS-RD-001 反映）**：管理機能に**ロール別権限（RBAC）**を導入し、
-> Webhookは**受信記録＋真正性検証**（CloudSignはAPI照会必須）、提出は**サーバー側ファイル検証**、
-> アクセスは**用途別トークン**（期限・回数付き）に統一。利用報告に**承認フロー**、請求は**自動起票**
-> （定額系=締結時／売上連動=報告承認後）。GASは**公開ポータル／業務処理／管理コンソールの3プロジェクトに分離**。
+> **v0.4 主な変更点（修正設計書 v2.0＝SPLL-SYS-RD-002 の P0/P1 実装完了を反映）**：
+> ①3プロジェクト分離を**物理的に完了**（単一プロジェクト配布経路は廃止。本番相当の環境で稼働開始）。
+> ②Webhookは**受信台帳＋自動再試行＋手動確認キュー**（突合できない締結は保留し、人手で申込に紐付け）。
+> ③申込時の**同意証跡を強化**（同意文書の版・セッション・表示内容ハッシュを記録。文書が更新されたら再同意）。
+> ④入金は**累計消込**（一部入金・過入金を検出）、清算は**契約時スナップショット**基準（後からマスタを変えても過去の計算に影響しない）。
+> ⑤バッジは**共有リンクを廃止**しトークン検証後に配信。⑥認証の失効・再有効化などの重要変更は**申請→別担当者の承認**（職務分離）。
+> ⑦AI審査の出力は無害化して保存し、**AI停止時も提出が消えず人手審査へ**。⑧審査SLA・報告期限の**自動督促**。
+> ※ v0.3: RBAC・Webhook真正性検証・ファイル検証・用途別トークン・報告承認フロー・請求自動起票・3分離（設計）。
 > ※ v0.2: B経路固定・複数原作・application_ref突合・版管理・締結時認証発行。
 >
 > 図（Mermaid）は GitHub 上でそのまま描画されます。会議配布・PDF化には同梱の
@@ -282,19 +286,22 @@ sequenceDiagram
   actor U as 利用者
   Note over SYS,DB: 契約締結（Webhook）で発行トリガー
   SYS->>SYS: バッジを組版（対象原作・ライセンスID・発行日・クレジット・検証QR）
-  SYS->>DR: PNG 3サイズ（大/中/小）を保存
-  SYS->>DB: Badges に発行記録
-  Note over SYS,U: 当社はメールを送らない。利用者は検証ポータル／提出リンクから取得
-  U->>DR: ポータルでバッジPNGをダウンロード
+  SYS->>DR: PNG 3サイズ（大/中/小）を保存（共有リンクは作らない）
+  SYS->>DB: Badges / Badge_Jobs に発行記録（失敗は自動再試行）
+  Note over SYS,U: 当社はメールを送らない。利用者は提出ページのバッジ取得リンクから取得
+  U->>SYS: 提出リンク（トークン）でアクセス
+  SYS-->>U: トークン検証後にバッジPNGを直接表示・ダウンロード
 ```
 
 | # | レーン | 作業 | 自動/人手 | 記録先 | 現行運用／確認・修正 |
 |---|---|---|---|---|---|
 | 1 | システム | 締結で発行トリガー（契約単位・複数原作をまとめて表示） | 自動 | Contracts / Contract_Works |  |
-| 2 | システム | バッジPNG3サイズを生成・Drive保存 | 自動 | Badges / Drive |  |
-| 3 | 利用者 | バッジをダウンロード・クレジット表記に利用 | 手 | — |  |
+| 2 | システム | バッジPNG3サイズを生成・Drive保存（発行ジョブで追跡・失敗時は5分毎に自動再試行） | 自動 | Badges / Badge_Jobs / Drive |  |
+| 3 | 利用者 | 提出ページの「バッジ取得」からダウンロード・クレジット表記に利用 | 手 | — |  |
 
 **方針（決定）**：**締結時に自動発行**（B経路固定）。契約が複数原作を含む場合は、対象原作名をまとめて表示します。
+**v0.4**：Driveの「リンクを知っている全員」共有を**廃止**。バッジは**トークン検証を通過した本人にだけ**システムが直接配信します
+（リンク拡散・第三者取得の防止）。照合コード再発行・再有効化時は旧QR入りバッジを**自動で差し替え**ます。
 **要確認**
 - **バッジのデザイン**（意匠・ロゴ）と**掲載情報**（対象原作・ライセンスID・発行日・クレジット文・QRの要否）
 - **3サイズの用途**（例：大＝告知バナー／中＝商品ページ／小＝奥付・SNSアイコン）
@@ -319,14 +326,19 @@ sequenceDiagram
   else 失効・保留・取消 等
     V-->>TP: ✖ 無効（現在の状態を表示）
   end
-  OF->>DB: 必要時に状態変更（理由・承認記録つき／即反映）
+  OF->>DB: 重要な状態変更は「申請」を登録（理由必須）
+  Note over OF,DB: 別の担当者（法務管理者）が承認して初めて適用（職務分離）
 ```
 
 - **利用者**：ログイン不要。締結時に用意された**提出リンク／検証ポータル**からバッジを取得（当社メール不要）。
 - **第三者**：バッジのQR→**ライセンスID＋照合コード**で**有効/無効**を確認。
-- **事務局**：管理コンソール「契約管理」から**認証を失効／再有効**（検証ページに即反映）。状態変更には**理由コード・理由・承認者・法務案件ID**を記録。
+- **事務局**：管理コンソール「契約管理」から状態変更。**v0.4：失効・再有効化・契約終了・支払保留などの重要変更は
+  「申請→別の担当者（LEGAL_ADMIN）による承認」で初めて適用**されます（一人での即時変更は不可）。
+  緊急時のみ申請者本人が承認できますが、緊急理由の入力が必須で **EMERGENCY_OVERRIDE として監査記録**に残ります。
+  申請には**理由コード・理由・申請者・承認者・法務案件ID**を記録。
 - **認証状態**：`ACTIVE / SUSPENDED / REVOKED / EXPIRED / TERMINATED / PAYMENT_HOLD`
 - **v0.3**：照合コードは**12桁の暗号学的乱数**とし、台帳には**ハッシュのみ**保存（総当たり・漏えい対策）。照会の不一致はログに記録。
+- **v0.4**：再有効化の承認時は照合コードを**自動で再発行**し、旧QR入りバッジを差し替え（失効中に出回った旧バッジの無効化）。
 - **要確認**：失効の運用ルール（未入金時に `PAYMENT_HOLD` にするか 等）。
 
 ---
@@ -395,7 +407,10 @@ sequenceDiagram
 | 権限 | 管理者・ロールの登録・無効化（RBAC） | システム管理者 | 随時 |  |
 | 告知 ★ | X投稿文面の確認・**送信承認**（データ更新時のポップアップ） | 事務局/広報 | 随時 |  |
 | バッジ ★ | バッジ発行の確認・再発行（必要時） | 事務局 | 随時 |  |
-| 認証 ★ | 認証の**状態変更（失効／再有効 等）**（違反・解除・未入金時） | 事務局/法務 | 随時 |  |
+| 認証 ★ | 認証の**状態変更の申請**（失効／再有効 等。理由必須） | 事務局/法務 | 随時 |  |
+| 認証 ★ | 状態変更申請の**承認／却下**（**申請者とは別の法務管理者**・職務分離） | 法務 | 随時 |  |
+| 契約 | **未紐付け締結の手動紐付け**（application_refで突合できなかった契約を申込に紐付け） | 事務局 | 随時 |  |
+| 通知 | 通知キューの対応（提出案内・是正依頼・督促などを利用者へ人手連絡） | 事務局 | 随時 |  |
 
 ---
 
@@ -406,16 +421,19 @@ sequenceDiagram
 | Applications | APPLICATION_CREATED → FORM_PENDING → CONTRACT_PENDING → SIGNED |
 | Contracts | SIGNED（締結Webhookで作成。DECLINED/CANCELLED は運用で管理） |
 | Submissions | SUBMITTED → AI_SCREENING → AI_SCREENED → HUMAN_REVIEW_PENDING → CLEARED / CORRECTION_REQUIRED / ESCALATED |
-| Submission_Versions | SUBMITTED → AI_SCREENING → AI_SCREENED → CLEARED / CORRECTION_REQUIRED / ESCALATED |
-| AI審査ジョブ | QUEUED → SCANNING → COMPLETED / ERROR |
-| AI総合結果 | PASS候補 / 要確認 / 高リスク / 判読不可（work_idごとにFinding） |
+| Submission_Versions | SUBMITTED → AI_SCREENING → AI_SCREENED → CLEARED / CORRECTION_REQUIRED / ESCALATED（AI停止時は AI_UNAVAILABLE→人手審査へ） |
+| AI審査ジョブ | QUEUED → SCANNING → COMPLETED / ERROR（再試行上限到達。提出は人手審査へ回送し消失しない） |
+| AI総合結果 | PASS候補 / 要確認 / 高リスク / 判読不可（work_idごとにFinding・推奨対応つき） |
 | 人手判断 | CLEARED（承認）/ CORRECTION_REQUIRED（是正）/ ESCALATED（上申） |
 | Certificates（認証） | ACTIVE / SUSPENDED / REVOKED / EXPIRED / TERMINATED / PAYMENT_HOLD |
-| Usage_Reports | SUBMITTED →（RETURNED ⇄ 再提出）→ APPROVED → LOCKED（/ SUPERSEDED） |
-| Invoices | 入金待ち → 入金済（/ 取消）※起票元を記録（CONTRACT=締結時定額系／REPORT=RATE承認後） |
-| 計算書 | DRAFT → APPROVED → SENT → OBJECTION_PERIOD → NO_OBJECTION_RECORDED / OBJECTION_RECEIVED → FINALIZED（/ SUPERSEDED） |
-| 認証バッジ ★ | （締結）→ ISSUED（発行・配布済） |
-| Webhook_Receipts | RECEIVED → PROCESSED / ERROR（再試行） / REJECTED（検証不一致） |
+| 認証状態変更申請 ★ | REQUESTED → APPLIED（別担当者が承認・適用）/ REJECTED（却下）※本人承認は EMERGENCY_OVERRIDE 記録 |
+| Usage_Reports | SUBMITTED →（RETURNED ⇄ 再提出）→ APPROVED → LOCKED（/ SUPERSEDED＝訂正で置換） |
+| Invoices | ISSUED（入金待ち）→ PARTIALLY_PAID（一部入金）→ PAID（入金済）/ OVERPAID（過入金）/ VOID（取消）※累計消込。起票元を記録（CONTRACT=締結時定額系／REPORT=RATE承認後） |
+| Payments（入金） | RECORDED（記録）/ VOID（取消・理由必須）※入金参照番号の重複は拒否 |
+| 計算書 | DRAFT → APPROVED → SENDING → SENT → OBJECTION_PERIOD → NO_OBJECTION_RECORDED / OBJECTION_RECEIVED → FINALIZED（/ SUPERSEDED / SEND_FAILED＝再送可） |
+| 認証バッジ ★ | ISSUED（発行・配布済）/ SUPERSEDED（コード再発行・再有効化で差替え） |
+| バッジ発行ジョブ ★ | QUEUED → GENERATING → ISSUED / RETRY_WAIT（自動再試行）/ ERROR |
+| Webhook_Receipts | RECEIVED → PROCESSING → PROCESSED / RETRY_WAIT（指数バックオフ再試行）→ DEAD_LETTER（5回失敗）/ MANUAL_REVIEW（要手動紐付け）/ REJECTED（検証不一致） |
 | Admin_Users（RBAC） | SYSTEM_ADMIN / LEGAL_ADMIN / OPERATIONS / ACCOUNTING / AUDITOR（ACTIVE/DISABLED） |
 
 ---
@@ -450,14 +468,25 @@ sequenceDiagram
 - **秘密情報**（CloudSign資格情報等）は ScriptProperties 管理。公開APIは返却列をホワイトリスト化（内部メモ・配分は返さない）。
 - **CloudSign は現在サンドボックス（試験環境）** に設定。本番切替は疎通確認後。
 - **同意文・規約・原作マスタ・料率**は管理コンソール「設定」から更新可能（コード改修不要）。
-- **GASは3プロジェクトに分離**（公開ポータル／業務処理／管理コンソール=組織内限定）。管理機能は
-  ロール別権限（RBAC）でサーバー側強制。詳細は「SPLL_3プロジェクト分割手順_v1.0」参照。
-- **環境切替**：`ENVIRONMENT=production` で全フェイルクローズ（Webhook検証必須・匿名管理拒否・
-  サンプル表示なし）が有効。試験中は development のまま運用。
+- **GASは3プロジェクトに分離（構築済み）**：公開ポータル（GAS①）／業務処理（GAS②）／管理コンソール（GAS③=組織内限定）。
+  正本コードは1つのリポジトリで管理し、ビルドが各プロジェクトへ**必要な機能だけ**を配布（管理機能・Webhook処理・
+  秘密情報のスコープが公開面に物理的に存在しない）。管理機能はロール別権限（RBAC）でサーバー側強制。
+  詳細は「SPLL_3プロジェクト分割手順_v1.0」参照。
+- **環境切替**：`ENVIRONMENT` の明示設定が**必須**（未設定はエラーで起動停止＝設定漏れの検知）。
+  `production` で全フェイルクローズ（Webhook検証・CloudSign API照会必須・匿名管理拒否・公開済み同意文書必須・
+  サンプル表示なし）。試験中は development で運用。
+- **同意証跡（v0.4）**：申込時に同意した**文書の版・セッションID・表示内容ハッシュ**を記録。同意文・規約は
+  管理コンソールで**下書き→公開の版管理**とし、公開版が変わると申込画面の再表示を要求。
+- **清算の独立性（v0.4）**：締結時にパートナー名・適格請求書番号・配分方式・料率を**契約単位でスナップショット**。
+  後からマスタを変更しても、既存契約の計算には影響しない。
+- **フォーム引継ぎの改ざん検知（v0.4）**：申込→クラウドサインフォームへ引き継ぐ隠し項目に**署名（HMAC）**を付与し、
+  Webhook受信時に照合。不一致は自動処理せず手動確認キューへ。
+- **自動督促（v0.4）**：審査SLA超過（起点＝最新版の提出日時）と利用報告の期限超過を検知し、通知キューへ起票
+  （メール非保持のため、利用者への連絡は人手で実施）。
 
 ---
 
-> 本資料は設計検討・すり合わせ用のドラフト（v0.2）です。ガイドライン本文・規約・参加パブリッシャの正式記載、
+> 本資料は設計検討・すり合わせ用のドラフト（v0.4）です。ガイドライン本文・規約・参加パブリッシャの正式記載、
 > および料率・期日等の数値は**確定前**です。事業部確認の結果を反映して更新します。
 
 </script>
