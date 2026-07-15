@@ -66,6 +66,7 @@ npm run push:all        # build → portal/workflow/admin を順に push
 | `ENVIRONMENT`（**必須**。development / staging / production。未設定は起動停止） | ✔ | ✔ | ✔ |
 | `ALLOW_DEV_BOOTSTRAP`（development で管理者未登録時の暫定操作を許可する場合のみ true） | — | — | ✔ |
 | `HANDOFF_SECRET`（フォーム引継ぎ改変検知・HMAC鍵） | ✔ | ✔ | — |
+| `ADMIN_CONSOLE_URL`（adminのウェブアプリURL。ポータルの「管理コンソール」スイッチ先） | ✔ | — | — |
 
 ### 実行する関数（GASエディタから1回ずつ）
 

@@ -14,13 +14,16 @@ function isAdminEmail_(email){
 /** 現在のログインユーザーの役割。identified=false は匿名アクセス（メール取得不可）を意味する。 */
 function api_getViewerRole(){
   var email = ''; try{ email = Session.getActiveUser().getEmail() || ''; }catch(e){}
-  var listed = adminEmails_().length > 0;
-  var adminUrl = '?page=admin'; try{ adminUrl = ScriptApp.getService().getUrl() + '?page=admin'; }catch(e){}
+  var registered = false; try{ registered = readRows_(ssOps_(),'Admin_Users').length > 0; }catch(e){}
+  var listed = adminEmails_().length > 0 || registered;
+  // 3プロジェクト分割後、管理コンソールは別プロジェクト（ADMIN_CONSOLE_URL で指定）
+  var adminUrl = String(prop_('ADMIN_CONSOLE_URL') || '');
+  if(!adminUrl){ try{ adminUrl = ScriptApp.getService().getUrl() + '?page=admin'; }catch(e){ adminUrl = '?page=admin'; } }
   var homeUrl = ''; try{ homeUrl = ScriptApp.getService().getUrl(); }catch(e){}
   return {
     email: email,
     identified: !!email,                 // 匿名デプロイでは空になる
-    isAdmin: isAdminEmail_(email),
+    isAdmin: !!roleOf_(email),           // Admin_Users のロール保持者（後方互換で ADMIN_EMAILS も可）
     bootstrap: !listed,                   // 管理者未登録（初期セットアップ状態）
     adminUrl: adminUrl,
     homeUrl: homeUrl

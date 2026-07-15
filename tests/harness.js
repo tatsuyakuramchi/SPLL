@@ -416,6 +416,14 @@ G.setup_setInitialAdmin('acct@example.com','ACCOUNTING');
 G.Session={ getActiveUser:()=>({ getEmail:()=>'acct@example.com' }) };
 let sysErr=false; try{ G.admin_saveAdminAccess({emails:'x'}); }catch(e){ sysErr=/AUTHORIZATION_ERROR/.test(String(e.message)); }
 ok(sysErr,'ACCOUNTING: SYSTEM_ADMIN専用の設定保存は拒否');
+// 管理画面スイッチ（3プロジェクト分割後は ADMIN_CONSOLE_URL を指す）
+scriptProps.ADMIN_CONSOLE_URL='https://script.google.com/macros/s/ADMIN-DEPLOY/exec';
+const vr=G.api_getViewerRole();
+ok(vr.isAdmin===true && vr.identified===true,'Admin_Users 登録者は isAdmin（ADMIN_EMAILS不要）');
+ok(vr.adminUrl==='https://script.google.com/macros/s/ADMIN-DEPLOY/exec','スイッチ先は ADMIN_CONSOLE_URL');
+G.Session={ getActiveUser:()=>({ getEmail:()=>'nobody@example.com' }) };
+ok(G.api_getViewerRole().isAdmin===false,'未登録ユーザーは isAdmin=false');
+delete scriptProps.ADMIN_CONSOLE_URL;
 G.Session=SessRef; scriptProps.ENVIRONMENT='development';
 
 // 20. ファイル検証（SEC-05）
