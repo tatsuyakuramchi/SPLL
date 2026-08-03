@@ -1055,5 +1055,14 @@ ok(wfAll2.steps.some(s=>/作成=\[\]/.test(s)),'setup_workflowAll: 再実行は�
 const accAll=G.setup_accountingAll();
 ok(accAll.steps.some(s=>/trigger_accountingJobs/.test(s)),'setup_accountingAll: 経理ジョブトリガー作成');
 
+// 70. 新規契約の自動識別（登録不要の突合）：契約ID／申込番号／SPLL-プレフィックス表記
+const autoCsv='DLsite作品ID,作品名,SPLL申請番号,販売本数,ライセンス料合計\nRJ100,新契約の作品,SPLL-'+cP4.contract_id+',3,900\nRJ101,新契約の作品2,'+appP4.application_ref+',1,100';
+const autoUp=G.admin_accountingUploadSalesFile({channelId:'DLSITE',salesPeriod:'2026-07',fileName:'auto_ident.csv'},Buffer.from(autoCsv,'utf8').toString('base64'));
+G.admin_accountingStartImport(autoUp.import_batch_id);
+const autoLedger=G.readTableBulk_(ACCY,'Sales_Ledger').filter(r=>r.import_batch_id===autoUp.import_batch_id);
+ok(autoLedger.length===2&&autoLedger.every(r=>r.match_status==='MATCHED'),'新規契約の売上をLicense_Identifiers登録なしで自動突合');
+const autoRes=G.readTableBulk_(ACCY,'Sales_Match_Results').filter(r=>r.status==='CONFIRMED'&&autoLedger.some(l=>l.sales_row_id===r.sales_row_id));
+ok(autoRes.length===2&&autoRes.every(r=>r.contract_id===cP4.contract_id&&r.work_id==='WRK-BKK00019'),'契約ID・申込番号（SPLL-表記含む）→契約スナップショット原作へ解決');
+
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

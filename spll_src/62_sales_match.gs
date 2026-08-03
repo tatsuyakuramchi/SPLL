@@ -41,6 +41,15 @@ function accMatchRules_(){
     const k = r.identifier_normalized || accNormalizeLicenseRef_(r.identifier_value);
     if(k && !(k in identifiers)) identifiers[k] = r;
   });
+  // 現行契約の自動識別（登録不要）：application_ref・contract_id は台帳から常に突合可能にする。
+  // 手動登録（License_Identifiers）が同じ番号を持つ場合はそちらを優先。
+  readRows_(ssOps_(), 'Contracts').forEach(function(c){
+    if(c.status !== 'SIGNED' || c.link_status === 'UNLINKED') return;
+    [c.contract_id, c.application_ref].forEach(function(v){
+      const k = accNormalizeLicenseRef_(v);
+      if(k && !(k in identifiers)) identifiers[k] = { contract_id: c.contract_id, identifier_type: 'AUTO_CONTRACT' };
+    });
+  });
   const mappings = readTableBulk_(master, 'Sales_Work_Mappings').filter(activeWindow)
     .sort(function(a, b){ return (num_(a.priority)||100) - (num_(b.priority)||100); });
   const legacy = {};
@@ -58,7 +67,9 @@ function accMatchRules_(){
 function accMatchRow_(row, rules){
   const ref = accNormalizeLicenseRef_(row.external_license_ref);
   const productKey = accNormalizeProductKey_(row.product_name);
-  const ident = ref ? rules.identifiers[ref] : null;
+  // クレジット表記ゆらぎの吸収：SPLL: ／ SPLL- の接頭辞を外した形でも照合する
+  const refAlt = ref.replace(/^SPLL[:：]/, '').replace(/^SPLL-(?=(REF|CTR)-)/, '');
+  const ident = ref ? (rules.identifiers[ref] || rules.identifiers[refAlt]) : null;
   const contractId = ident ? String(ident.contract_id || '') : '';
 
   function fromMapping(m){
