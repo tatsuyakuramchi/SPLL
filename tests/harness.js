@@ -958,5 +958,79 @@ let dupPost=false; try{ G.admin_accountingPostSettlements(runRes.allocation_run_
 ok(dupPost,'同一runの二重連携を拒否（受入18.2-14）');
 ok(runRow().status==='POSTED'&&batchRow().status==='POSTED','run・対象バッチがPOSTED');
 
+// ============ P4：CloudSign運用拡張（§10） ============
+// 61. 自動送信／手動確認の経路判定（§10.3）
+ok(G.decideContractRoute_({usageCategory:'書籍',workIds:['WRK-BKK00019']}).route==='STANDARD_FIXED','経路判定: 定額系→STANDARD_FIXED');
+ok(G.decideContractRoute_({usageCategory:'電子出版物',workIds:['WRK-ARK00012']}).route==='STANDARD_RATE','経路判定: 売上連動→STANDARD_RATE');
+const mrRoute=G.decideContractRoute_({usageCategory:'書籍',workIds:['WRK-BKK00019'],isMinor:true});
+ok(mrRoute.route==='MANUAL_REVIEW'&&mrRoute.reasons.some(r=>/未成年/.test(r)),'経路判定: 未成年→MANUAL_REVIEW（理由記録）');
+ok(G.decideContractRoute_({usageCategory:'未知の目的',workIds:['WRK-BKK00019']}).route==='MANUAL_REVIEW','経路判定: 料金表未設定→MANUAL_REVIEW');
+const docExtra={privacyDocumentId:d1.legal_document_id,termsDocumentId:d2.legal_document_id};
+const appP4=mkApp(['WRK-BKK00019'],'書籍',docExtra);
+ok(appP4.template_route==='STANDARD_FIXED'&&'form_url' in appP4,'申込応答に経路（template_route）とフォームURL');
+
+// 62. formrun送信状態・連携失敗キュー（§10.4/§10.5）
+G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:appP4.application_ref,submission_id:'FR-P4-1',columns:[]})}});
+const appP4row=()=>rows(OPS,'Applications').find(a=>a.application_id===appP4.application_id);
+ok(appP4row().cloudsign_send_status==='CLOUDSIGN_SENDING'&&appP4row().form_submission_id==='FR-P4-1','フォーム送信を記録（submission ID＋CLOUDSIGN_SENDING）');
+const appFail=mkApp(['WRK-BKK00019'],'書籍',docExtra);
+G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:appFail.application_ref,submission_id:'FR-P4-2',cloudsign_status:'error',columns:[]})}});
+const appFailRow=()=>rows(OPS,'Applications').find(a=>a.application_id===appFail.application_id);
+ok(appFailRow().cloudsign_send_status==='CLOUDSIGN_SEND_FAILED','formrun→CloudSign連携失敗でCLOUDSIGN_SEND_FAILED（自動再送しない）');
+ok(G.admin_listCloudSignSendFailures().some(a=>a.application_id===appFail.application_id),'送信失敗キューに表示');
+ok(rows(OPS,'Notification_Queue').some(n=>n.type==='CLOUDSIGN_SEND_FAILED'&&n.reference_id===appFail.application_id),'送信失敗の通知起票');
+G.admin_markManualCloudSignSent(appFail.application_id,'CSDOC-MANUAL-1','電話確認のうえ手動送信');
+ok(appFailRow().cloudsign_send_status==='MANUAL_SENT','手動送信のCloudSign書類IDを登録→MANUAL_SENT');
+
+// 63. 締結時の条件照合（§10.8）：正常系はVERIFIED
+G.doPost({parameter:{},postData:{contents:JSON.stringify({document_id:'DOC-P4-OK',status:'COMPLETED',application_ref:appP4.application_ref})}});
+const cP4=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-P4-OK');
+ok(cP4&&cP4.terms_verification_status==='VERIFIED'&&cP4.route_type==='AUTO'&&cP4.form_submission_id==='FR-P4-1','照合VERIFIED＋route_type/form_submission_id記録');
+ok(rows(OPS,'Certificates').some(x=>x.contract_id===cP4.contract_id&&x.status==='ACTIVE'),'照合通過で認証発行');
+const rcptP4=rows(OPS,'Webhook_Receipts').find(r=>r.document_id==='DOC-P4-OK');
+ok(rcptP4&&rcptP4.application_ref===appP4.application_ref&&String(rcptP4.response_code)==='200','受信台帳にevent_type/document_id/application_ref/response_code');
+
+// 64. 条件不一致（フォーム未通過のまま締結）→ TERMS_MISMATCH → 手動確認で有効化
+const appT=mkApp(['WRK-BKK00019'],'書籍',docExtra);   // formrun未通過（FORM_PENDING）
+const whT=G.doPost({parameter:{},postData:{contents:JSON.stringify({document_id:'DOC-P4-NG',status:'COMPLETED',application_ref:appT.application_ref})}});
+ok(String(whT.getContent())==='accepted-manual-review','条件不一致はmanual-review応答（HTTP 200系）');
+const cT=()=>rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-P4-NG');
+ok(cT().link_status==='TERMS_MISMATCH'&&cT().terms_verification_status==='TERMS_MISMATCH','TERMS_MISMATCHで保存（削除しない）');
+ok(!rows(OPS,'Certificates').some(x=>x.contract_id===cT().contract_id),'不一致中は認証・バッジ・請求を停止');
+ok(G.admin_listTermsMismatch().some(c=>c.contract_id===cT().contract_id),'条件不一致キューに表示');
+G.admin_confirmContractTerms(cT().contract_id,'締結PDFと台帳条件を照合し一致を確認');
+ok(cT().terms_verification_status==='MANUAL_CONFIRMED'&&cT().link_status==='LINKED','手動確認でMANUAL_CONFIRMED→LINKED');
+ok(rows(OPS,'Certificates').some(x=>x.contract_id===cT().contract_id),'確認後に認証発行');
+
+// 65. メール不達（§10.9）
+G.doPost({parameter:{},postData:{contents:JSON.stringify({document_id:'DOC-P4-OK',status:'signing_email_bounced'})}});
+const cP4b=()=>rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-P4-OK');
+ok(cP4b().delivery_status==='SIGNING_EMAIL_BOUNCED','不達イベントでdelivery_status更新');
+ok(G.admin_listDeliveryFailures().some(c=>c.contract_id===cP4.contract_id),'不達キューに表示＋通知');
+G.admin_markDeliveryHandled(cP4.contract_id,'連絡先を確認しCloudSignから再送');
+ok(cP4b().delivery_status==='HANDLED','不達対応を記録');
+
+// 66. 訂正・再申込（§10.10）
+scriptProps.HANDOFF_SECRET='handoff-secret';
+const appRp=mkApp(['WRK-ARK00012'],'書籍',docExtra);
+const rep=G.admin_createReplacementApplication(appRp.application_id,'原作追加のため訂正');
+delete scriptProps.HANDOFF_SECRET;
+ok(rep.application_ref!==appRp.application_ref&&rep.handoff_token,'新しいapplication_ref＋handoffトークンで再申込');
+const oldA=rows(OPS,'Applications').find(a=>a.application_id===appRp.application_id);
+const newA=rows(OPS,'Applications').find(a=>a.application_id===rep.application_id);
+ok(oldA.status==='SUPERSEDED'&&oldA.superseded_by_application_id===rep.application_id&&newA.supersedes_application_id===appRp.application_id,'旧SUPERSEDED⇔新申込の相互リンク（上書きしない）');
+ok(rows(OPS,'Application_Works').filter(w=>w.application_id===rep.application_id).length===1,'対象原作を新申込へ引継ぎ');
+let dupRep=false; try{ G.admin_createReplacementApplication(appRp.application_id,'x'); }catch(e){ dupRep=/訂正済み/.test(String(e.message)); }
+ok(dupRep,'訂正済み申込の二重再申込は拒否');
+
+// 67. 送信停滞の検知（§10.4）と テンプレート版管理（§10.11）
+G.updateRow_(OPS,'Applications','application_id',rep.application_id,{cloudsign_send_status:'CLOUDSIGN_SENDING',form_submitted_at:'2020-01-01T00:00:00.000Z'});
+G.notifyCloudSignSendStale_();
+ok(rows(OPS,'Applications').find(a=>a.application_id===rep.application_id).cloudsign_send_status==='MANUAL_SEND_REQUIRED','送信停滞をMANUAL_SEND_REQUIREDへ（督促起票）');
+G.admin_saveContractTemplates({STANDARD_RATE:{form_url:'https://form.run/rate-v2',template_id:'SPLL_STD_RATE_v2',template_version:'2'}});
+ok(G.admin_getContractTemplates().STANDARD_RATE.template_id==='SPLL_STD_RATE_v2','テンプレート・フォームURLの版管理（Config）');
+const appRt=mkApp(['WRK-ARK00012'],'電子出版物',docExtra);
+ok(appRt.form_url==='https://form.run/rate-v2','経路別フォームURLを申込応答で配信');
+
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

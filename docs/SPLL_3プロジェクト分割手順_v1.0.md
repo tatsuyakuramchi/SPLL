@@ -1,7 +1,16 @@
-# SPLL GAS 3プロジェクト分割 セットアップ手順（SEC-01）
+# SPLL GAS プロジェクト分割 セットアップ手順（SEC-01＋経理連携）
 
-**対応**：修正設計書 v1.0（SPLL-SYS-RD-001）§3・§22・§29 ／ SEC-01
-**版**：v1.0
+**対応**：修正設計書 v1.0（SPLL-SYS-RD-001）§3・§22・§29 ／ SEC-01 ／ 経理設計書（SPLL-SYS-AD-001）§4
+**版**：v1.1（GAS④ Accounting を追加）
+
+> **v1.1追記**：経理連携（SPLL-SYS-AD-001）により **GAS④ accounting** が加わりました。
+> セットアップは①〜③と同様（`apps/accounting/.clasp.json` にスクリプトIDを記入し `npm run push:accounting`）。
+> ScriptPropertiesは `ENVIRONMENT`（必須）・`SS_MASTER`・`SS_OPS`・`DRIVE_ROOT` を設定後、
+> **admin または accounting のエディタで `setup_accountingBootstrap` を1回実行**（経理マスタ・年度別台帳・
+> Driveフォルダを自動作成し `SS_ACCOUNTING_MASTER`／`SS_ACCOUNTING_CURRENT` を自動登録。
+> adminで実行した場合は表示されたIDを accounting 側のプロパティにも転記）。
+> 最後に **accounting で `setup_accountingTriggers`**（5分毎の経理ジョブ実行）。
+> 既存3プロジェクトはスキーマ更新のため admin で `setup_migrate` を再実行してください（SCHEMA_VERSION=4）。
 
 ## 1. 構成
 

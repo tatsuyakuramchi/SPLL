@@ -39,9 +39,17 @@ function receiveWebhook_(provider, e){
     payload_json:sanitizeCell_(String(raw).slice(0,45000)),
     signature_valid:String(sigValid), received_at:new Date().toISOString(), status:'RECEIVED',
     retry_count:0, last_error:'', processed_at:'', processing_started_at:'', processing_owner:'',
-    manual_review_reason:'', next_retry_at:'' });
+    manual_review_reason:'', next_retry_at:'',
+    // 追跡列（経理設計書 §9.3）
+    event_type: sanitizeCell_(String(body.event_type || body.status || body.event || '')),
+    document_id: provider === 'CLOUDSIGN' ? extId : '',
+    application_ref: sanitizeCell_(String(body.application_ref || refFromText_(String(raw).slice(0, 2000)) || '')),
+    response_code: '' });
   // 同期で業務処理を試行（排他確保つき）。失敗しても受信は記録済み → バッチが再試行。
-  return ContentService.createTextOutput(processReceiptRow_(receiptId, provider, body));
+  // §10.6：受信保存に成功した時点で応答はHTTP 200（400番台を業務エラーの再送要求に使わない）
+  const ack = processReceiptRow_(receiptId, provider, body);
+  updateRow_(ssOps_(),'Webhook_Receipts','receipt_id',receiptId,{ response_code: 200 });
+  return ContentService.createTextOutput(ack);
 }
 
 /**
@@ -123,6 +131,21 @@ function processCloudSignEvent_(body, e){
   const docId = body.document_id || body.documentID || body.id || (e && e.parameter && e.parameter.documentID);
   const event = body.event_type || body.status || body.event;
   if(!docId) return 'no-docid';
+  // メール不達イベント（経理設計書 §10.9）：契約の配達状態を更新し不達キューへ
+  const bounce = csBounceStatus_(event);
+  if(bounce){
+    const c = readRows_(ssOps_(),'Contracts').find(function(x){ return String(x.cloudsign_document_id) === String(docId); });
+    if(c){
+      updateRow_(ssOps_(),'Contracts','contract_id',c.contract_id,
+        { delivery_status: bounce, last_delivery_event_at: new Date().toISOString() });
+      enqueueNotification_(c.contract_id, 'DELIVERY_FAILED', c.contract_id + ':' + bounce,
+        { document_id: String(docId), delivery_status: bounce, action: '連絡先を確認し、CloudSignから再送してください（経理連携→CloudSign例外対応）' });
+      logEvent_('contract', c.contract_id, 'cloudsign', null, { delivery_status: bounce });
+      return 'ok-delivery';
+    }
+    logEvent_('webhook', String(docId), 'cloudsign', null, { delivery_status: bounce, note: '契約未登録の書類' });
+    return 'ok-delivery-nocontract';
+  }
   if(!cs_isCompletedEvent_(event)) return 'ignored';
   // 冪等：同一書類の契約が既にあれば処理しない
   if(readRows_(ssOps_(),'Contracts').some(function(c){ return String(c.cloudsign_document_id) === String(docId); })) return 'dup';
@@ -157,7 +180,23 @@ function processCloudSignEvent_(body, e){
   if(linked){
     snapshotContractWorks_(contractId, app.application_id);
     snapshotContractTerms_(contractId, app);
-    updateRow_(ssOps_(),'Applications','application_id',app.application_id,{ status:'SIGNED' });
+    updateRow_(ssOps_(),'Applications','application_id',app.application_id,{ status:'SIGNED', cloudsign_send_status:'SIGNED' });
+    updateRow_(ssOps_(),'Contracts','contract_id',contractId,{
+      form_submission_id: app.form_submission_id || '',
+      route_type: app.manual_review_reason ? 'MANUAL' : 'AUTO', delivery_status: 'DELIVERED' });
+    // 条件照合（経理設計書 §10.8）：認証・バッジ・請求の前に主要条件を検証
+    const verify = verifyContractTerms_(contractId, app);
+    if(!verify.ok){
+      updateRow_(ssOps_(),'Contracts','contract_id',contractId,{
+        link_status:'TERMS_MISMATCH', terms_verification_status:'TERMS_MISMATCH',
+        terms_verification_detail: sanitizeCell_(verify.detail.slice(0, 300)) });
+      enqueueNotification_(contractId, 'TERMS_MISMATCH', contractId,
+        { application_ref: ref, detail: verify.detail.slice(0, 200), action: '法務・運営が内容確認のうえ「条件確認済み」にしてください（自動有効化は停止中）' });
+      logEvent_('contract', contractId, 'cloudsign', null,
+        { status:'SIGNED', link_status:'TERMS_MISMATCH', detail: verify.detail.slice(0, 200) });
+      return 'manual-review:条件不一致（' + verify.detail.slice(0, 100) + '）';
+    }
+    updateRow_(ssOps_(),'Contracts','contract_id',contractId,{ terms_verification_status:'VERIFIED' });
     logEvent_('contract', contractId, 'cloudsign', null, { status:'SIGNED', link_status:'LINKED', application_ref:ref });
     finishContractLinkage_(contractId);
     return 'ok';
@@ -200,10 +239,85 @@ function processFormrunEvent_(body){
       return 'manual-review:' + v.reason;
     }
   }
+  // フォーム送信の記録（経理設計書 §10.4）：form submission ID・送信日時
+  const submissionId = sanitizeCell_(String(body.submission_id || body.id || body.sequence_number || ''));
+  const sendPatch = { form_submission_id: submissionId, form_submitted_at: new Date().toISOString() };
+  // formrun→CloudSign連携失敗の検知：payload内のエラー通知は自動再送せず手動キューへ
+  const csError = canon.cloudsign_error || body.cloudsign_error ||
+    (String(body.cloudsign_status || '').toLowerCase() === 'error' ? 'cloudsign_status=error' : '');
+  if(csError){
+    sendPatch.cloudsign_send_status = 'CLOUDSIGN_SEND_FAILED';
+    sendPatch.cloudsign_send_error = sanitizeCell_(String(csError).slice(0, 200));
+    updateRow_(ssOps_(),'Applications','application_id',app.application_id, sendPatch);
+    enqueueNotification_('', 'CLOUDSIGN_SEND_FAILED', app.application_id,
+      { application_ref: ref, error: String(csError).slice(0, 200), action: '経理連携→CloudSign例外対応から手動送信してください' });
+    logEvent_('application', app.application_id, 'formrun', {status: app.status},
+      { cloudsign_send_status: 'CLOUDSIGN_SEND_FAILED', error: String(csError).slice(0, 200) });
+    return 'ok-send-failed';
+  }
+  sendPatch.cloudsign_send_status = 'CLOUDSIGN_SENDING';
   // 逆行禁止：FORM_PENDING/APPLICATION_CREATED からのみ前進
   if(app.status === 'APPLICATION_CREATED' || app.status === 'FORM_PENDING'){
-    updateRow_(ssOps_(),'Applications','application_id',app.application_id,{ status:'CONTRACT_PENDING' });
+    sendPatch.status = 'CONTRACT_PENDING';
+    updateRow_(ssOps_(),'Applications','application_id',app.application_id, sendPatch);
     logEvent_('application', app.application_id, 'formrun', {status:app.status}, { status:'CONTRACT_PENDING', application_ref:ref });
+  } else {
+    updateRow_(ssOps_(),'Applications','application_id',app.application_id, sendPatch);
   }
   return 'ok';
+}
+
+// ============================================================
+// CloudSign運用拡張ヘルパー（経理設計書 §10.8/§10.9/§10.4）
+// ============================================================
+/** 不達イベント名 → delivery_status（該当しなければ空文字）。 */
+function csBounceStatus_(event){
+  const ev = String(event || '').toLowerCase();
+  if(!ev) return '';
+  if(/signing.*bounce|bounce.*signing/.test(ev)) return 'SIGNING_EMAIL_BOUNCED';
+  if(/completion.*bounce|bounce.*completion/.test(ev)) return 'COMPLETION_EMAIL_BOUNCED';
+  if(/bounce|undeliver|delivery_failed|not_delivered/.test(ev)) return 'DELIVERY_FAILED';
+  return '';
+}
+/**
+ * 締結後の条件照合（§10.8）。認証・バッジ・請求の前に、台帳スナップショットと
+ * 締結内容の主要条件（フォーム完了記録・対象原作・利用目的・料金モデル）を検証する。
+ */
+function verifyContractTerms_(contractId, app){
+  const problems = [];
+  // フォーム完了の整合：正規の引継ぎ（formrun Webhook通過）が記録されているか
+  if(app.status !== 'CONTRACT_PENDING' && app.status !== 'SIGNED')
+    problems.push('フォーム完了記録がありません（引継ぎ改変検知または未通過・status=' + app.status + '）');
+  // 対象原作：申込とスナップショットの件数一致・1件以上
+  const appWorks = readRows_(ssOps_(),'Application_Works').filter(function(x){ return x.application_id === app.application_id; });
+  const cws = readRows_(ssOps_(),'Contract_Works').filter(function(x){ return x.contract_id === contractId; });
+  if(!cws.length) problems.push('対象原作のスナップショットがありません');
+  else if(appWorks.length !== cws.length) problems.push('対象原作の件数が申込と一致しません（申込' + appWorks.length + '/契約' + cws.length + '）');
+  // 利用目的・料金モデル
+  const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === contractId; }) || {};
+  if(String(c.usage_category || '') !== String(app.usage_category || ''))
+    problems.push('利用目的が申込と一致しません');
+  let t = {}; try{ t = JSON.parse(c.terms_snapshot || '{}'); }catch(e){}
+  if(!t.fee_model) problems.push('利用料条件（料金モデル）を確定できません');
+  return problems.length ? { ok:false, detail:problems.join('／') } : { ok:true, detail:'' };
+}
+/**
+ * CloudSign送信の停滞検知（§10.4/§10.5）：フォーム送信済みのまま既定日数を超えて
+ * 締結に進まない申込を手動送信キュー（MANUAL_SEND_REQUIRED）へ。日次バッチから実行。
+ */
+function notifyCloudSignSendStale_(){
+  const staleDays = num_(getConfig_('CS_SEND_STALE_DAYS','2')) || 2;
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - staleDays);
+  let n = 0;
+  readRows_(ssOps_(),'Applications')
+    .filter(function(a){ return ['FORM_SUBMITTED','CLOUDSIGN_SENDING'].indexOf(String(a.cloudsign_send_status)) >= 0 &&
+      a.form_submitted_at && new Date(a.form_submitted_at) < cutoff &&
+      ['SIGNED','CANCELLED','SUPERSEDED'].indexOf(String(a.status)) < 0; })
+    .forEach(function(a){
+      updateRow_(ssOps_(),'Applications','application_id',a.application_id,{ cloudsign_send_status:'MANUAL_SEND_REQUIRED' });
+      if(enqueueNotification_('', 'CLOUDSIGN_SEND_FAILED', a.application_id,
+        { application_ref: a.application_ref, error: 'フォーム送信から' + staleDays + '日以上CloudSign締結に進んでいません',
+          action: '経理連携→CloudSign例外対応から状況確認・手動送信してください' })) n++;
+    });
+  return { processed: n };
 }

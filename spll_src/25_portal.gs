@@ -92,9 +92,50 @@ function web_createApplication(params){
       legal_document_version:(x[2]?x[2].version:''), content_hash:hash_(String(x[1]||'')),
       display_hash:disp, consent_session_id:sess, accepted:'true', accepted_at:now,
       consented_at:now, consent_method:'PORTAL_CHECKBOX', evidence_version:'v2' }); });
-  updateRow_(ssOps_(),'Applications','application_id',appId,{ status:'FORM_PENDING' });
-  logEvent_('application', appId, 'portal', null, { application_ref:ref, works:ids.length, usage_category:usageCategory });
+  // 自動送信／手動確認の経路判定（経理設計書 §10.3）
+  const route = decideContractRoute_({ usageCategory: usageCategory, workIds: ids,
+    isMinor: params.isMinor === true, isOverseas: params.isOverseas === true,
+    hasSpecialTerms: params.hasSpecialTerms === true });
+  updateRow_(ssOps_(),'Applications','application_id',appId,{ status:'FORM_PENDING',
+    cloudsign_send_status:'NOT_STARTED',
+    manual_review_reason: route.route === 'MANUAL_REVIEW' ? sanitizeCell_(route.reasons.join('、')) : '' });
+  logEvent_('application', appId, 'portal', null,
+    { application_ref:ref, works:ids.length, usage_category:usageCategory, route:route.route, reasons:route.reasons });
   // 引継ぎ改変検知トークン（フォーム項目設計 §4.1.1）
   const handoff = makeHandoffToken_(appId, ref, ids, usageCategory, termsHash, handoffExpires);
-  return { application_id:appId, application_ref:ref, handoff_token:handoff, handoff_expires_at:handoffExpires };
+  return { application_id:appId, application_ref:ref, handoff_token:handoff, handoff_expires_at:handoffExpires,
+    template_route: route.route, route_reasons: route.reasons, form_url: routeFormUrl_(route.route) };
+}
+
+/**
+ * 契約経路の判定（経理設計書 §10.3）。
+ *   STANDARD_FIXED（定額系）／STANDARD_RATE（売上連動）はCloudSign自動送信、
+ *   MANUAL_REVIEW（未成年・海外・その他・特約・上限超過等）は自動送信しない。
+ */
+function decideContractRoute_(ctx){
+  ctx = ctx || {};
+  const reasons = [];
+  const rule = ctx.usageCategory ? feeRuleFor_(ctx.usageCategory) : null;
+  if(!rule) reasons.push('料金表が未設定');
+  if(/その他|OTHER/i.test(String(ctx.usageCategory||''))) reasons.push('利用目的がその他');
+  const maxW = formMaxWorks_();
+  if((ctx.workIds || []).length > maxW) reasons.push('対象原作数が上限超過');
+  if(ctx.isMinor) reasons.push('未成年');
+  if(ctx.isOverseas) reasons.push('海外居住・海外法人');
+  if(ctx.hasSpecialTerms) reasons.push('特約あり');
+  // クレジット・原作名がテンプレート上限を超える場合（既定400字）
+  if(ctx.workIds && ctx.workIds.length){
+    const master = readRows_(ssMaster_(),'Works_Master');
+    const creditLen = ctx.workIds.map(function(id){ const w = master.find(function(x){ return x.work_id === id; });
+      return (w ? String(w.credit_text||'') + String(w.work_name||'') : ''); }).join('').length;
+    if(creditLen > (num_(getConfig_('CS_CREDIT_MAX_CHARS','400')) || 400)) reasons.push('クレジット表記が上限超過');
+  }
+  const model = rule ? String(rule.fee_model||'').toUpperCase() : '';
+  if(rule && ['RATE','FLAT','PER_WORK'].indexOf(model) < 0) reasons.push('利用目的と料金モデルが不整合');
+  if(reasons.length) return { route:'MANUAL_REVIEW', reasons:reasons };
+  return { route: model === 'RATE' ? 'STANDARD_RATE' : 'STANDARD_FIXED', reasons: [] };
+}
+/** 経路別フォームURL（§10.11：Configで版管理。未設定は共通URLへフォールバック）。 */
+function routeFormUrl_(route){
+  return getConfig_('FORM_URL_' + route, '') || prop_('FORMRUN_FORM_URL') || '';
 }

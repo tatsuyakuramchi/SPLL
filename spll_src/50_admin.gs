@@ -843,3 +843,140 @@ function admin_retryStatementSend(statementId){
   logEvent_('settlement_statement', statementId, actor.email, {status:'SEND_FAILED'}, {status:'APPROVED', retry:true});
   return true;
 }
+
+// ============================================================
+// CloudSign例外対応（経理設計書 §10.5/§10.8〜10.11/§12.6）
+// ============================================================
+/** 自動送信失敗・手動送信待ちの申込一覧。 */
+function admin_listCloudSignSendFailures(){ requireRole_([]);
+  return readRows_(ssOps_(),'Applications')
+    .filter(function(a){ return ['CLOUDSIGN_SEND_FAILED','MANUAL_SEND_REQUIRED'].indexOf(String(a.cloudsign_send_status)) >= 0 &&
+      ['CANCELLED','SUPERSEDED'].indexOf(String(a.status)) < 0; })
+    .map(function(a){ return { application_id:a.application_id, application_ref:a.application_ref,
+      usage_category:a.usage_category, form_submission_id:a.form_submission_id,
+      form_submitted_at:String(a.form_submitted_at||'').slice(0,16).replace('T',' '),
+      cloudsign_send_status:a.cloudsign_send_status, cloudsign_send_error:a.cloudsign_send_error,
+      manual_review_reason:a.manual_review_reason }; });
+}
+/** 手動で作成・送信したCloudSign書類IDの登録（§10.5）。 */
+function admin_markManualCloudSignSent(applicationId, documentId, note){
+  const actor = requireRole_(['OPERATIONS','LEGAL_ADMIN']);
+  if(!String(documentId||'').trim()) throw new Error('VALIDATION_ERROR: CloudSign書類IDは必須です');
+  const app = readRows_(ssOps_(),'Applications').find(function(a){ return a.application_id === String(applicationId||''); });
+  if(!app) throw new Error('DATA_NOT_FOUND: 申込がありません: ' + applicationId);
+  updateRow_(ssOps_(),'Applications','application_id',app.application_id,
+    { cloudsign_send_status:'MANUAL_SENT', cloudsign_send_error:'' });
+  logEvent_('application', app.application_id, actor.email,
+    { cloudsign_send_status: app.cloudsign_send_status },
+    { cloudsign_send_status:'MANUAL_SENT', cloudsign_document_id:String(documentId), note:sanitizeCell_(String(note||'')) });
+  return true;
+}
+/** 申込の取消（§10.5）。 */
+function admin_cancelApplication(applicationId, reason){
+  const actor = requireRole_(['OPERATIONS','LEGAL_ADMIN']);
+  if(!String(reason||'').trim()) throw new Error('VALIDATION_ERROR: 取消理由は必須です');
+  const app = readRows_(ssOps_(),'Applications').find(function(a){ return a.application_id === String(applicationId||''); });
+  if(!app) throw new Error('DATA_NOT_FOUND: 申込がありません: ' + applicationId);
+  if(String(app.status) === 'SIGNED') throw new Error('DATA_CONFLICT: 締結済みの申込は取消できません（訂正は再申込で行ってください）');
+  updateRow_(ssOps_(),'Applications','application_id',app.application_id,
+    { status:'CANCELLED', cloudsign_send_status:'CANCELLED' });
+  logEvent_('application', app.application_id, actor.email, { status:app.status }, { status:'CANCELLED', reason:String(reason) });
+  return true;
+}
+/** 条件不一致（TERMS_MISMATCH）契約の一覧。 */
+function admin_listTermsMismatch(){ requireRole_([]);
+  return readRows_(ssOps_(),'Contracts')
+    .filter(function(c){ return c.terms_verification_status === 'TERMS_MISMATCH'; })
+    .map(function(c){ return { contract_id:c.contract_id, application_ref:c.application_ref,
+      cloudsign_title:c.cloudsign_title, signed_at:String(c.signed_at||'').slice(0,10),
+      detail:c.terms_verification_detail }; });
+}
+/** 条件不一致の手動確認（LEGAL_ADMIN）。確認後に認証・バッジ・請求を実行（§10.8）。 */
+function admin_confirmContractTerms(contractId, note){
+  const actor = requireRole_(['LEGAL_ADMIN']);
+  const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === String(contractId||''); });
+  if(!c) throw new Error('DATA_NOT_FOUND: 契約がありません: ' + contractId);
+  if(c.terms_verification_status !== 'TERMS_MISMATCH') throw new Error('DATA_CONFLICT: 条件不一致の契約ではありません（' + c.terms_verification_status + '）');
+  updateRow_(ssOps_(),'Contracts','contract_id',c.contract_id,
+    { link_status:'LINKED', terms_verification_status:'MANUAL_CONFIRMED',
+      terms_verification_detail: sanitizeCell_(String(c.terms_verification_detail||'') + ' / 確認: ' + String(note||'')) });
+  logEvent_('contract', c.contract_id, actor.email, { terms_verification_status:'TERMS_MISMATCH' },
+    { terms_verification_status:'MANUAL_CONFIRMED', note:String(note||'') });
+  finishContractLinkage_(c.contract_id);
+  return true;
+}
+/** メール不達の契約一覧（§10.9）。 */
+function admin_listDeliveryFailures(){ requireRole_([]);
+  return readRows_(ssOps_(),'Contracts')
+    .filter(function(c){ return ['SIGNING_EMAIL_BOUNCED','COMPLETION_EMAIL_BOUNCED','DELIVERY_FAILED'].indexOf(String(c.delivery_status)) >= 0; })
+    .map(function(c){ return { contract_id:c.contract_id, application_ref:c.application_ref,
+      cloudsign_title:c.cloudsign_title, delivery_status:c.delivery_status,
+      last_delivery_event_at:String(c.last_delivery_event_at||'').slice(0,16).replace('T',' ') }; });
+}
+function admin_markDeliveryHandled(contractId, note){
+  const actor = requireRole_(['OPERATIONS','LEGAL_ADMIN']);
+  const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === String(contractId||''); });
+  if(!c) throw new Error('DATA_NOT_FOUND: 契約がありません: ' + contractId);
+  updateRow_(ssOps_(),'Contracts','contract_id',c.contract_id,
+    { delivery_status:'HANDLED', last_delivery_event_at:new Date().toISOString() });
+  logEvent_('contract', c.contract_id, actor.email, { delivery_status:c.delivery_status },
+    { delivery_status:'HANDLED', note:sanitizeCell_(String(note||'')) });
+  return true;
+}
+/**
+ * 訂正・再申込（§10.10）：既存申込を上書きせず、新しいapplication_refで置換申込を作成。
+ * 旧申込は SUPERSEDED。再同意・再送信は新しいフォームリンクで行う。
+ */
+function admin_createReplacementApplication(applicationId, reason){
+  const actor = requireRole_(['OPERATIONS','LEGAL_ADMIN']);
+  if(!String(reason||'').trim()) throw new Error('VALIDATION_ERROR: 訂正理由は必須です');
+  const old = readRows_(ssOps_(),'Applications').find(function(a){ return a.application_id === String(applicationId||''); });
+  if(!old) throw new Error('DATA_NOT_FOUND: 申込がありません: ' + applicationId);
+  if(String(old.status) === 'SUPERSEDED') throw new Error('DATA_CONFLICT: この申込は訂正済みです（' + old.superseded_by_application_id + '）');
+  const works = readRows_(ssOps_(),'Application_Works').filter(function(x){ return x.application_id === old.application_id; });
+  const newId = newId_('APP');
+  const newRef = newRef_();
+  const handoffExpires = addDaysIso_(14);
+  appendRow_(ssOps_(),'Applications',{ application_id:newId, application_ref:newRef,
+    usage_category:old.usage_category, privacy_hash:old.privacy_hash, terms_hash:old.terms_hash,
+    handoff_expires_at:handoffExpires, status:'FORM_PENDING', created_at:new Date().toISOString(),
+    cloudsign_send_status:'MANUAL_SEND_REQUIRED',
+    manual_review_reason:sanitizeCell_('再申込（訂正）: ' + reason),
+    supersedes_application_id: old.application_id });
+  works.forEach(function(w){ appendRow_(ssOps_(),'Application_Works',{
+    application_work_id:newId_('AW'), application_id:newId, work_id:w.work_id }); });
+  updateRow_(ssOps_(),'Applications','application_id',old.application_id,
+    { status:'SUPERSEDED', superseded_by_application_id:newId, cloudsign_send_status:'CANCELLED' });
+  // 旧申込に送信済みCloudSign書類があれば取消扱いを記録（§10.10）
+  const oldContract = readRows_(ssOps_(),'Contracts').find(function(c){ return c.application_id === old.application_id; });
+  if(oldContract) logEvent_('contract', oldContract.contract_id, actor.email, null,
+    { note:'再申込により旧契約書類の取消/失効を要手続き', superseded_by_application:newId });
+  const workIds = works.map(function(w){ return w.work_id; });
+  const handoff = makeHandoffToken_(newId, newRef, workIds, old.usage_category, old.terms_hash, handoffExpires);
+  logEvent_('application', newId, actor.email, null,
+    { replacement_of: old.application_id, reason:String(reason), application_ref:newRef });
+  return { application_id:newId, application_ref:newRef, handoff_token:handoff,
+    form_url: routeFormUrl_(decideContractRoute_({ usageCategory: old.usage_category, workIds: workIds }).route) };
+}
+/** CloudSignテンプレート・フォームURLの版管理（§10.11）。Configで経路別に保持。 */
+const CS_TEMPLATE_ROUTES = ['STANDARD_FIXED','STANDARD_RATE','MANUAL_REVIEW'];
+function admin_getContractTemplates(){ requireRole_([]);
+  const out = {};
+  CS_TEMPLATE_ROUTES.forEach(function(r){
+    out[r] = { form_url: getConfig_('FORM_URL_' + r, ''), template_id: getConfig_('CS_TEMPLATE_' + r, ''),
+      template_version: getConfig_('CS_TEMPLATE_VERSION_' + r, '') };
+  });
+  return out;
+}
+function admin_saveContractTemplates(cfg){
+  const actor = requireRole_(['SYSTEM_ADMIN','LEGAL_ADMIN']);
+  cfg = cfg || {};
+  CS_TEMPLATE_ROUTES.forEach(function(r){
+    const c = cfg[r]; if(!c) return;
+    if(c.form_url !== undefined) setConfig_('FORM_URL_' + r, String(c.form_url));
+    if(c.template_id !== undefined) setConfig_('CS_TEMPLATE_' + r, String(c.template_id));
+    if(c.template_version !== undefined) setConfig_('CS_TEMPLATE_VERSION_' + r, String(c.template_version));
+  });
+  logEvent_('config', 'CS_TEMPLATES', actor.email, null, { routes: Object.keys(cfg) });
+  return true;
+}

@@ -1384,5 +1384,5 @@ DRIVE_ROOT/
 | 配分 | **実装済（P2）**：`64_sales_allocation.gs`（Distribution_Profiles版管理・最大剰余法按分・RATE四捨五入＋RESIDUAL残額・rounding_adjustment・差額0/例外0の承認条件・作成/承認の職務分離＋EMERGENCY_OVERRIDE・VOID）。行単位の手動突合（MANUAL）。admin.html「配分確認」サブタブ |
 | 銀行照合 | **実装済（P3）**：`66_bank_reconciliation.gs`（三菱UFJ CSVレコード種別判定・名義正規化・プラットフォーム/直接入金の候補提示（自動確定なし）・複数対象充当・確定/取消・Invoices入金記録連携）。admin.html「入金照合」サブタブ |
 | 経理出力 | **実装済（P3）**：`68_accounting_export.gs`（LEGACY_V3_07／CONSOLIDATED_V1のSpreadsheet生成・権利者別月次/四半期CSV＋全権利者ZIP・版管理（上書きしない）・ハッシュ/承認記録・Settlements連携＝source_type付き集約＋二重計上拒否）。`Settlement_Details`へ末尾3列追加（SCHEMA_VERSION=3）。admin.html「ファイル出力」サブタブ |
-| CloudSign例外運用 | 未実装 |
-| テスト | P0〜P3分実装済（harness 285件／sec01 30件 全通過） |
+| CloudSign例外運用 | **実装済（P4）**：経路判定`decideContractRoute_`（STANDARD_FIXED/RATE/MANUAL_REVIEW・理由記録）・URL引継ぎ最小化（§10.2・長文撤去＋template_route）・`cloudsign_send_status`管理（formrun送信記録・連携失敗/停滞→手動送信キュー・手動送信登録・申込取消）・締結時の条件照合（TERMS_MISMATCHで認証等を停止→LEGAL_ADMIN確認で有効化）・メール不達キュー・訂正/再申込（SUPERSEDED相互リンク・二重防止）・テンプレート/フォームURL版管理（Config）。SS_OPS末尾列追加（SCHEMA_VERSION=4）。admin.html「CloudSign例外対応」サブタブ |
+| テスト | **P0〜P4 全実装済**（harness 314件／sec01 30件 全通過） |

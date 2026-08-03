@@ -31,12 +31,12 @@ const SCHEMA_MASTER = {
 const SCHEMA_OPS = {
   // 申込：複数原作は中間テーブル Application_Works で管理（B経路固定・A/B分岐なし）
   //   usage_category：利用目的（別紙2の料金計算キー）／privacy_hash・terms_hash：同意時文書ハッシュ（§7.2）
-  Applications:         ['application_id','application_ref','usage_category','privacy_hash','terms_hash','handoff_expires_at','status','created_at'],
+  Applications:         ['application_id','application_ref','usage_category','privacy_hash','terms_hash','handoff_expires_at','status','created_at','form_submission_id','form_submitted_at','cloudsign_send_status','cloudsign_send_error','manual_review_reason','supersedes_application_id','superseded_by_application_id'],
   Application_Works:    ['application_work_id','application_id','work_id'],
   // 契約：締結時に対象原作を Contract_Works へスナップショット（法務証跡）
   //   link_status: LINKED（申込突合済）/ UNLINKED（未突合＝手動紐付け待ち）
   //   contract_file_id/hash：締結済原本PDF（FUN-04）
-  Contracts:            ['contract_id','cloudsign_document_id','cloudsign_title','application_id','application_ref','usage_category','terms_snapshot','status','link_status','signed_at','contract_file_id','contract_file_hash','folder_id'],
+  Contracts:            ['contract_id','cloudsign_document_id','cloudsign_title','application_id','application_ref','usage_category','terms_snapshot','status','link_status','signed_at','contract_file_id','contract_file_hash','folder_id','form_submission_id','route_type','terms_verification_status','terms_verification_detail','delivery_status','last_delivery_event_at'],
   // 清算は契約時スナップショットを正本とする（V2-011）：権利者・登録番号・料率・配分方式まで固定
   Contract_Works:       ['contract_work_id','contract_id','work_id','work_name_snapshot','publisher_snapshot','credit_snapshot','partner_id_snapshot','partner_name_snapshot','invoice_reg_number_snapshot','allocation_scheme_snapshot','royalty_rate_snapshot','handling_fee_rate_snapshot'],
   // 用途別アクセストークン（SEC-06/§9.1）：SUBMISSION / REPORT / BADGE_DOWNLOAD
@@ -68,7 +68,7 @@ const SCHEMA_OPS = {
   // ---- 修正設計書 §15.1 追加テーブル ----
   Admin_Users:          ['admin_user_id','email','role','status','added_by','added_at'],
   // 受信キュー（V2-007）：RECEIVED→PROCESSING→PROCESSED／RETRY_WAIT／MANUAL_REVIEW／REJECTED／DEAD_LETTER
-  Webhook_Receipts:     ['receipt_id','provider','external_event_id','idempotency_key','payload_hash','payload_json','signature_valid','received_at','status','retry_count','last_error','processed_at','processing_started_at','processing_owner','manual_review_reason','next_retry_at'],
+  Webhook_Receipts:     ['receipt_id','provider','external_event_id','idempotency_key','payload_hash','payload_json','signature_valid','received_at','status','retry_count','last_error','processed_at','processing_started_at','processing_owner','manual_review_reason','next_retry_at','event_type','document_id','application_ref','response_code'],
   System_Errors:        ['error_id','error_code','source','message','detail','occurred_at','status'],
   Batch_Runs:           ['batch_run_id','batch_name','started_at','finished_at','processed','errors','status','detail'],
   X_Posts:              ['x_post_id','work_id','tweet_id','text','posted_by','posted_at'],
@@ -225,7 +225,7 @@ function setup_seedSamples_(){
 }
 
 // ---- スキーマ移行（修正設計書v2 V2-003）----
-const SCHEMA_VERSION = 3;   // 列定義を変えたら加算する（v3: Settlement_Detailsに経理連携由来列を追加）
+const SCHEMA_VERSION = 4;   // v4: Applications/Contracts/Webhook_ReceiptsへCloudSign運用拡張列を追加（SPLL-SYS-AD-001 §9）
 
 /**
  * 既存スプレッドシートへ不足シート・不足列を追加する（既存列の削除・並び替えはしない）。

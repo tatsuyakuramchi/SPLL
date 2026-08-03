@@ -31,6 +31,7 @@ function trigger_daily(){                         // 期限処理・みなし確
   batchRun_('closeObjectionPeriods', function(){ confirmDeemed_(); return {}; });
   batchRun_('notifyReviewSla', notifyReviewSla_);
   batchRun_('notifyReportDue', notifyReportDue_);
+  batchRun_('notifyCloudSignSendStale', notifyCloudSignSendStale_);   // 送信停滞の検知（経理設計書 §10.4）
   batchRun_('purgeExpiredData', purgeExpiredData_);
 }
 
