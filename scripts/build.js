@@ -24,12 +24,12 @@ const MANIFEST = {
     title: 'SPLL 契約・提出・報告 (GAS②)',
   },
   admin: {
-    gs: ['00_core.gs','05_schema.gs','10_auth.gs','15_fee.gs','20_tokens.gs','30_cloudsign.gs','32_contract.gs','37_ai.gs','45_settlement.gs','50_admin.gs','55_accounting_master.gs','60_sales_import.gs','62_sales_match.gs','64_sales_allocation.gs','69_accounting_jobs.gs'],
+    gs: ['00_core.gs','05_schema.gs','10_auth.gs','15_fee.gs','20_tokens.gs','30_cloudsign.gs','32_contract.gs','37_ai.gs','45_settlement.gs','50_admin.gs','55_accounting_master.gs','60_sales_import.gs','62_sales_match.gs','64_sales_allocation.gs','66_bank_reconciliation.gs','68_accounting_export.gs','69_accounting_jobs.gs'],
     html: ['admin.html'],
     title: 'SPLL 管理コンソール (GAS③)',
   },
   accounting: {
-    gs: ['00_core.gs','10_auth.gs','55_accounting_master.gs','60_sales_import.gs','62_sales_match.gs','64_sales_allocation.gs','69_accounting_jobs.gs'],
+    gs: ['00_core.gs','10_auth.gs','55_accounting_master.gs','60_sales_import.gs','62_sales_match.gs','64_sales_allocation.gs','66_bank_reconciliation.gs','68_accounting_export.gs','69_accounting_jobs.gs'],
     html: [],
     title: 'SPLL 経理連携 (GAS④)',
   },

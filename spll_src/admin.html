@@ -262,13 +262,43 @@
       </div>
       <div class="note">承認条件：<b>配分差額0円・例外0件</b>（満たさないrunは承認ボタンが無効）。作成者と承認者は別担当者（職務分離）。原票合計＝原作按分合計＝権利者配分合計が常に一致します（最大剰余法）。</div>
     </div>
-    <!-- 入金照合（P3で実装） -->
+    <!-- 入金照合 -->
     <div class="accpane setpane" id="a-bank">
-      <div class="panel"><div class="ph"><h3>入金照合</h3></div><div class="pbody"><p class="setnote" id="acc-bank-note">銀行明細照合はP3で実装予定です。</p></div></div>
+      <div class="panel">
+        <div class="ph"><h3>銀行明細の取込（三菱UFJ）</h3><span class="hint">取引行のみ登録・原本はDrive保存</span></div>
+        <div class="pbody" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+          <label style="font-size:12px;">明細CSV<br><input type="file" id="acc-bank-file" accept=".csv,text/csv"></label>
+          <button class="btn p" onclick="accBankUpload()">取込</button>
+          <button class="btn" onclick="accSuggest()">照合候補を提示</button>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="ph"><h3>照合候補（自動確定はしません）</h3></div>
+        <table><thead><tr><th>対象</th><th>期待額</th><th>候補入金（日付/名義/金額）</th><th>操作</th></tr></thead><tbody id="acc-suggest-tbody"></tbody></table>
+      </div>
+      <div class="panel">
+        <div class="ph"><h3>確定済み照合</h3><button class="btn" onclick="loadAccRecons()">更新</button></div>
+        <table><thead><tr><th>ID</th><th>種別</th><th>対象</th><th>期待額</th><th>充当額</th><th>差額</th><th>操作</th></tr></thead><tbody id="acc-recon-tbody"></tbody></table>
+      </div>
+      <div class="note">プラットフォーム入金（BOOTH=ピクシブ／DLsite=エイシス等）は名義・対象月・金額から、直接入金は未入金請求×金額から候補を提示します。1件の入金を複数対象へ、複数入金を1対象へ充当できます。</div>
     </div>
-    <!-- ファイル出力（P3で実装） -->
+    <!-- ファイル出力 -->
     <div class="accpane setpane" id="a-export">
-      <div class="panel"><div class="ph"><h3>ファイル出力</h3></div><div class="pbody"><p class="setnote" id="acc-export-note">経理・権利者向けファイル出力はP3で実装予定です。</p></div></div>
+      <div class="panel">
+        <div class="ph"><h3>経理・権利者向けファイルの生成</h3><span class="hint">上書きしない（再生成はversion増加）</span></div>
+        <div class="pbody" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+          <label style="font-size:12px;">配分run<br><input type="text" id="acc-export-run" placeholder="ALR-..." style="padding:7px;border:1px solid var(--line);border-radius:7px;width:200px;"></label>
+          <button class="btn" onclick="accGenExport('LEGACY_V3_07')">経理（旧形式）</button>
+          <button class="btn" onclick="accGenExport('CONSOLIDATED_V1')">経理（統合版）</button>
+          <button class="btn p" onclick="accGenPartner('MONTHLY')">権利者別（月次＋ZIP）</button>
+          <button class="btn" onclick="accGenPartner('QUARTERLY')">権利者別（四半期＋ZIP）</button>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="ph"><h3>出力履歴</h3><button class="btn" onclick="loadAccExports()">更新</button></div>
+        <table><thead><tr><th>ID</th><th>run</th><th>プロファイル</th><th>版</th><th>状態</th><th>生成</th><th>操作</th></tr></thead><tbody id="acc-export-tbody"></tbody></table>
+      </div>
+      <div class="note">出力承認後、「清算連携」で権利者別確定額を既存の清算（Settlements）へ連携します（同一runの二重連携は自動拒否）。</div>
     </div>
 
     <!-- 処理ジョブ -->
@@ -545,6 +575,8 @@ document.querySelectorAll(".acctab").forEach(s=>s.onclick=()=>{
   if(s.dataset.a==="import") loadAccImports();
   else if(s.dataset.a==="unmatched") loadAccUnmatched();
   else if(s.dataset.a==="alloc") loadAccAlloc();
+  else if(s.dataset.a==="bank") loadAccRecons();
+  else if(s.dataset.a==="export") loadAccExports();
   else if(s.dataset.a==="jobs") loadAccJobs();
 });
 
@@ -1358,6 +1390,94 @@ function accShowSummary(runId){
     });
   });
 }
+function accBankUpload(){
+  var f=$("acc-bank-file").files[0];
+  if(!f){ toast("明細CSVを選択してください", true); return; }
+  var reader=new FileReader();
+  reader.onload=function(){
+    var b64=String(reader.result).split(",")[1]||"";
+    call("admin_accountingUploadBankFile",[{bankCode:"MUFG",fileName:f.name},b64],function(res){
+      toast("銀行明細を取込みました（"+res.rows+"件）"); accSuggest();
+    });
+  };
+  reader.readAsDataURL(f);
+}
+function accSuggest(){
+  call("admin_accountingSuggestReconciliations",[""],function(rows){
+    var tb=$("acc-suggest-tbody"); tb.innerHTML=""; rows=rows||[];
+    if(!rows.length){ emptyRow(tb,4,"照合候補がありません（未照合入金・対象がない）"); return; }
+    rows.forEach(function(s){
+      var tr=document.createElement("tr");
+      tr.appendChild(td(esc(s.label||s.target_id)));
+      tr.appendChild(td(Number(s.expected_amount||0).toLocaleString()));
+      tr.appendChild(td((s.candidates||[]).map(function(c){ return esc(c.transaction_date)+" "+esc(c.payer_name_raw)+" "+Number(c.credit_amount||0).toLocaleString()+"円"+(c.exact?" ✔":""); }).join("<br>")));
+      var act=document.createElement("td"); act.className="actions";
+      act.appendChild(mkBtn("先頭候補で確定","btn p",function(){
+        var c=(s.candidates||[])[0]; if(!c){ toast("候補がありません", true); return; }
+        if(!confirm(s.label+"\nに入金 "+Number(c.credit_amount).toLocaleString()+"円（"+c.payer_name_raw+"）を充当しますか？")) return;
+        var payload={target_type:s.target_type,target_id:s.target_id,expected_amount:s.expected_amount,
+          lines:[{bank_transaction_id:c.bank_transaction_id,applied_amount:c.credit_amount}]};
+        if(s.target_type==="INVOICE"&&confirm("入金記録（Payments）にも自動登録しますか？")) payload.recordPayment=true;
+        call("admin_accountingConfirmReconciliation",[payload],function(){ toast("照合を確定しました"); accSuggest(); loadAccRecons(); });
+      }));
+      tr.appendChild(act); tb.appendChild(tr);
+    });
+  });
+}
+function loadAccRecons(){
+  call("admin_accountingListReconciliations",[],function(rows){
+    var tb=$("acc-recon-tbody"); tb.innerHTML=""; rows=rows||[];
+    if(!rows.length){ emptyRow(tb,7,"確定済みの照合はありません"); return; }
+    rows.forEach(function(r){
+      var tr=document.createElement("tr");
+      tr.appendChild(td('<span class="id">'+esc(r.reconciliation_id)+'</span>'));
+      tr.appendChild(td(esc(r.target_type)));
+      tr.appendChild(td('<span class="id">'+esc(r.target_id)+'</span>'));
+      tr.appendChild(td(Number(r.expected_amount||0).toLocaleString()));
+      tr.appendChild(td(Number(r.applied_amount||0).toLocaleString()));
+      var diff=Number(r.difference_amount||0);
+      tr.appendChild(td(diff===0?"0":'<b style="color:var(--fail)">'+diff.toLocaleString()+"</b>"));
+      var act=document.createElement("td"); act.className="actions";
+      if(r.status==="CONFIRMED") act.appendChild(mkBtn("取消","btn d",function(){ var reason=prompt("取消理由（必須）:",""); if(!reason) return;
+        call("admin_accountingVoidReconciliation",[r.reconciliation_id,reason],function(){ toast("照合を取り消しました"); loadAccRecons(); }); }));
+      else act.appendChild(td(pill({cls:"wait",label:"取消済"})));
+      tr.appendChild(act); tb.appendChild(tr);
+    });
+  });
+}
+function accGenExport(profile){
+  var run=$("acc-export-run").value.trim();
+  if(!run){ toast("配分runを入力してください", true); return; }
+  call("admin_accountingGenerateExport",[run,profile],function(){ toast("生成ジョブを開始しました（"+profile+"）"); loadAccExports(); });
+}
+function accGenPartner(type){
+  var run=$("acc-export-run").value.trim();
+  if(!run){ toast("配分runを入力してください", true); return; }
+  call("admin_accountingGeneratePartnerExports",[run,type],function(){ toast("権利者別ファイルの生成を開始しました"); loadAccExports(); });
+}
+function loadAccExports(){
+  call("admin_accountingListExports",[],function(rows){
+    var tb=$("acc-export-tbody"); tb.innerHTML=""; rows=rows||[];
+    if(!rows.length){ emptyRow(tb,7,"出力履歴がありません"); return; }
+    var m={QUEUED:{cls:"wait",label:"生成待ち"},GENERATED:{cls:"review",label:"生成済"},APPROVED:{cls:"pass",label:"承認済"}};
+    rows.forEach(function(e){
+      var tr=document.createElement("tr");
+      tr.appendChild(td('<span class="id">'+esc(e.export_id)+'</span>'));
+      tr.appendChild(td('<span class="id">'+esc(e.allocation_run_id)+'</span>'));
+      tr.appendChild(td(esc(e.export_profile_id)));
+      tr.appendChild(td("v"+esc(e.version)));
+      tr.appendChild(td(pill(m[String(e.status)]||{cls:"wait",label:String(e.status)})));
+      tr.appendChild(td(esc(e.generated_at||"—")));
+      var act=document.createElement("td"); act.className="actions";
+      if(e.status==="GENERATED") act.appendChild(mkBtn("承認","btn p",function(){ call("admin_accountingApproveExport",[e.export_id],function(){ toast("出力を承認しました"); loadAccExports(); }); }));
+      if(e.status==="APPROVED") act.appendChild(mkBtn("清算連携","btn",function(){
+        if(!confirm("権利者別確定額を既存の清算（Settlements）へ連携します。よろしいですか？（二重連携は自動拒否）")) return;
+        call("admin_accountingPostSettlements",[e.allocation_run_id],function(r){ toast("清算へ連携しました（"+(r&&r.settlements||0)+"権利者）"); loadAccExports(); });
+      }));
+      tr.appendChild(act); tb.appendChild(tr);
+    });
+  });
+}
 function loadAccJobs(){
   call("admin_accountingListJobs",[{}],function(rows){
     var tb=$("acc-jobs-tbody"); tb.innerHTML=""; rows=rows||[];
@@ -1447,6 +1567,23 @@ MOCK.admin_accountingGetAllocationSummary=function(id){ return { run:{allocation
 MOCK.admin_accountingApproveAllocation=function(id){ var r=_mAccRuns.find(function(x){return x.allocation_run_id===id;}); if(r){ r.status="APPROVED"; r.approved_by="legal@example.com"; } return true; };
 MOCK.admin_accountingVoidAllocation=function(id){ var r=_mAccRuns.find(function(x){return x.allocation_run_id===id;}); if(r) r.status="VOID"; return true; };
 MOCK.admin_accountingManualMatch=function(){ return {updated:1}; };
+MOCK.admin_accountingUploadBankFile=function(){ return { bank_import_batch_id:"BKB-mock", rows:12, warnings:[] }; };
+MOCK.admin_accountingSuggestReconciliations=function(){ return [
+  {target_type:"PLATFORM_BATCH",target_id:"IMB-202606-0001",label:"BOOTH（ピクシブ） 2026-06",expected_amount:4609606,
+   candidates:[{bank_transaction_id:"BKB-mock:5",transaction_date:"2026-07-31",payer_name_raw:"ピクシブ（カ",credit_amount:4609606,exact:true}]},
+  {target_type:"INVOICE",target_id:"INV-202606-0001",label:"請求 INV-202606-0001（CTR-202606-0017）",expected_amount:16500,
+   candidates:[{bank_transaction_id:"BKB-mock:8",transaction_date:"2026-07-28",payer_name_raw:"ヤマダタロウ",credit_amount:16500,exact:true}]}
+]; };
+MOCK.admin_accountingConfirmReconciliation=function(){ return { reconciliation_id:"RCN-mock", applied_amount:4609606, difference_amount:0 }; };
+var _mAccRecons=[{reconciliation_id:"RCN-202607-0001",target_type:"PLATFORM_BATCH",target_id:"IMB-202606-0001",expected_amount:4609606,applied_amount:4609606,difference_amount:0,status:"CONFIRMED",confirmed_by:"acct@example.com"}];
+MOCK.admin_accountingListReconciliations=function(){ return _mAccRecons; };
+MOCK.admin_accountingVoidReconciliation=function(id){ var r=_mAccRecons.find(function(x){return x.reconciliation_id===id;}); if(r) r.status="VOID"; return true; };
+var _mAccExports=[{export_id:"EXP-202607-0001",allocation_run_id:"ALR-202606-0001",export_profile_id:"LEGACY_V3_07",version:1,status:"GENERATED",generated_by:"acct@example.com",generated_at:"2026-07-05 11:00"}];
+MOCK.admin_accountingGenerateExport=function(run,prof){ _mAccExports.unshift({export_id:"EXP-MOCK-"+(_mAccExports.length+1),allocation_run_id:run,export_profile_id:prof,version:1,status:"QUEUED",generated_by:"you",generated_at:""}); return {export_id:"EXP-MOCK"}; };
+MOCK.admin_accountingGeneratePartnerExports=function(run,type){ return MOCK.admin_accountingGenerateExport(run,type==="QUARTERLY"?"PARTNER_QUARTERLY_V1":"PARTNER_MONTHLY_V1"); };
+MOCK.admin_accountingListExports=function(){ return _mAccExports; };
+MOCK.admin_accountingApproveExport=function(id){ var e=_mAccExports.find(function(x){return x.export_id===id;}); if(e){ e.status="APPROVED"; } return true; };
+MOCK.admin_accountingPostSettlements=function(){ return { settlements:2 }; };
 MOCK.admin_accountingListJobs=function(){ return [
   {job_type:"SALES_PARSE",target_id:"IMB-202606-0001",status:"DONE",processed_count:7446,total_count:7446,retry_count:0,last_error:""},
   {job_type:"SALES_MATCH",target_id:"IMB-202606-0001",status:"DONE",processed_count:7446,total_count:7446,retry_count:0,last_error:""}

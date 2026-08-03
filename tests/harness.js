@@ -898,5 +898,65 @@ G.admin_accountingVoidAllocation(run2.allocation_run_id,'テスト取消');
 ok(run2Row().status==='VOID','承認済み（未連携）は取消可能→VOID');
 ok(dlLedger().every(r=>r.allocation_status==='PENDING'),'取消で販売行を未配分へ戻す');
 
+// ============ 経理連携 P3：銀行照合・出力・清算連携 ============
+// 56. 三菱UFJ銀行取込＋照合候補（§7.4/§6.4・受入18.2-3/6）
+const invU=rows(OPS,'Invoices').find(v=>['ISSUED','UNPAID','PARTIALLY_PAID'].indexOf(String(v.status))>=0&&Number(v.balance_amount)>0);
+const mufgCsv=['1,20260731,ヘッダ行,,,,',
+  '2,2026-07-31,振込,ピクシブ（カ,0,485,100485',
+  '2,2026-07-28,振込,カ）エイシス,0,1157,101642',
+  '2,2026-07-27,振込,ヤマダタロウ,0,'+invU.balance_amount+',999999',
+  '9,合計,3,,,,'].join('\n');
+const bkRes=G.admin_accountingUploadBankFile({bankCode:'MUFG',fileName:'三菱UFJ銀行_入金明細_20260731.csv'},Buffer.from(mufgCsv,'utf8').toString('base64'));
+ok(bkRes.rows===3,'MUFG: レコード種別判定で取引行のみ3件登録');
+let dupBank=false; try{ G.admin_accountingUploadBankFile({fileName:'x.csv'},Buffer.from(mufgCsv,'utf8').toString('base64')); }catch(e){ dupBank=/取込済み/.test(String(e.message)); }
+ok(dupBank,'銀行明細の二重取込を拒否');
+const sug=G.admin_accountingSuggestReconciliations('');
+const boothSug=sug.find(s=>s.target_type==='PLATFORM_BATCH'&&s.target_id===upRes.import_batch_id);
+ok(boothSug&&boothSug.candidates.some(c=>c.exact&&Number(c.credit_amount)===485),'ピクシブ入金をBOOTH対象月の候補として提示（名義＋金額一致）');
+ok(sug.some(s=>s.target_type==='PLATFORM_BATCH'&&s.target_id===dlUp.import_batch_id&&s.candidates.some(c=>Number(c.credit_amount)===1157)),'エイシス入金1,157円をDLsite候補として提示（受入18.2-6）');
+const invSug=sug.find(s=>s.target_type==='INVOICE'&&s.target_id===invU.invoice_id);
+ok(!!invSug,'未入金請求への直接入金候補を提示（自動確定しない）');
+
+// 57. 照合の確定・入金連携・取消
+const boothTx=boothSug.candidates.find(c=>c.exact).bank_transaction_id;
+const conf=G.admin_accountingConfirmReconciliation({target_type:'PLATFORM_BATCH',target_id:upRes.import_batch_id,
+  expected_amount:485,lines:[{bank_transaction_id:boothTx,applied_amount:485}],note:'BOOTH 2026-06'});
+ok(conf.difference_amount===0,'プラットフォーム入金の照合確定（差額0）');
+ok(G.readTableBulk_(ACCY,'Bank_Transactions').find(t=>t.bank_transaction_id===boothTx).match_status==='MATCHED','全額充当でMATCHED');
+G.admin_accountingConfirmReconciliation({target_type:'INVOICE',target_id:invU.invoice_id,
+  expected_amount:Number(invU.balance_amount),recordPayment:true,
+  lines:[{bank_transaction_id:invSug.candidates[0].bank_transaction_id,applied_amount:Number(invU.balance_amount)}]});
+ok(rows(OPS,'Invoices').find(v=>v.invoice_id===invU.invoice_id).status==='PAID','直接入金の照合→入金記録連携でPAID（参照番号=入金明細ID）');
+G.admin_accountingVoidReconciliation(conf.reconciliation_id,'テスト取消');
+ok(G.readTableBulk_(ACCY,'Bank_Transactions').find(t=>t.bank_transaction_id===boothTx).match_status==='UNMATCHED','照合取消で入金明細をUNMATCHEDへ戻す');
+
+// 58. 経理向け出力（§6.5：LEGACY_V3_07・版管理）
+const ex1=G.admin_accountingGenerateExport(runRes.allocation_run_id,'LEGACY_V3_07');
+const exRow=()=>G.readTableBulk_(ACCY,'Accounting_Exports').find(e=>e.export_id===ex1.export_id);
+ok(exRow().status==='GENERATED'&&exRow().drive_file_id&&exRow().file_hash,'旧形式（LEGACY_V3_07）生成＋ハッシュ記録');
+const legacySs=G.SpreadsheetApp.openById(exRow().drive_file_id);
+ok(!!(legacySs.getSheetByName('説明文')&&legacySs.getSheetByName('各社への支払')&&legacySs.getSheetByName('明細')&&legacySs.getSheetByName('BOOTH')&&legacySs.getSheetByName('複数原作明細①')&&legacySs.getSheetByName('原作マスタ')),'旧形式のシート構成（説明文/各社への支払/明細/チャネル別/複数原作/原作マスタ）');
+ok(G.readRows_(legacySs,'各社への支払').reduce((s,r)=>s+Number(r['配分額']||0),0)===485,'「各社への支払」合計＝485円（原票と一致）');
+const ex2=G.admin_accountingGenerateExport(runRes.allocation_run_id,'CONSOLIDATED_V1');
+const consSs=G.SpreadsheetApp.openById(G.readTableBulk_(ACCY,'Accounting_Exports').find(e=>e.export_id===ex2.export_id).drive_file_id);
+ok(!!(consSs.getSheetByName('サマリー')&&consSs.getSheetByName('入金照合')&&consSs.getSheetByName('支払先別集計')&&consSs.getSheetByName('未解決・警告')),'統合版（CONSOLIDATED_V1）のシート構成');
+const ex3=G.admin_accountingGenerateExport(runRes.allocation_run_id,'LEGACY_V3_07');
+ok(Number(G.readTableBulk_(ACCY,'Accounting_Exports').find(e=>e.export_id===ex3.export_id).version)===2,'再生成はversion増加（上書きしない）');
+
+// 59. 権利者別ファイル＋ZIP（§6.5）
+const px=G.admin_accountingGeneratePartnerExports(runRes.allocation_run_id,'MONTHLY');
+const pxRow=G.readTableBulk_(ACCY,'Accounting_Exports').find(e=>e.export_id===px.export_id);
+ok(pxRow.status==='GENERATED'&&pxRow.zip_file_id,'権利者別月次ファイル生成＋全権利者ZIP');
+
+// 60. 既存清算への連携・二重計上防止（§12.3・受入18.2-14）
+G.admin_accountingApproveExport(ex1.export_id);
+const post=G.admin_accountingPostSettlements(runRes.allocation_run_id);
+ok(post.settlements===6,'権利者別（6者）でSettlements作成');
+const postedDets=rows(OPS,'Settlement_Details').filter(d=>d.source_type==='ACCOUNTING_ALLOCATION'&&d.source_id===runRes.allocation_run_id);
+ok(postedDets.length>0&&postedDets.reduce((s,d)=>s+Number(d.amount),0)===485,'Settlement_Detailsへ確定額485円をsource付き連携');
+let dupPost=false; try{ G.admin_accountingPostSettlements(runRes.allocation_run_id); }catch(e){ dupPost=/二重計上/.test(String(e.message)); }
+ok(dupPost,'同一runの二重連携を拒否（受入18.2-14）');
+ok(runRow().status==='POSTED'&&batchRow().status==='POSTED','run・対象バッチがPOSTED');
+
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

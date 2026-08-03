@@ -1382,7 +1382,7 @@ DRIVE_ROOT/
 | Accounting GAS④ | **実装済（P0）**：`apps/accounting/`＋build配布・分離検査・`push:accounting`。一括I/O（`readTableBulk_`等）・`Accounting_Jobs`（カーソル分割・排他・回復・バックオフ）・Drive原票保存＋SHA-256二重取込防止 |
 | 原票パーサー | **実装済（P1）**：`60_sales_import.gs`（BOOTH／TALTO／DLsiteパーサー・ヘッダ検証・負数拒否・20MB上限・プレビュー・SALES_PARSEジョブ）＋`62_sales_match.gs`（正規化・License_Identifiers／Sales_Work_Mappings／Legacy_Work_Codes優先突合・未解決集約・マッピング保存・再突合）。admin.htmlに「経理連携」タブ（原票取込・未解決データ・処理ジョブ） |
 | 配分 | **実装済（P2）**：`64_sales_allocation.gs`（Distribution_Profiles版管理・最大剰余法按分・RATE四捨五入＋RESIDUAL残額・rounding_adjustment・差額0/例外0の承認条件・作成/承認の職務分離＋EMERGENCY_OVERRIDE・VOID）。行単位の手動突合（MANUAL）。admin.html「配分確認」サブタブ |
-| 銀行照合 | 未実装 |
-| 経理出力 | 未実装 |
+| 銀行照合 | **実装済（P3）**：`66_bank_reconciliation.gs`（三菱UFJ CSVレコード種別判定・名義正規化・プラットフォーム/直接入金の候補提示（自動確定なし）・複数対象充当・確定/取消・Invoices入金記録連携）。admin.html「入金照合」サブタブ |
+| 経理出力 | **実装済（P3）**：`68_accounting_export.gs`（LEGACY_V3_07／CONSOLIDATED_V1のSpreadsheet生成・権利者別月次/四半期CSV＋全権利者ZIP・版管理（上書きしない）・ハッシュ/承認記録・Settlements連携＝source_type付き集約＋二重計上拒否）。`Settlement_Details`へ末尾3列追加（SCHEMA_VERSION=3）。admin.html「ファイル出力」サブタブ |
 | CloudSign例外運用 | 未実装 |
-| テスト | P0〜P2分実装済（harness 266件／sec01 30件 全通過） |
+| テスト | P0〜P3分実装済（harness 285件／sec01 30件 全通過） |

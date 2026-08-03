@@ -56,7 +56,7 @@ const SCHEMA_OPS = {
   Payments:             ['payment_id','invoice_id','contract_id','amount','paid_at','method','payment_reference','note','status','recorded_by','void_reason','voided_at','voided_by'],
   Settlements:          ['settlement_id','partner_id','period','amount','status','hold_reason'],
   // 清算明細（FLOW-04/§12.2）：原作・権利者・配分方式・比率を明示
-  Settlement_Details:   ['settlement_detail_id','settlement_id','contract_id','report_id','work_id','partner_id','allocation_scheme','allocation_ratio','rate_snapshot','amount'],
+  Settlement_Details:   ['settlement_detail_id','settlement_id','contract_id','report_id','work_id','partner_id','allocation_scheme','allocation_ratio','rate_snapshot','amount','source_type','source_id','accounting_allocation_detail_id'],
   // 清算ステータスは CONFIRMED を使わず OBJECTION_PERIOD→NO_OBJECTION_RECORDED→FINALIZED
   Settlement_Statements:['statement_id','settlement_id','partner_id','period','type','reg_number_snapshot','status','effective_date','objection_due','pdf_file_id','sheet_id','version','sent_at','finalized_at','cloudsign_document_id','send_attempt_id','send_status','send_error','approved_by','approved_at','objection_note','objection_received_at'],
   Partners:             ['partner_id','name','invoice_reg_number','is_qualified_issuer','bank','contact'],
@@ -225,7 +225,7 @@ function setup_seedSamples_(){
 }
 
 // ---- スキーマ移行（修正設計書v2 V2-003）----
-const SCHEMA_VERSION = 2;   // 列定義を変えたら加算する
+const SCHEMA_VERSION = 3;   // 列定義を変えたら加算する（v3: Settlement_Detailsに経理連携由来列を追加）
 
 /**
  * 既存スプレッドシートへ不足シート・不足列を追加する（既存列の削除・並び替えはしない）。
