@@ -18,3 +18,4 @@ docs/_preview*.png
 # SEC-01: ビルド生成物と実プロジェクトIDはコミットしない（§22.3）
 apps/*/dist/
 apps/*/.clasp.json
+apps/*/.deploy.json

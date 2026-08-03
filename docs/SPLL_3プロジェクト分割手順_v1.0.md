@@ -53,10 +53,36 @@ copy apps\admin\.clasp.json.example    apps\admin\.clasp.json
 ### 2.3 ビルド＆push
 
 ```bash
-npm run push:all        # build → portal/workflow/admin を順に push
+npm run push:all        # build → portal/workflow/admin/accounting を順に push
 ```
 
-個別push：`npm run push:portal` / `push:workflow` / `push:admin`
+個別push：`npm run push:portal` / `push:workflow` / `push:admin` / `push:accounting`
+
+> **注意**：`push` はコードを更新するだけで、公開URL（/exec）には反映されません。
+> 公開URLへの反映は次の 2.4 の `deploy` コマンドを使うか、GASエディタで「デプロイ→編集→新バージョン」。
+
+### 2.4 デプロイ（push＋公開URLへ新バージョン反映を1コマンドで）
+
+初回のみ、各アプリのデプロイIDを登録します：
+
+1. GASで一度だけ手動で「ウェブアプリ」としてデプロイ（公開範囲は§3の表どおり）
+2. デプロイIDを確認：`cd apps\portal && npx clasp deployments`（`AKfycb...` で始まる行。`@HEAD` ではない方）
+3. `apps/portal/.deploy.json` を作成（Gitにはコミットされません）：
+
+```json
+{ "deploymentId": "AKfycb..." }
+```
+
+（workflow / admin / accounting も同様）
+
+以後は次の1コマンドで build → push → 公開URLへ新バージョン反映まで完了します（URLは変わりません）：
+
+```bash
+npm run deploy:all          # 4プロジェクトすべて
+npm run deploy:portal       # 個別（deploy:workflow / deploy:admin / deploy:accounting）
+```
+
+バージョンメモは自動で「日時＋gitハッシュ」が入ります（`node scripts/deploy.js portal "任意メモ"` で指定も可）。
 
 ## 3. プロジェクト別の初期設定
 
