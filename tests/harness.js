@@ -1064,5 +1064,15 @@ ok(autoLedger.length===2&&autoLedger.every(r=>r.match_status==='MATCHED'),'新�
 const autoRes=G.readTableBulk_(ACCY,'Sales_Match_Results').filter(r=>r.status==='CONFIRMED'&&autoLedger.some(l=>l.sales_row_id===r.sales_row_id));
 ok(autoRes.length===2&&autoRes.every(r=>r.contract_id===cP4.contract_id&&r.work_id==='WRK-BKK00019'),'契約ID・申込番号（SPLL-表記含む）→契約スナップショット原作へ解決');
 
+// 71. 配分プロファイルの一括作成（Works_Masterのpartner_idから）
+G.appendRow_(MAS,'Works_Master',{work_id:'WRK-SEED01',work_name:'一括投入テスト作品',publish_status:'DRAFT',partner_id:'PRT-TEST'});
+G.appendRow_(MAS,'Works_Master',{work_id:'WRK-SEED02',work_name:'複数権利者テスト',publish_status:'DRAFT',partner_id:'PRT-A／PRT-B'});
+const seedRes=G.admin_accountingSeedProfilesFromWorks();
+ok(seedRes.created===1,'単一権利者の原作にRESIDUAL100%プロファイルを一括作成（複数権利者・作成済みはスキップ）');
+const seedRes2=G.admin_accountingSeedProfilesFromWorks();
+ok(seedRes2.created===0,'再実行は作成済みをスキップ（冪等）');
+ok(G.admin_accountingListDistributionProfiles().some(p=>p.work_id==='WRK-SEED01'&&p.lines.length===1&&p.lines[0].calculation_type==='RESIDUAL'&&p.lines[0].partner_id==='PRT-TEST'),
+  '作成されたプロファイルはpartner_idへのRESIDUAL 1行');
+
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

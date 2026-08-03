@@ -358,3 +358,25 @@ function admin_accountingVoidAllocation(runId, reason){
   logEvent_('allocation_run', runId, actor.email, { status: run.status }, { status: 'VOID', reason: String(reason) });
   return true;
 }
+
+/**
+ * Works_Master の partner_id（単一権利者）から RESIDUAL 100% の配分プロファイルを一括作成。
+ * 既にACTIVEプロファイルがある原作・partner_id空欄（複数権利者等）はスキップ。冪等。
+ */
+function admin_accountingSeedProfilesFromWorks(){
+  const actor = requireRole_(['ACCOUNTING','LEGAL_ADMIN']);
+  const existing = {};
+  readTableBulk_(ssAccMaster_(), 'Distribution_Profiles').forEach(function(p){
+    if(p.status === 'ACTIVE') existing[p.work_id] = true; });
+  let created = 0, skipped = 0;
+  readRows_(ssMaster_(), 'Works_Master').forEach(function(w){
+    const pid = String(w.partner_id || '').trim();
+    if(!w.work_id || !pid || /[\/／]/.test(pid) || existing[w.work_id]){ skipped++; return; }
+    admin_accountingSaveDistributionProfile({ work_id: w.work_id,
+      profile_name: String(w.work_name || w.work_id) + ' 標準配分',
+      lines: [{ partner_id: pid, calculation_type: 'RESIDUAL' }] });
+    created++;
+  });
+  logEvent_('distribution_profile', 'seedFromWorks', actor.email, null, { created: created, skipped: skipped });
+  return { created: created, skipped: skipped };
+}
