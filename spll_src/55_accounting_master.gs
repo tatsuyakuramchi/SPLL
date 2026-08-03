@@ -228,6 +228,14 @@ function seedAccountingMaster_(year, yearId){
   return true;
 }
 
+/** 販売チャネル一覧（管理画面用）。 */
+function admin_accountingListChannels(){ requireRole_([]);
+  return readTableBulk_(ssAccMaster_(), 'Sales_Channels')
+    .filter(function(c){ return String(c.active) !== 'false'; })
+    .map(function(c){ return { channel_id: c.channel_id, channel_name: c.channel_name,
+      parser_type: c.parser_type, default_encoding: c.default_encoding, statement_basis: c.statement_basis }; });
+}
+
 // ============================================================
 // Drive原票保存（§7.5/§15/§16）
 // ============================================================

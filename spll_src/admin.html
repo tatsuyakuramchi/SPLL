@@ -107,6 +107,7 @@
   <div class="tab" data-v="review">作品審査管理</div>
   <div class="tab" data-v="contract">契約管理</div>
   <div class="tab" data-v="pay">入金・清算</div>
+  <div class="tab" data-v="acc">経理連携</div>
   <div class="tab" data-v="settings">設定</div>
 </div></div>
 
@@ -190,6 +191,77 @@
       <table><thead><tr><th>期</th><th>パートナー</th><th>配分額</th><th>計算書状態</th><th>異議期限</th><th>操作</th></tr></thead><tbody id="settle-tbody"></tbody></table>
     </div>
     <div class="note">パートナー清算書は仕入明細書方式。承認後CloudSignでみなし合意付き送信し、発効日から1ヶ月で確認とみなして支払対象化します。既発生の配分は保護されます。</div>
+  </section>
+
+  <!-- ACCOUNTING（経理連携・SPLL-SYS-AD-001） -->
+  <section class="view" id="v-acc">
+    <h2>経理連携</h2>
+    <p class="sub">BOOTH・TALTO・DLsite・銀行の原票を取り込み、SPLL番号・原作・権利者へ突合して配分・照合・帳票生成を行います（経理専用台帳）。</p>
+    <div class="subtabs">
+      <div class="acctab subtab on" data-a="import">原票取込</div>
+      <div class="acctab subtab" data-a="unmatched">未解決データ</div>
+      <div class="acctab subtab" data-a="alloc">配分確認</div>
+      <div class="acctab subtab" data-a="bank">入金照合</div>
+      <div class="acctab subtab" data-a="export">ファイル出力</div>
+      <div class="acctab subtab" data-a="jobs">処理ジョブ</div>
+    </div>
+
+    <!-- 原票取込 -->
+    <div class="accpane setpane on" id="a-import">
+      <div class="panel">
+        <div class="ph"><h3>原票CSVのアップロード</h3><span class="hint">原本はDriveへ保存（SHA-256・同一ファイルの二重取込は拒否）</span></div>
+        <div class="pbody">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+            <label style="font-size:12px;">対象月<br><input type="month" id="acc-period" style="padding:7px;border:1px solid var(--line);border-radius:7px;"></label>
+            <label style="font-size:12px;">販売チャネル<br><select id="acc-channel" style="padding:8px;border:1px solid var(--line);border-radius:7px;"></select></label>
+            <label style="font-size:12px;">CSVファイル<br><input type="file" id="acc-file" accept=".csv,text/csv"></label>
+            <button class="btn p" onclick="accUpload()">アップロード</button>
+          </div>
+          <div id="acc-preview" style="display:none;margin-top:14px;">
+            <div class="note" id="acc-preview-sum"></div>
+            <table><thead><tr><th>行</th><th>商品名</th><th>SPLL番号</th><th>数量</th><th>許諾料</th></tr></thead><tbody id="acc-preview-tbody"></tbody></table>
+            <div style="margin-top:10px;"><button class="btn p" id="acc-start-btn" onclick="accStartImport()">この内容で取込を開始</button>
+            <span class="hint">取込はバックグラウンドジョブで実行されます（大量明細対応）</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="ph"><h3>取込バッチ一覧</h3><button class="btn" onclick="loadAccImports()">更新</button></div>
+        <table><thead><tr><th>バッチ</th><th>チャネル</th><th>対象月</th><th>ファイル</th><th>状態</th><th>行数(原票/正規化)</th><th>許諾料合計</th><th>操作</th></tr></thead><tbody id="acc-import-tbody"></tbody></table>
+      </div>
+      <div class="note">受入基準：原票の行数・許諾料合計が明細一覧の表示と一致することを必ず確認してください（差異がある場合は取込を開始しない）。</div>
+    </div>
+
+    <!-- 未解決データ -->
+    <div class="accpane setpane" id="a-unmatched">
+      <div class="panel">
+        <div class="ph"><h3>未解決の販売明細（SPLL番号×商品で集約）</h3><button class="btn" onclick="loadAccUnmatched()">更新</button></div>
+        <table><thead><tr><th>SPLL番号</th><th>チャネル</th><th>商品</th><th>件数</th><th>許諾料合計</th><th>状態</th><th>操作</th></tr></thead><tbody id="acc-unmatched-tbody"></tbody></table>
+      </div>
+      <div class="note">突合の優先順位：商品別マッピング → SPLL番号マッピング → 現行契約（単一原作は自動）→ 旧原作コード。商品名の曖昧一致は候補提示のみで自動確定しません。原作・比率を設定するとマッピングルールとして保存され、再突合に適用されます。</div>
+    </div>
+
+    <!-- 配分確認（P2で実装） -->
+    <div class="accpane setpane" id="a-alloc">
+      <div class="panel"><div class="ph"><h3>配分確認</h3></div><div class="pbody"><p class="setnote" id="acc-alloc-note">配分機能はP2で実装予定です。</p></div></div>
+    </div>
+    <!-- 入金照合（P3で実装） -->
+    <div class="accpane setpane" id="a-bank">
+      <div class="panel"><div class="ph"><h3>入金照合</h3></div><div class="pbody"><p class="setnote" id="acc-bank-note">銀行明細照合はP3で実装予定です。</p></div></div>
+    </div>
+    <!-- ファイル出力（P3で実装） -->
+    <div class="accpane setpane" id="a-export">
+      <div class="panel"><div class="ph"><h3>ファイル出力</h3></div><div class="pbody"><p class="setnote" id="acc-export-note">経理・権利者向けファイル出力はP3で実装予定です。</p></div></div>
+    </div>
+
+    <!-- 処理ジョブ -->
+    <div class="accpane setpane" id="a-jobs">
+      <div class="panel">
+        <div class="ph"><h3>経理ジョブ（取込・突合・配分・出力）</h3><button class="btn" onclick="loadAccJobs()">更新</button></div>
+        <table><thead><tr><th>種別</th><th>対象</th><th>状態</th><th>進捗</th><th>再試行</th><th>エラー</th></tr></thead><tbody id="acc-jobs-tbody"></tbody></table>
+      </div>
+      <div class="note">失敗ジョブは自動でバックオフ再試行されます（上限到達でERROR）。RUNNINGのまま止まったジョブは自動回復されます。</div>
+    </div>
   </section>
 
   <!-- SETTINGS -->
@@ -438,13 +510,24 @@ document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{
   else if(v==="review") loadReview();
   else if(v==="contract") loadContract();
   else if(v==="pay") loadPay();
+  else if(v==="acc") loadAcc();
   window.scrollTo(0,0);
 });
-// 設定内サブタブ
+// 設定内サブタブ（#v-settings 内のみ）
 document.querySelectorAll(".subtab").forEach(s=>s.onclick=()=>{
-  document.querySelectorAll(".subtab").forEach(x=>x.classList.remove("on"));
-  document.querySelectorAll(".setpane").forEach(x=>x.classList.remove("on"));
+  if(!s.dataset.p) return;
+  document.querySelectorAll(".subtab").forEach(x=>{ if(x.dataset.p) x.classList.remove("on"); });
+  document.querySelectorAll("#v-settings .setpane").forEach(x=>x.classList.remove("on"));
   s.classList.add("on"); document.getElementById("p-"+s.dataset.p).classList.add("on");
+});
+// 経理連携サブタブ（#v-acc 内のみ）
+document.querySelectorAll(".acctab").forEach(s=>s.onclick=()=>{
+  document.querySelectorAll(".acctab").forEach(x=>x.classList.remove("on"));
+  document.querySelectorAll("#v-acc .accpane").forEach(x=>x.classList.remove("on"));
+  s.classList.add("on"); document.getElementById("a-"+s.dataset.a).classList.add("on");
+  if(s.dataset.a==="import") loadAccImports();
+  else if(s.dataset.a==="unmatched") loadAccUnmatched();
+  else if(s.dataset.a==="jobs") loadAccJobs();
 });
 
 // ===== GAS呼び出しラッパ（スタンドアロン時はMOCKにフォールバック） =====
@@ -1066,6 +1149,135 @@ function sendStatements(){
   });
 }
 
+// ===== 経理連携（SPLL-SYS-AD-001） =====
+var accUploadedBatch=null;
+function loadAcc(){
+  call("admin_accountingListChannels",[],function(chs){
+    var sel=$("acc-channel"); sel.innerHTML="";
+    (chs||[]).filter(function(c){ return c.parser_type; }).forEach(function(c){
+      var o=document.createElement("option"); o.value=c.channel_id; o.textContent=c.channel_name+"（"+c.channel_id+"）"; sel.appendChild(o);
+    });
+  });
+  loadAccImports();
+}
+function accUpload(){
+  var period=$("acc-period").value, ch=$("acc-channel").value, f=$("acc-file").files[0];
+  if(!period){ toast("対象月を選択してください", true); return; }
+  if(!f){ toast("CSVファイルを選択してください", true); return; }
+  if(f.size>20*1024*1024){ toast("ファイルが20MBを超えています", true); return; }
+  var reader=new FileReader();
+  reader.onload=function(){
+    var b64=String(reader.result).split(",")[1]||"";
+    call("admin_accountingUploadSalesFile",[{channelId:ch,salesPeriod:period,fileName:f.name},b64],function(res){
+      accUploadedBatch=res.import_batch_id;
+      toast("アップロードしました（原本保存済み）。プレビューを確認してください");
+      call("admin_accountingPreviewImport",[res.import_batch_id],function(pv){ renderAccPreview(pv); loadAccImports(); });
+    });
+  };
+  reader.readAsDataURL(f);
+}
+function renderAccPreview(pv){
+  if(!pv) return;
+  $("acc-preview").style.display="";
+  $("acc-preview-sum").innerHTML="原票 <b>"+esc(pv.source_row_count)+"件</b> ／ 許諾料合計 <b>"+Number(pv.source_total_amount||0).toLocaleString()+"円</b>"+
+    (pv.warnings&&pv.warnings.length?'<br><span style="color:var(--fail)">警告: '+esc(pv.warnings.join(" / "))+"</span>":"");
+  var tb=$("acc-preview-tbody"); tb.innerHTML="";
+  (pv.preview||[]).forEach(function(r){
+    var tr=document.createElement("tr");
+    tr.appendChild(td(esc(r.source_row_no))); tr.appendChild(td(esc(r.product_name)));
+    tr.appendChild(td('<span class="id">'+esc(r.external_license_ref||"—")+'</span>'));
+    tr.appendChild(td(esc(r.quantity))); tr.appendChild(td(Number(r.license_fee_amount||0).toLocaleString()));
+    tb.appendChild(tr);
+  });
+}
+function accStartImport(){
+  if(!accUploadedBatch){ toast("先にアップロードしてください", true); return; }
+  call("admin_accountingStartImport",[accUploadedBatch],function(){
+    toast("取込ジョブを開始しました（完了後に自動で突合されます）");
+    $("acc-preview").style.display="none"; accUploadedBatch=null; loadAccImports();
+  });
+}
+function accBatchPill(st){
+  var m={UPLOADED:{cls:"wait",label:"未取込"},PARSING:{cls:"review",label:"取込中"},MATCHING:{cls:"review",label:"突合中"},
+    REVIEW_REQUIRED:{cls:"fail",label:"要解決"},READY:{cls:"pass",label:"突合済"},ALLOCATED:{cls:"pass",label:"配分済"},
+    APPROVED:{cls:"pass",label:"承認済"},POSTED:{cls:"pass",label:"計上済"},EXPORTED:{cls:"pass",label:"出力済"},
+    SUPERSEDED:{cls:"wait",label:"差替済"},ERROR:{cls:"fail",label:"エラー"}};
+  return m[String(st)]||{cls:"wait",label:String(st)||"—"};
+}
+function loadAccImports(){
+  call("admin_accountingListImports",[{}],function(rows){
+    var tb=$("acc-import-tbody"); tb.innerHTML=""; rows=rows||[];
+    if(!rows.length){ emptyRow(tb,8,"取込バッチがありません"); return; }
+    rows.forEach(function(b){
+      var tr=document.createElement("tr");
+      tr.appendChild(td('<span class="id">'+esc(b.import_batch_id)+'</span>'));
+      tr.appendChild(td(esc(b.channel_id)));
+      tr.appendChild(td(esc(b.sales_period)));
+      tr.appendChild(td(esc(b.file_name)));
+      tr.appendChild(td(pill(accBatchPill(b.status))+(b.error_summary?'<br><span style="font-size:10px;color:var(--fail)">'+esc(b.error_summary)+'</span>':"")));
+      tr.appendChild(td(esc((b.source_row_count||"—")+" / "+(b.normalized_row_count||"—"))));
+      tr.appendChild(td(b.normalized_total_amount!==""&&b.normalized_total_amount!==undefined?Number(b.normalized_total_amount||0).toLocaleString():"—"));
+      var act=document.createElement("td"); act.className="actions";
+      if(b.status==="UPLOADED") act.appendChild(mkBtn("取込開始","btn p",function(){ accUploadedBatch=b.import_batch_id; accStartImport(); }));
+      if(b.status==="REVIEW_REQUIRED"||b.status==="READY") act.appendChild(mkBtn("再突合","btn",function(){ call("admin_accountingRematch",[b.import_batch_id],function(){ toast("再突合を開始しました"); loadAccImports(); }); }));
+      tr.appendChild(act); tb.appendChild(tr);
+    });
+  });
+}
+function loadAccUnmatched(){
+  call("admin_accountingListUnmatched",[{}],function(rows){
+    var tb=$("acc-unmatched-tbody"); tb.innerHTML=""; rows=rows||[];
+    if(!rows.length){ emptyRow(tb,7,"未解決の明細はありません"); return; }
+    rows.forEach(function(g){
+      var tr=document.createElement("tr");
+      tr.appendChild(td('<span class="id">'+esc(g.external_license_ref||"（番号なし）")+'</span>'));
+      tr.appendChild(td(esc(g.channel_id)));
+      tr.appendChild(td(esc((g.source_product_id?g.source_product_id+" ":"")+(g.product_name||""))));
+      tr.appendChild(td(esc(g.row_count)));
+      tr.appendChild(td(Number(g.total_amount||0).toLocaleString()));
+      tr.appendChild(td(pill(g.match_status==="UNMATCHED"?{cls:"fail",label:"番号不明"}:{cls:"review",label:"要確認"})));
+      var act=document.createElement("td"); act.className="actions";
+      act.appendChild(mkBtn("契約に紐付け","btn",function(){
+        var cid=prompt("紐付ける現行契約ID（旧案件で契約が無い場合は空欄のまま原作設定へ）:","");
+        if(cid===null) return;
+        call("admin_accountingLinkLicenseRef",[g.external_license_ref,cid||""],function(){ toast("SPLL番号を登録しました。原作が複数の契約は続けて原作・比率を設定してください"); });
+      }));
+      act.appendChild(mkBtn("原作を設定","btn p",function(){ accSetWorks(g); }));
+      tr.appendChild(act); tb.appendChild(tr);
+    });
+  });
+}
+function accSetWorks(g){
+  var input=prompt("原作IDを入力（複数は「WRK-A:2,WRK-B:1」の形式で比率指定）:","");
+  if(!input) return;
+  var works=input.split(",").map(function(s){ var p=s.split(":"); return { work_id:p[0].trim(), weight:Number(p[1]||1) }; }).filter(function(w){ return w.work_id; });
+  if(!works.length){ toast("原作IDを確認してください", true); return; }
+  var applyProduct=g.source_product_id&&confirm("この商品（"+g.source_product_id+"）だけに適用しますか？\nOK=商品単位／キャンセル=SPLL番号全体");
+  call("admin_accountingSaveMapping",[{
+    external_license_ref:g.external_license_ref, channel_id:applyProduct?g.channel_id:"",
+    source_product_id:applyProduct?g.source_product_id:"", match_scope:applyProduct?"LICENSE_PRODUCT_ID":"LICENSE_ONLY",
+    works:works }],function(){
+      toast("マッピングを保存しました。再突合で適用されます");
+    });
+}
+function loadAccJobs(){
+  call("admin_accountingListJobs",[{}],function(rows){
+    var tb=$("acc-jobs-tbody"); tb.innerHTML=""; rows=rows||[];
+    if(!rows.length){ emptyRow(tb,6,"ジョブはありません"); return; }
+    var m={QUEUED:{cls:"wait",label:"待機"},RUNNING:{cls:"review",label:"実行中"},DONE:{cls:"pass",label:"完了"},RETRY_WAIT:{cls:"review",label:"再試行待ち"},ERROR:{cls:"fail",label:"エラー"}};
+    rows.forEach(function(j){
+      var tr=document.createElement("tr");
+      tr.appendChild(td(esc(j.job_type)));
+      tr.appendChild(td('<span class="id">'+esc(j.target_id||"—")+'</span>'));
+      tr.appendChild(td(pill(m[String(j.status)]||{cls:"wait",label:String(j.status)})));
+      tr.appendChild(td(esc((j.processed_count||0)+(j.total_count?" / "+j.total_count:""))));
+      tr.appendChild(td(esc(j.retry_count||0)));
+      tr.appendChild(td(esc(j.last_error||"—")));
+      tb.appendChild(tr);
+    });
+  });
+}
+
 // ===== 業務タブ用モック（スタンドアロン表示） =====
 MOCK.admin_dashboard=function(){ return { kpis:{reviewPending:7,highRisk:2,unscreened:15,signing:4,unpaid:6,reporting:9}, alerts:[
   {kind:"審査",target:"SUB-202606-0042",work:"新クトゥルフ神話TRPG",status:"HIGH_RISK",cls:"fail",at:"2026-06-27"},
@@ -1101,6 +1313,36 @@ MOCK.admin_approveCertChange=function(requestId){ _mCertReqs=_mCertReqs.filter(f
 MOCK.admin_listCertChangeRequests=function(){ return _mCertReqs; };
 MOCK.admin_revokeCert=function(c){ return MOCK.admin_requestCertChange(c,"REVOKED","MANUAL_REVOKE","失効申請"); };
 MOCK.admin_reactivateCert=function(c){ return MOCK.admin_requestCertChange(c,"ACTIVE","REACTIVATE","再有効化の申請"); };
+// 経理連携モック
+var _mAccBatches=[
+  {import_batch_id:"IMB-202606-0001",channel_id:"BOOTH",sales_period:"2026-06",file_name:"ピクシブ_Booth_明細書_2026.6.csv",status:"REVIEW_REQUIRED",source_row_count:7446,normalized_row_count:7446,normalized_total_amount:4609606,imported_by:"acct@example.com",imported_at:"2026-07-05 10:12",error_summary:""},
+  {import_batch_id:"IMB-202606-0002",channel_id:"DLSITE",sales_period:"2026-05",file_name:"エイシス_DLsite_TRPG集計2026年05月.csv",status:"READY",source_row_count:17,normalized_row_count:17,normalized_total_amount:1157,imported_by:"acct@example.com",imported_at:"2026-07-05 10:20",error_summary:""}
+];
+MOCK.admin_accountingListChannels=function(){ return [
+  {channel_id:"BOOTH",channel_name:"BOOTH（ピクシブ）",parser_type:"BOOTH"},
+  {channel_id:"TALTO",channel_name:"TALTO（ココフォリア）",parser_type:"TALTO"},
+  {channel_id:"DLSITE",channel_name:"DLsite（エイシス）",parser_type:"DLSITE"}
+]; };
+MOCK.admin_accountingUploadSalesFile=function(meta){ var id="IMB-MOCK-"+(_mAccBatches.length+1);
+  _mAccBatches.unshift({import_batch_id:id,channel_id:meta.channelId,sales_period:meta.salesPeriod,file_name:meta.fileName,status:"UPLOADED",source_row_count:"",normalized_row_count:"",normalized_total_amount:"",imported_by:"you",imported_at:"now",error_summary:""});
+  return { import_batch_id:id, file_hash:"mock-hash" }; };
+MOCK.admin_accountingPreviewImport=function(id){ return { import_batch_id:id, source_row_count:3, source_total_amount:1850,
+  preview:[{source_row_no:2,product_name:"狂気山脈シナリオ集",external_license_ref:"SPLL:E107009",quantity:2,license_fee_amount:600},
+           {source_row_no:3,product_name:"クトゥルフ卓用アイテム",external_license_ref:"SPLL:E107010",quantity:1,license_fee_amount:450},
+           {source_row_no:4,product_name:"インセイン用シナリオ",external_license_ref:"SPLL:E108001",quantity:4,license_fee_amount:800}], warnings:[] }; };
+MOCK.admin_accountingStartImport=function(id){ var b=_mAccBatches.find(function(x){return x.import_batch_id===id;}); if(b) b.status="MATCHING"; return { job_id:"job-mock" }; };
+MOCK.admin_accountingListImports=function(){ return _mAccBatches; };
+MOCK.admin_accountingRematch=function(){ return { job_id:"job-mock-2" }; };
+MOCK.admin_accountingListUnmatched=function(){ return [
+  {external_license_ref:"SPLL:E107009",channel_id:"BOOTH",source_product_id:"1234567",product_name:"狂気山脈 陰謀の分水嶺",row_count:37,total_amount:52400,match_status:"REVIEW_REQUIRED"},
+  {external_license_ref:"",channel_id:"BOOTH",source_product_id:"9876543",product_name:"名称未設定の商品",row_count:2,total_amount:900,match_status:"UNMATCHED"}
+]; };
+MOCK.admin_accountingLinkLicenseRef=function(){ return { license_identifier_id:"LID-mock", updated:false }; };
+MOCK.admin_accountingSaveMapping=function(){ return { mapping_id:"MAP-mock" }; };
+MOCK.admin_accountingListJobs=function(){ return [
+  {job_type:"SALES_PARSE",target_id:"IMB-202606-0001",status:"DONE",processed_count:7446,total_count:7446,retry_count:0,last_error:""},
+  {job_type:"SALES_MATCH",target_id:"IMB-202606-0001",status:"DONE",processed_count:7446,total_count:7446,retry_count:0,last_error:""}
+]; };
 MOCK.admin_listPayments=function(){ return [
   {invoice_id:"INV-202606-0001",contract_id:"CTR-202606-0017",work:"新クトゥルフ神話TRPG",amount:"売上の10％",status:"入金待ち",paid_at:""},
   {invoice_id:"INV-202606-0002",contract_id:"CTR-202606-0011",work:"インセイン",amount:"16,500円",status:"入金済",paid_at:"2026-06-24"}

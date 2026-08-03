@@ -76,8 +76,9 @@ const Utilities={
   newBlob:function(c,t,n){ return Blob(c,t,n); },
   base64Encode:function(x){ if(Array.isArray(x)) return Buffer.from(x).toString('base64'); return Buffer.from(String(x),'utf8').toString('base64'); },
   base64Decode:function(s){ return Array.from(Buffer.from(String(s),'base64')); },
-  computeDigest:function(alg,val){ // deterministic: char codes
-    const s=String(val); const out=[]; for(let i=0;i<Math.min(s.length,32);i++) out.push(s.charCodeAt(i)%256); while(out.length<32)out.push(0); return out; },
+  computeDigest:function(alg,val){ const crypto=require('crypto');
+    const buf=Array.isArray(val)?Buffer.from(val):Buffer.from(String(val),'utf8');
+    return Array.from(crypto.createHash('sha256').update(buf).digest()); },
   computeHmacSignature:function(a,b,c){ return Array.from(Buffer.from(b+c).slice(0,20)); },
   computeHmacSha256Signature:function(payload,secret){ const crypto=require('crypto'); return Array.from(crypto.createHmac('sha256',String(secret)).update(String(payload)).digest()); },
   base64EncodeWebSafe:function(x){ const b=Array.isArray(x)?Buffer.from(x):Buffer.from(String(x),'utf8'); return b.toString('base64').replace(/\+/g,'-').replace(/\//g,'_'); },
@@ -751,6 +752,71 @@ ok(rows(ACCM,'Accounting_Jobs').find(x=>x.job_id===accJid3).status==='DONE','停
 let badType=false; try{ G.enqueueAccountingJob_('NOT_A_TYPE','x',{}); }catch(e){ badType=/不正なジョブ種別/.test(String(e.message)); }
 ok(badType,'不正なジョブ種別は拒否');
 G.accJobSalesParse_=realSalesParse;
+
+// ============ 経理連携 P1：販売原票取込・突合 ============
+// 47. パーサー単体（§7）
+const taltoText='集計期間,2025/12/01-2025/12/31\n総額,4591\n\n許諾番号,プロジェクトID,作品名,販売数,販売額計,売上計,販売許諾料小計\nSPLL-T0001,PJ-1,作品A,3,3000,2400,300\nSPLL-T0002,PJ-2,作品B,1,"1,000",800,100';
+const taltoRes=G.parseSalesFile_(taltoText,{parser_type:'TALTO',channel_id:'TALTO',sales_period:'2025-12'});
+ok(taltoRes.rows.length===2 && taltoRes.source_total_amount===400,'TALTO: プリアンブル付きCSVを解析（2件・許諾料400円）');
+ok(taltoRes.rows[1].quantity===1 && taltoRes.rows[1].gross_sales_amount===1000,'TALTO: 引用符付き金額を数値化');
+const dlText='DLsite作品ID,作品名,SPLL申請番号,販売本数,ライセンス料合計\nRJ001,作品X,SPLL:E107009,10,657\nRJ002,作品Y,SPLL:E108001,5,500';
+const dlRes=G.parseSalesFile_(dlText,{parser_type:'DLSITE',channel_id:'DLSITE',sales_period:'2026-05'});
+ok(dlRes.rows.length===2 && dlRes.source_total_amount===1157,'DLsite: 2件・許諾料合計1,157円（受入基準の形）');
+let hdrErr=false; try{ G.parseSalesFile_(dlText,{parser_type:'BOOTH',channel_id:'BOOTH',sales_period:'2026-05'}); }catch(e){ hdrErr=/一致しません/.test(String(e.message)); }
+ok(hdrErr,'ヘッダ不一致は取込停止');
+let negAmtErr=false; try{ G.parseSalesFile_('DLsite作品ID,作品名,SPLL申請番号,販売本数,ライセンス料合計\nRJ,X,S,1,-100',{parser_type:'DLSITE'}); }catch(e){ negAmtErr=/負数/.test(String(e.message)); }
+ok(negAmtErr,'負数金額は拒否');
+ok(G.accNormalizeLicenseRef_('ｓｐｌｌ－ e107009 ')==='SPLL-E107009','SPLL番号正規化（全角・空白・大文字）');
+ok(G.accExtractLegacyCode_('E107009')==='107','旧SPLL番号から原作コード抽出（E107009→107）');
+
+// 48. BOOTH取込→突合（License_Identifiers／Legacy_Work_Codes／マッピング）
+G.appendRowsBulk_(ACCM,'Legacy_Work_Codes',[{legacy_code:'107',work_id:'WRK-ARK00012',status:'ACTIVE',updated_by:'t',updated_at:'2026-01-01'}]);
+G.admin_accountingLinkLicenseRef('REF-LINKED-1', unlinkedC.contract_id);   // 単一原作契約へ紐付け
+const boothCsv=['ショップ名,商品番号,商品名,SPLL申請番号,小売価格,数量,BOOST計,売上（税込）,ライセンス料（税込）',
+  'ショップA,P-100,狂気山脈シナリオ,E107009,"1,500",2,0,3000,300',
+  'ショップB,P-200,インセイン本,REF-LINKED-1,1000,1,100,1100,110',
+  'ショップC,P-300,未知の作品,E999001,500,1,0,500,50',
+  'ショップD,P-400,番号なし商品,,500,1,0,500,25'].join('\n');
+const upRes=G.admin_accountingUploadSalesFile({channelId:'BOOTH',salesPeriod:'2026-06',fileName:'ピクシブ_Booth_明細書_2026.6.csv'},Buffer.from(boothCsv,'utf8').toString('base64'));
+ok(upRes.import_batch_id && upRes.file_hash,'BOOTH原票アップロード（原本保存＋ハッシュ）');
+let dupUp=false; try{ G.admin_accountingUploadSalesFile({channelId:'BOOTH',salesPeriod:'2026-06',fileName:'x.csv'},Buffer.from(boothCsv,'utf8').toString('base64')); }catch(e){ dupUp=/取込済み/.test(String(e.message)); }
+ok(dupUp,'同一内容の二重取込を拒否（§18.2-13）');
+const pv=G.admin_accountingPreviewImport(upRes.import_batch_id);
+ok(pv.source_row_count===4 && pv.source_total_amount===485,'プレビュー：原票4件・許諾料合計485円');
+G.admin_accountingStartImport(upRes.import_batch_id);
+let ledger=G.readTableBulk_(ACCY,'Sales_Ledger').filter(r=>r.import_batch_id===upRes.import_batch_id);
+ok(ledger.length===4,'Sales_Ledger へ4行を一括正規化');
+const batchRow=()=>G.readTableBulk_(ACCY,'Sales_Import_Batches').find(b=>b.import_batch_id===upRes.import_batch_id);
+ok(String(batchRow().normalized_total_amount)==='485' && String(batchRow().source_total_amount)==='485','原票合計＝正規化合計（485円）');
+ok(batchRow().status==='REVIEW_REQUIRED','未解決ありでREVIEW_REQUIRED');
+ok(ledger.find(r=>r.external_license_ref==='E107009').match_status==='MATCHED','旧原作コードで自動突合');
+ok(ledger.find(r=>r.external_license_ref==='REF-LINKED-1').match_status==='MATCHED','License_Identifiers→単一原作契約で自動突合');
+ok(ledger.find(r=>r.external_license_ref==='E999001').match_status==='REVIEW_REQUIRED','未知の番号は要確認');
+ok(ledger.find(r=>!r.external_license_ref).match_status==='UNMATCHED','番号なしはUNMATCHED');
+const mres=G.readTableBulk_(ACCY,'Sales_Match_Results');
+ok(mres.some(r=>r.match_method==='LEGACY_CODE'&&r.work_id==='WRK-ARK00012'),'突合結果にLEGACY_CODE記録');
+ok(mres.some(r=>r.match_method==='CONTRACT_SNAPSHOT'&&r.contract_id===unlinkedC.contract_id&&r.work_id==='WRK-BKK00019'),'突合結果にCONTRACT_SNAPSHOT記録');
+
+// 49. 未解決画面→マッピング保存→再突合（§11.4/§12.2）
+const unm=G.admin_accountingListUnmatched({});
+ok(unm.length===2,'未解決2グループ（E999001＋番号なし）');
+G.admin_accountingSaveMapping({external_license_ref:'E999001',match_scope:'LICENSE_ONLY',works:[{work_id:'WRK-ARK00012',weight:2},{work_id:'WRK-BKK00019',weight:1}]});
+let mapErr=false; try{ G.admin_accountingSaveMapping({external_license_ref:'EX',match_scope:'LICENSE_ONLY',works:[{work_id:'WRK-NONE',weight:1}]}); }catch(e){ mapErr=/原作がありません/.test(String(e.message)); }
+ok(mapErr,'存在しない原作のマッピングは拒否');
+G.admin_accountingRematch(upRes.import_batch_id);
+ledger=G.readTableBulk_(ACCY,'Sales_Ledger').filter(r=>r.import_batch_id===upRes.import_batch_id);
+ok(ledger.find(r=>r.external_license_ref==='E999001').match_status==='MATCHED','マッピング適用で解決');
+const multiRes=G.readTableBulk_(ACCY,'Sales_Match_Results').filter(r=>r.sales_row_id===ledger.find(x=>x.external_license_ref==='E999001').sales_row_id&&r.status==='CONFIRMED');
+ok(multiRes.length===2,'複数原作マッピングは原作ごとに結果2行');
+ok(G.admin_accountingListUnmatched({}).length===1,'残る未解決は番号なし1グループ');
+ok(batchRow().status==='REVIEW_REQUIRED','番号なしが残るためREVIEW_REQUIRED維持');
+
+// 50. 形式不正の取込はバッチERROR（再試行しない）
+const badUp=G.admin_accountingUploadSalesFile({channelId:'DLSITE',salesPeriod:'2026-05',fileName:'bad.csv'},Buffer.from(boothCsv+'\n','utf8').toString('base64'));
+G.admin_accountingStartImport(badUp.import_batch_id);
+const badBatch=G.readTableBulk_(ACCY,'Sales_Import_Batches').find(b=>b.import_batch_id===badUp.import_batch_id);
+ok(badBatch.status==='ERROR' && /一致しません/.test(badBatch.error_summary),'ヘッダ不一致はバッチERROR＋理由記録');
+ok(rows(ACCM,'Accounting_Jobs').filter(j=>j.target_id===badUp.import_batch_id&&j.job_type==='SALES_PARSE').every(j=>j.status==='DONE'),'形式不正は再試行せずジョブ完了');
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

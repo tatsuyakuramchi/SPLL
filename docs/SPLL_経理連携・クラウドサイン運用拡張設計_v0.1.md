@@ -1380,9 +1380,9 @@ DRIVE_ROOT/
 | 設計 | 本書v0.1 |
 | スキーマ | **実装済（P0）**：`55_accounting_master.gs`（経理マスタ・年度別ブック・`setup_accountingBootstrap`／`setup_accountingMigrate`） |
 | Accounting GAS④ | **実装済（P0）**：`apps/accounting/`＋build配布・分離検査・`push:accounting`。一括I/O（`readTableBulk_`等）・`Accounting_Jobs`（カーソル分割・排他・回復・バックオフ）・Drive原票保存＋SHA-256二重取込防止 |
-| 原票パーサー | 未実装 |
+| 原票パーサー | **実装済（P1）**：`60_sales_import.gs`（BOOTH／TALTO／DLsiteパーサー・ヘッダ検証・負数拒否・20MB上限・プレビュー・SALES_PARSEジョブ）＋`62_sales_match.gs`（正規化・License_Identifiers／Sales_Work_Mappings／Legacy_Work_Codes優先突合・未解決集約・マッピング保存・再突合）。admin.htmlに「経理連携」タブ（原票取込・未解決データ・処理ジョブ） |
 | 配分 | 未実装 |
 | 銀行照合 | 未実装 |
 | 経理出力 | 未実装 |
 | CloudSign例外運用 | 未実装 |
-| テスト | P0分実装済（harness +21件／sec01 +9件） |
+| テスト | P0〜P1分実装済（harness 242件／sec01 30件 全通過） |
