@@ -105,12 +105,26 @@ npm run deploy:portal       # 個別（deploy:workflow / deploy:admin / deploy:a
 
 ### 実行する関数（GASエディタから1回ずつ）
 
+**推奨：一括初期設定（3関数だけ・すべて冪等）**
+
+| 関数 | 実行場所 | 内容 |
+|---|---|---|
+| `setup_all` | **admin** | ENVIRONMENT既定値→台帳・Drive作成→スキーマ移行→初期管理者（実行者を自動登録。指定は `setup_all("you@example.com")`）→HANDOFF_SECRET生成→経理台帳作成。**他プロジェクトへ転記するプロパティ一覧をログに出力** |
+| `setup_workflowAll` | **workflow** | （プロパティ転記後）必須設定の検査＋5分毎・日次トリガー作成 |
+| `setup_accountingAll` | **accounting** | （プロパティ転記後）経理台帳の確認/作成＋経理ジョブトリガー作成 |
+
+実行順：admin `setup_all` → ログの一覧を portal/workflow/accounting のスクリプト プロパティへ転記 →
+workflow `setup_workflowAll` → accounting `setup_accountingAll` → portal に `ADMIN_CONSOLE_URL` を設定。
+
+**個別関数（必要時のみ）**
+
 | 関数 | 実行場所 | 内容 |
 |---|---|---|
 | `setup_bootstrap` | **admin** | 台帳・マスタ・Drive作成＋初期設定＋スキーマ移行（作り直しは `setup_reset`※devのみ） |
 | `setup_migrate` | **admin** | **既存シートへ不足列を追加**（スキーマ更新時。productionでも実行可・冪等） |
 | `setup_setInitialAdmin("you@example.com","SYSTEM_ADMIN")` | **admin** | 初期管理者登録（2人目以降はSYSTEM_ADMIN権限が必要） |
 | `setup_triggers` | **workflow** | 5分毎（Webhook再処理・AI審査）＋日次（期限・みなし確認・削除）トリガー作成（冪等） |
+| `setup_accountingBootstrap` / `setup_accountingTriggers` | **admin／accounting** | 経理台帳の作成／経理ジョブトリガー |
 
 ### デプロイ（ウェブアプリ）
 

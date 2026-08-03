@@ -133,3 +133,26 @@ function purgeExpiredData_(){
     });
   return { processed:n };
 }
+
+/**
+ * workflow一括初期設定（workflowのGASエディタから1回実行）。
+ * ENVIRONMENT既定値・必須プロパティ検査・時間主導トリガー作成をまとめて行う。
+ */
+function setup_workflowAll(){
+  const sp = PropertiesService.getScriptProperties();
+  const report = { steps: [], missing: [], warnings: [] };
+  if(!sp.getProperty('ENVIRONMENT')){ sp.setProperty('ENVIRONMENT','development'); report.steps.push('ENVIRONMENT=development を設定'); }
+  ['SS_MASTER','SS_OPS','DRIVE_ROOT'].forEach(function(k){ if(!sp.getProperty(k)) report.missing.push(k); });
+  ['HANDOFF_SECRET','CLOUDSIGN_WEBHOOK_KEY','FORMRUN_WEBHOOK_SECRET','CLOUDSIGN_CLIENT_ID','GCP_PROJECT'].forEach(function(k){
+    if(!sp.getProperty(k)) report.warnings.push(k + '（本番までに設定）'); });
+  if(report.missing.length){
+    Logger.log('必須プロパティが未設定です: ' + report.missing.join(', ') + '（adminの setup_all のログから転記してください）');
+    return report;
+  }
+  const trg = setup_triggers();
+  report.steps.push('トリガー: 作成=' + JSON.stringify(trg.created) + ' 既存=' + JSON.stringify(trg.skipped));
+  Logger.log('===== setup_workflowAll 完了 =====');
+  report.steps.forEach(function(s){ Logger.log('・' + s); });
+  if(report.warnings.length) Logger.log('未設定（本番までに）: ' + report.warnings.join(', '));
+  return report;
+}

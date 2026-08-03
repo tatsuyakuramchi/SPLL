@@ -110,7 +110,11 @@ const _cache={};
 const CacheService={ getScriptCache:()=>({ get:k=>(k in _cache?_cache[k]:null), put:(k,v)=>{_cache[k]=String(v);} }) };
 const LockService={ getScriptLock:()=>({ waitLock:()=>{}, releaseLock:()=>{} }) };
 const SlidesApp={ create:function(n){ const id='PRES'+Math.random().toString(36).slice(2,7); return { getId:()=>id, getSlides:()=>[{ getObjectId:()=>'p1', getBackground:()=>({setSolidFill:()=>{}}), insertTextBox:()=>({ getText:()=>({ getTextStyle:()=>({ setForegroundColor:function(){return this;}, setBold:function(){return this;}, setFontSize:function(){return this;} }) }) }) }], saveAndClose:()=>{} }; }, openById:function(id){ return { getSlides:()=>[{ getObjectId:()=>'p1' }], replaceAllText:()=>{}, saveAndClose:()=>{}, getId:()=>id }; } };
-const ScriptApp={ getService:()=>({ getUrl:()=>'https://script.example/exec' }), getOAuthToken:()=>'oauth-tok' };
+const ScriptApp={ getService:()=>({ getUrl:()=>'https://script.example/exec' }), getOAuthToken:()=>'oauth-tok',
+  _triggers:[], getProjectTriggers:function(){ return this._triggers.slice(); },
+  newTrigger:function(fn){ const self=this; const add=()=>{ self._triggers.push({ getHandlerFunction:()=>fn }); };
+    const chain={ create:add, everyMinutes:()=>chain, everyDays:()=>chain, atHour:()=>chain, timeBased:()=>chain };
+    return chain; } };
 const Session={ getActiveUser:()=>({ getEmail:()=>'admin@example.com' }) };
 const Logger={ log:function(){ } };
 const MailApp={ sendEmail:function(){} };
@@ -1031,6 +1035,25 @@ G.admin_saveContractTemplates({STANDARD_RATE:{form_url:'https://form.run/rate-v2
 ok(G.admin_getContractTemplates().STANDARD_RATE.template_id==='SPLL_STD_RATE_v2','テンプレート・フォームURLの版管理（Config）');
 const appRt=mkApp(['WRK-ARK00012'],'電子出版物',docExtra);
 ok(appRt.form_url==='https://form.run/rate-v2','経路別フォームURLを申込応答で配信');
+
+// ============ 一括初期設定（setup_all／setup_workflowAll／setup_accountingAll） ============
+// 68. adminの setup_all：冪等・転記用プロパティ一覧・HANDOFF_SECRET生成
+const allRep=G.setup_all('admin@example.com');
+ok(allRep.properties.SS_OPS && allRep.copy_to_other_projects.workflow.SS_OPS===allRep.properties.SS_OPS &&
+   allRep.copy_to_other_projects.accounting.SS_ACCOUNTING_MASTER===allRep.properties.SS_ACCOUNTING_MASTER,
+  'setup_all: 他プロジェクト転記用のプロパティ一覧を出力');
+ok(!!scriptProps.HANDOFF_SECRET,'setup_all: HANDOFF_SECRETを自動生成');
+const adminCount=()=>rows(OPS,'Admin_Users').filter(u=>u.email==='admin@example.com').length;
+const cntBefore=adminCount();
+G.setup_all('admin@example.com');
+ok(adminCount()===cntBefore,'setup_all: 再実行で管理者・台帳が重複しない（冪等）');
+// 69. workflow／accounting の一括初期設定：トリガー作成（冪等）
+const wfAll=G.setup_workflowAll();
+ok(wfAll.steps.some(s=>/trigger_every5min/.test(s)),'setup_workflowAll: トリガー作成');
+const wfAll2=G.setup_workflowAll();
+ok(wfAll2.steps.some(s=>/作成=\[\]/.test(s)),'setup_workflowAll: 再実行はスキップ（冪等）');
+const accAll=G.setup_accountingAll();
+ok(accAll.steps.some(s=>/trigger_accountingJobs/.test(s)),'setup_accountingAll: 経理ジョブトリガー作成');
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

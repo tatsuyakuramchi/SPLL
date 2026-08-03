@@ -326,3 +326,73 @@ function setup_status(){
     DRIVE_ROOT:prop_('DRIVE_ROOT')||'(未設定)' };
   Logger.log(JSON.stringify(s)); return s;
 }
+
+// ============================================================
+// 一括初期設定（adminのGASエディタから setup_all を1回実行）
+//   台帳・Drive・スキーマ移行・初期管理者・経理台帳までを一気に整え、
+//   他プロジェクト（portal/workflow/accounting）へ転記するプロパティ一覧をログに出力する。
+//   冪等：既存の設定・台帳は再利用し、作り直さない。
+// ============================================================
+function setup_all(adminEmail){
+  const sp = PropertiesService.getScriptProperties();
+  const report = { steps: [], properties: {}, copy_to_other_projects: {} };
+
+  // 1) ENVIRONMENT（未設定なら development）
+  if(!sp.getProperty('ENVIRONMENT')){ sp.setProperty('ENVIRONMENT','development'); report.steps.push('ENVIRONMENT=development を設定'); }
+  else report.steps.push('ENVIRONMENT: ' + sp.getProperty('ENVIRONMENT') + '（既存を維持）');
+
+  // 2) 台帳・Drive・既定Config・スキーマ移行（既存IDは再利用・冪等）
+  const boot = setup_bootstrap({ seed: env_() !== 'production' });
+  report.steps.push('setup_bootstrap: ' + JSON.stringify({ created: Object.keys(boot.created||{}), reused: Object.keys(boot.reused||{}) }));
+
+  // 3) 初期管理者（引数省略時は実行者自身）
+  let email = String(adminEmail || '').toLowerCase();
+  if(!email){ try{ email = String(Session.getActiveUser().getEmail() || '').toLowerCase(); }catch(e){} }
+  if(!email) throw new Error('管理者メールを取得できません。setup_all("you@example.com") の形式で実行してください。');
+  const admins = readRows_(ssOps_(),'Admin_Users');
+  if(!admins.length){ setup_setInitialAdmin(email, 'SYSTEM_ADMIN'); report.steps.push('初期管理者を登録: ' + email); }
+  else if(!admins.some(function(u){ return String(u.email).toLowerCase() === email && u.status !== 'DISABLED'; })){
+    setup_setInitialAdmin(email, 'SYSTEM_ADMIN');   // 2人目以降はSYSTEM_ADMIN権限が必要（実行者が権限を持つ場合のみ成功）
+    report.steps.push('管理者を追加登録: ' + email);
+  } else report.steps.push('管理者登録済み: ' + email);
+
+  // 4) HANDOFF_SECRET（フォーム引継ぎHMAC鍵）：未生成なら採番して保持
+  if(!sp.getProperty('HANDOFF_SECRET')){
+    sp.setProperty('HANDOFF_SECRET', Utilities.getUuid().replace(/-/g,'') + Utilities.getUuid().replace(/-/g,''));
+    report.steps.push('HANDOFF_SECRET を生成（portal/workflowへ転記が必要）');
+  }
+
+  // 5) 経理台帳（SPLL-SYS-AD-001）：マスタ・年度ブック・Driveフォルダ・初期値
+  try{ const acc = setup_accountingBootstrap(); report.steps.push('setup_accountingBootstrap: ' + JSON.stringify({ created: Object.keys(acc.created||{}), reused: Object.keys(acc.reused||{}) })); }
+  catch(e){ report.steps.push('setup_accountingBootstrap 失敗: ' + String(e && e.message || e)); }
+
+  // 6) 転記用プロパティ一覧（ScriptPropertiesはプロジェクトごとに独立）
+  const P = function(k){ return sp.getProperty(k) || ''; };
+  report.properties = { ENVIRONMENT: P('ENVIRONMENT'), SS_MASTER: P('SS_MASTER'), SS_OPS: P('SS_OPS'),
+    DRIVE_ROOT: P('DRIVE_ROOT'), SS_ACCOUNTING_MASTER: P('SS_ACCOUNTING_MASTER'),
+    SS_ACCOUNTING_CURRENT: P('SS_ACCOUNTING_CURRENT'), HANDOFF_SECRET: P('HANDOFF_SECRET') };
+  report.copy_to_other_projects = {
+    portal:     { ENVIRONMENT: P('ENVIRONMENT'), SS_MASTER: P('SS_MASTER'), SS_OPS: P('SS_OPS'),
+                  HANDOFF_SECRET: P('HANDOFF_SECRET'), ADMIN_CONSOLE_URL: '（adminのウェブアプリURL /exec を設定）' },
+    workflow:   { ENVIRONMENT: P('ENVIRONMENT'), SS_MASTER: P('SS_MASTER'), SS_OPS: P('SS_OPS'),
+                  DRIVE_ROOT: P('DRIVE_ROOT'), HANDOFF_SECRET: P('HANDOFF_SECRET') },
+    accounting: { ENVIRONMENT: P('ENVIRONMENT'), SS_MASTER: P('SS_MASTER'), SS_OPS: P('SS_OPS'),
+                  DRIVE_ROOT: P('DRIVE_ROOT'), SS_ACCOUNTING_MASTER: P('SS_ACCOUNTING_MASTER'),
+                  SS_ACCOUNTING_CURRENT: P('SS_ACCOUNTING_CURRENT') } };
+
+  Logger.log('===== setup_all 完了 =====');
+  report.steps.forEach(function(s){ Logger.log('・' + s); });
+  Logger.log('');
+  Logger.log('▼ 他プロジェクトの「プロジェクトの設定→スクリプト プロパティ」へ転記してください');
+  Object.keys(report.copy_to_other_projects).forEach(function(app){
+    Logger.log('--- %s ---', app);
+    const props = report.copy_to_other_projects[app];
+    Object.keys(props).forEach(function(k){ Logger.log('%s = %s', k, props[k]); });
+  });
+  Logger.log('');
+  Logger.log('▼ 残りの手作業');
+  Logger.log('・workflow のエディタで setup_workflowAll を実行（トリガー作成）');
+  Logger.log('・accounting のエディタで setup_accountingAll を実行（経理ジョブトリガー作成）');
+  Logger.log('・portal の ADMIN_CONSOLE_URL に adminのウェブアプリURL（/exec）を設定');
+  return report;
+}

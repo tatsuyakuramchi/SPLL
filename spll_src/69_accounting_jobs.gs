@@ -148,3 +148,31 @@ function admin_accountingListJobs(filters){ requireRole_([]);
       last_error: j.last_error, started_at: j.started_at, finished_at: j.finished_at }; })
     .reverse();
 }
+
+/**
+ * accounting一括初期設定（accountingのGASエディタから1回実行）。
+ * ENVIRONMENT既定値・必須プロパティ検査・経理台帳の確認（無ければ作成）・ジョブトリガー作成。
+ */
+function setup_accountingAll(){
+  const sp = PropertiesService.getScriptProperties();
+  const report = { steps: [], missing: [] };
+  if(!sp.getProperty('ENVIRONMENT')){ sp.setProperty('ENVIRONMENT','development'); report.steps.push('ENVIRONMENT=development を設定'); }
+  ['SS_MASTER','SS_OPS','DRIVE_ROOT'].forEach(function(k){ if(!sp.getProperty(k)) report.missing.push(k); });
+  if(report.missing.length){
+    Logger.log('必須プロパティが未設定です: ' + report.missing.join(', ') + '（adminの setup_all のログから転記してください）');
+    return report;
+  }
+  // 経理台帳：admin側で作成済みならIDを転記済みのはず。未設定ならこのプロジェクトで作成。
+  if(!sp.getProperty('SS_ACCOUNTING_MASTER') || !sp.getProperty('SS_ACCOUNTING_CURRENT')){
+    const acc = setup_accountingBootstrap();
+    report.steps.push('setup_accountingBootstrap: ' + JSON.stringify({ created: Object.keys(acc.created||{}), reused: Object.keys(acc.reused||{}) }));
+  } else {
+    try{ migrateAccountingSchema_(); report.steps.push('経理スキーマ移行（冪等）'); }
+    catch(e){ report.steps.push('経理スキーマ移行 失敗: ' + String(e && e.message || e)); }
+  }
+  const trg = setup_accountingTriggers();
+  report.steps.push('トリガー: 作成=' + JSON.stringify(trg.created) + ' 既存=' + JSON.stringify(trg.skipped));
+  Logger.log('===== setup_accountingAll 完了 =====');
+  report.steps.forEach(function(s){ Logger.log('・' + s); });
+  return report;
+}

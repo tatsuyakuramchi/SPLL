@@ -10,6 +10,11 @@
 
 ## フェーズ0：事前チェック（5分）
 
+> **初期設定がまだ・不安な場合**：adminのGASエディタで **`setup_all`** を1回実行すると、
+> ENVIRONMENT・台帳・スキーマ移行（v4）・初期管理者・HANDOFF_SECRET・経理台帳までまとめて整い、
+> 他プロジェクトへ転記するプロパティ一覧が実行ログに出ます（冪等・既存は再利用）。
+> その後 workflow で `setup_workflowAll`、accounting で `setup_accountingAll` を実行。
+
 adminのGASエディタで一時関数を実行して確認：
 
 ```javascript
