@@ -818,5 +818,85 @@ const badBatch=G.readTableBulk_(ACCY,'Sales_Import_Batches').find(b=>b.import_ba
 ok(badBatch.status==='ERROR' && /一致しません/.test(badBatch.error_summary),'ヘッダ不一致はバッチERROR＋理由記録');
 ok(rows(ACCM,'Accounting_Jobs').filter(j=>j.target_id===badUp.import_batch_id&&j.job_type==='SALES_PARSE').every(j=>j.status==='DONE'),'形式不正は再試行せずジョブ完了');
 
+// ============ 経理連携 P2：配分（最大剰余法・職務分離） ============
+// 51. 配分プロファイル（§6.1）
+let res2Err=false; try{ G.admin_accountingSaveDistributionProfile({work_id:'WRK-ARK00012',lines:[
+  {partner_id:'P-A',calculation_type:'RESIDUAL'},{partner_id:'P-B',calculation_type:'RESIDUAL'}]}); }catch(e){ res2Err=/RESIDUAL行は1行まで/.test(String(e.message)); }
+ok(res2Err,'RESIDUAL2行は拒否');
+G.admin_accountingSaveDistributionProfile({work_id:'WRK-ARK00012',profile_name:'ARK標準',lines:[
+  {partner_id:'P-A',calculation_type:'RATE',rate:0.05},
+  {partner_id:'P-B',calculation_type:'RATE',rate:0.25},
+  {partner_id:'P-C',calculation_type:'RATE',rate:0.08},
+  {partner_id:'P-D',calculation_type:'RATE',rate:0.12},
+  {partner_id:'P-E',calculation_type:'RESIDUAL'}]});
+G.admin_accountingSaveDistributionProfile({work_id:'WRK-BKK00019',lines:[{partner_id:'P-F',calculation_type:'RESIDUAL'}]});
+const prof2=G.admin_accountingSaveDistributionProfile({work_id:'WRK-BKK00019',lines:[{partner_id:'P-F',calculation_type:'RATE',rate:1}]});
+ok(prof2.version===2,'プロファイル更新は新版採番（旧版RETIRED・直接編集しない）');
+ok(G.admin_accountingListDistributionProfiles().filter(p=>p.work_id==='WRK-BKK00019').length===1,'ACTIVE版は原作ごとに1つ');
+
+// 52. 最大剰余法（§6.3・受入18.2-10）
+ok(JSON.stringify(G.accLargestRemainder_(25,[1,1]))==='[13,12]','25円を同率2原作へ13円/12円（合計25円維持）');
+ok(G.accLargestRemainder_(100,[5,25,8,12,50]).reduce((a,b)=>a+b,0)===100,'任意比率でも合計維持');
+
+// 53. 配分run（受入18.2-11/12）
+const norefRow=G.readTableBulk_(ACCY,'Sales_Ledger').find(r=>r.import_batch_id===upRes.import_batch_id&&!r.external_license_ref);
+G.admin_accountingManualMatch([norefRow.sales_row_id],[{work_id:'WRK-BKK00019',weight:1}],'');
+ok(batchRow().status==='READY','手動突合（MANUAL）で全解決→READY');
+let notReady=false; try{ G.admin_accountingCreateAllocationRun('2026-06',[badUp.import_batch_id]); }catch(e){ notReady=true; }
+ok(notReady,'未解決バッチのrun作成は拒否');
+const runRes=G.admin_accountingCreateAllocationRun('2026-06',[upRes.import_batch_id]);
+G.admin_accountingCalculateAllocation(runRes.allocation_run_id);
+const runRow=()=>G.readTableBulk_(ACCY,'Allocation_Runs').find(r=>r.allocation_run_id===runRes.allocation_run_id);
+ok(runRow().status==='READY_FOR_APPROVAL','計算完了で承認待ち');
+ok(String(runRow().source_total_amount)==='485'&&String(runRow().allocated_total_amount)==='485'&&Number(runRow().difference_amount)===0,
+  '原票合計＝配分合計＝485円・差額0円（整合性条件）');
+const dets=G.readTableBulk_(ACCY,'Allocation_Details').filter(d=>d.allocation_run_id===runRes.allocation_run_id&&d.status==='CALCULATED');
+const r300=dets.filter(d=>String(d.base_license_fee_amount)==='300');
+ok(Number(r300.find(d=>d.partner_id==='P-A').allocated_amount)===15&&Number(r300.find(d=>d.partner_id==='P-B').allocated_amount)===75&&
+   Number(r300.find(d=>d.partner_id==='P-C').allocated_amount)===24&&Number(r300.find(d=>d.partner_id==='P-D').allocated_amount)===36&&
+   Number(r300.find(d=>d.partner_id==='P-E').allocated_amount)===150,'5%/25%/8%/12%/残額の配分を再現（受入18.2-11）');
+const r50=dets.filter(d=>String(d.base_license_fee_amount)==='50');
+ok(r50.filter(d=>d.work_id==='WRK-ARK00012').reduce((s,d)=>s+Number(d.allocated_amount),0)===33&&
+   r50.filter(d=>d.work_id==='WRK-BKK00019').reduce((s,d)=>s+Number(d.allocated_amount),0)===17,'複数原作2:1按分（50円→33円/17円）');
+const accSum=G.admin_accountingGetAllocationSummary(runRes.allocation_run_id);
+ok(accSum.partners.reduce((s,p)=>s+p.amount,0)===485,'権利者別サマリー合計＝485円');
+const detPage=G.admin_accountingListAllocationDetails(runRes.allocation_run_id,{},1);
+ok(detPage.rows.length<=100&&detPage.total===dets.length,'明細は100件/ページ（全件返却しない）');
+
+// 54. 承認の職務分離（§6.3/§13）
+let selfAppr2=false; try{ G.admin_accountingApproveAllocation(runRes.allocation_run_id,''); }catch(e){ selfAppr2=/作成者本人/.test(String(e.message)); }
+ok(selfAppr2,'作成者本人の承認は拒否（職務分離）');
+G.Session={ getActiveUser:()=>({ getEmail:()=>'acct@example.com' }) };
+G.admin_accountingApproveAllocation(runRes.allocation_run_id,'');
+G.Session=SessRef;
+ok(runRow().status==='APPROVED'&&runRow().approved_by==='acct@example.com','別担当者（ACCOUNTING）の承認でAPPROVED');
+let recalcErr=false; try{ G.admin_accountingCalculateAllocation(runRes.allocation_run_id); }catch(e){ recalcErr=true; }
+ok(recalcErr,'承認済みrunの再計算は拒否');
+
+// 55. 例外（プロファイル未設定）→承認不可→取消（§11.5）
+const dlUp=G.admin_accountingUploadSalesFile({channelId:'DLSITE',salesPeriod:'2026-05',fileName:'エイシス_DLsite_TRPG集計2026年05月.csv'},Buffer.from(dlText,'utf8').toString('base64'));
+G.admin_accountingStartImport(dlUp.import_batch_id);
+const dlLedger=()=>G.readTableBulk_(ACCY,'Sales_Ledger').filter(r=>r.import_batch_id===dlUp.import_batch_id);
+ok(dlLedger().find(r=>r.external_license_ref==='SPLL:E107009').match_status==='MATCHED','SPLL:プレフィックス付き旧番号も突合');
+const dlRow=dlLedger().find(r=>r.external_license_ref==='SPLL:E108001');
+G.admin_accountingManualMatch([dlRow.sales_row_id],[{work_id:'WRK-ARK00045',weight:1}],'');
+const run2=G.admin_accountingCreateAllocationRun('2026-05',[dlUp.import_batch_id]);
+G.admin_accountingCalculateAllocation(run2.allocation_run_id);
+const run2Row=()=>G.readTableBulk_(ACCY,'Allocation_Runs').find(r=>r.allocation_run_id===run2.allocation_run_id);
+ok(run2Row().status==='REVIEW_REQUIRED'&&Number(run2Row().exception_count)>0,'プロファイル未設定は例外→REVIEW_REQUIRED');
+let excErr=false; try{ G.admin_accountingApproveAllocation(run2.allocation_run_id,''); }catch(e){ excErr=true; }
+ok(excErr,'例外あり・承認待ち以外は承認不可');
+// プロファイル設定→再計算→緊急承認（EMERGENCY_OVERRIDE）
+G.admin_accountingSaveDistributionProfile({work_id:'WRK-ARK00045',lines:[{partner_id:'P-G',calculation_type:'RESIDUAL'}]});
+G.admin_accountingCalculateAllocation(run2.allocation_run_id);
+ok(run2Row().status==='READY_FOR_APPROVAL'&&Number(run2Row().difference_amount)===0,'プロファイル設定後の再計算で承認待ち（洗い替え・重複なし）');
+const dl2dets=G.readTableBulk_(ACCY,'Allocation_Details').filter(d=>d.allocation_run_id===run2.allocation_run_id&&d.status==='CALCULATED');
+ok(dl2dets.length===6&&dl2dets.reduce((s,d)=>s+Number(d.allocated_amount),0)===1157,'再計算後の明細に重複がない（5配分行＋1残額行・合計1,157円）');
+G.admin_accountingApproveAllocation(run2.allocation_run_id,'月次締切のため緊急承認');
+ok(run2Row().status==='APPROVED','EMERGENCY_OVERRIDE（理由必須）で本人承認可・記録');
+G.admin_accountingVoidAllocation(run2.allocation_run_id,'テスト取消');
+ok(run2Row().status==='VOID','承認済み（未連携）は取消可能→VOID');
+ok(dlLedger().every(r=>r.allocation_status==='PENDING'),'取消で販売行を未配分へ戻す');
+
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

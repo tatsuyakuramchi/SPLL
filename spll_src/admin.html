@@ -241,9 +241,26 @@
       <div class="note">突合の優先順位：商品別マッピング → SPLL番号マッピング → 現行契約（単一原作は自動）→ 旧原作コード。商品名の曖昧一致は候補提示のみで自動確定しません。原作・比率を設定するとマッピングルールとして保存され、再突合に適用されます。</div>
     </div>
 
-    <!-- 配分確認（P2で実装） -->
+    <!-- 配分確認 -->
     <div class="accpane setpane" id="a-alloc">
-      <div class="panel"><div class="ph"><h3>配分確認</h3></div><div class="pbody"><p class="setnote" id="acc-alloc-note">配分機能はP2で実装予定です。</p></div></div>
+      <div class="panel">
+        <div class="ph"><h3>配分run（原作按分→権利者配分）</h3>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input type="month" id="acc-alloc-period" style="padding:6px;border:1px solid var(--line);border-radius:7px;">
+            <button class="btn p" onclick="accCreateRun()">突合済バッチから作成</button>
+            <button class="btn" onclick="loadAccAlloc()">更新</button>
+          </div>
+        </div>
+        <table><thead><tr><th>run</th><th>対象月</th><th>状態</th><th>原票合計</th><th>配分合計</th><th>差額</th><th>例外</th><th>操作</th></tr></thead><tbody id="acc-alloc-tbody"></tbody></table>
+      </div>
+      <div class="panel" id="acc-alloc-sum-panel" style="display:none;">
+        <div class="ph"><h3 id="acc-alloc-sum-title">配分サマリー</h3></div>
+        <div class="pbody">
+          <table><thead><tr><th>権利者</th><th>明細数</th><th>配分額</th><th>支払予定額</th></tr></thead><tbody id="acc-alloc-partner-tbody"></tbody></table>
+          <table style="margin-top:10px;"><thead><tr><th>原作</th><th>明細数</th><th>按分額</th></tr></thead><tbody id="acc-alloc-work-tbody"></tbody></table>
+        </div>
+      </div>
+      <div class="note">承認条件：<b>配分差額0円・例外0件</b>（満たさないrunは承認ボタンが無効）。作成者と承認者は別担当者（職務分離）。原票合計＝原作按分合計＝権利者配分合計が常に一致します（最大剰余法）。</div>
     </div>
     <!-- 入金照合（P3で実装） -->
     <div class="accpane setpane" id="a-bank">
@@ -527,6 +544,7 @@ document.querySelectorAll(".acctab").forEach(s=>s.onclick=()=>{
   s.classList.add("on"); document.getElementById("a-"+s.dataset.a).classList.add("on");
   if(s.dataset.a==="import") loadAccImports();
   else if(s.dataset.a==="unmatched") loadAccUnmatched();
+  else if(s.dataset.a==="alloc") loadAccAlloc();
   else if(s.dataset.a==="jobs") loadAccJobs();
 });
 
@@ -1260,6 +1278,86 @@ function accSetWorks(g){
       toast("マッピングを保存しました。再突合で適用されます");
     });
 }
+function accRunPill(st){
+  var m={DRAFT:{cls:"wait",label:"下書き"},CALCULATING:{cls:"review",label:"計算中"},REVIEW_REQUIRED:{cls:"fail",label:"要解決"},
+    READY_FOR_APPROVAL:{cls:"review",label:"承認待ち"},APPROVED:{cls:"pass",label:"承認済"},POSTED:{cls:"pass",label:"清算連携済"},
+    EXPORTED:{cls:"pass",label:"出力済"},VOID:{cls:"wait",label:"取消"}};
+  return m[String(st)]||{cls:"wait",label:String(st)||"—"};
+}
+function accCreateRun(){
+  var period=$("acc-alloc-period").value;
+  if(!period){ toast("対象月を選択してください", true); return; }
+  call("admin_accountingListImports",[{status:"READY"}],function(batches){
+    batches=(batches||[]).filter(function(b){ return b.status==="READY"; });
+    if(!batches.length){ toast("突合済（READY）のバッチがありません", true); return; }
+    var ids=batches.map(function(b){ return b.import_batch_id; });
+    if(!confirm("対象月 "+period+" の配分runを作成します。\n対象バッチ:\n"+ids.join("\n"))) return;
+    call("admin_accountingCreateAllocationRun",[period,ids],function(res){
+      call("admin_accountingCalculateAllocation",[res.allocation_run_id],function(){
+        toast("配分計算を開始しました"); loadAccAlloc();
+      });
+    });
+  });
+}
+function loadAccAlloc(){
+  call("admin_accountingListAllocationRuns",[],function(rows){
+    var tb=$("acc-alloc-tbody"); tb.innerHTML=""; rows=rows||[];
+    if(!rows.length){ emptyRow(tb,8,"配分runがありません"); return; }
+    rows.forEach(function(r){
+      var tr=document.createElement("tr");
+      tr.appendChild(td('<span class="id">'+esc(r.allocation_run_id)+'</span>'));
+      tr.appendChild(td(esc(r.sales_period)));
+      tr.appendChild(td(pill(accRunPill(r.status))));
+      tr.appendChild(td(r.source_total_amount!==""?Number(r.source_total_amount||0).toLocaleString():"—"));
+      tr.appendChild(td(r.allocated_total_amount!==""?Number(r.allocated_total_amount||0).toLocaleString():"—"));
+      var diff=Number(r.difference_amount||0);
+      tr.appendChild(td(diff===0?'<span style="color:var(--pass,#1A7A4A)">0</span>':'<b style="color:var(--fail)">'+diff.toLocaleString()+'</b>'));
+      tr.appendChild(td(esc(r.exception_count||0)));
+      var act=document.createElement("td"); act.className="actions";
+      act.appendChild(mkBtn("サマリー","btn",function(){ accShowSummary(r.allocation_run_id); }));
+      if(r.status==="READY_FOR_APPROVAL"){
+        act.appendChild(mkBtn("承認","btn p",function(){
+          if(!confirm("この配分を承認しますか？（差額0円・例外0件を確認済み）")) return;
+          call("admin_accountingApproveAllocation",[r.allocation_run_id,""],function(){ toast("配分を承認しました"); loadAccAlloc(); },function(e){
+            var msg=String(e&&e.message||e);
+            if(msg.indexOf("作成者本人")>=0){
+              var er=prompt("作成者本人による承認は原則できません。\n緊急時のみ、緊急理由を入力すると EMERGENCY_OVERRIDE として記録のうえ承認されます:","");
+              if(er&&er.trim()) call("admin_accountingApproveAllocation",[r.allocation_run_id,er],function(){ toast("緊急承認（EMERGENCY_OVERRIDE）しました"); loadAccAlloc(); });
+            } else toast("承認できません: "+msg, true);
+          });
+        }));
+      }
+      if(r.status==="REVIEW_REQUIRED"||r.status==="READY_FOR_APPROVAL"){
+        act.appendChild(mkBtn("再計算","btn",function(){ call("admin_accountingCalculateAllocation",[r.allocation_run_id],function(){ toast("再計算を開始しました"); loadAccAlloc(); }); }));
+      }
+      if(r.status!=="POSTED"&&r.status!=="VOID"&&r.status!=="EXPORTED"){
+        act.appendChild(mkBtn("取消","btn d",function(){ var reason=prompt("取消理由（必須）:",""); if(!reason) return;
+          call("admin_accountingVoidAllocation",[r.allocation_run_id,reason],function(){ toast("配分を取り消しました"); loadAccAlloc(); }); }));
+      }
+      tr.appendChild(act); tb.appendChild(tr);
+    });
+  });
+}
+function accShowSummary(runId){
+  call("admin_accountingGetAllocationSummary",[runId],function(s){
+    if(!s) return;
+    $("acc-alloc-sum-panel").style.display="";
+    $("acc-alloc-sum-title").textContent="配分サマリー："+runId+"（"+(s.run.sales_period||"")+"）";
+    var pt=$("acc-alloc-partner-tbody"); pt.innerHTML="";
+    (s.partners||[]).forEach(function(p){
+      var tr=document.createElement("tr");
+      tr.appendChild(td('<span class="id">'+esc(p.partner_id||"（未設定）")+'</span>'));
+      tr.appendChild(td(esc(p.count))); tr.appendChild(td(Number(p.amount||0).toLocaleString()));
+      tr.appendChild(td(Number(p.payable||0).toLocaleString())); pt.appendChild(tr);
+    });
+    var wt=$("acc-alloc-work-tbody"); wt.innerHTML="";
+    (s.works||[]).forEach(function(w){
+      var tr=document.createElement("tr");
+      tr.appendChild(td('<span class="id">'+esc(w.work_id)+'</span>'));
+      tr.appendChild(td(esc(w.count))); tr.appendChild(td(Number(w.amount||0).toLocaleString())); wt.appendChild(tr);
+    });
+  });
+}
 function loadAccJobs(){
   call("admin_accountingListJobs",[{}],function(rows){
     var tb=$("acc-jobs-tbody"); tb.innerHTML=""; rows=rows||[];
@@ -1339,6 +1437,16 @@ MOCK.admin_accountingListUnmatched=function(){ return [
 ]; };
 MOCK.admin_accountingLinkLicenseRef=function(){ return { license_identifier_id:"LID-mock", updated:false }; };
 MOCK.admin_accountingSaveMapping=function(){ return { mapping_id:"MAP-mock" }; };
+var _mAccRuns=[{allocation_run_id:"ALR-202606-0001",sales_period:"2026-06",status:"READY_FOR_APPROVAL",source_total_amount:4609606,allocated_total_amount:4609606,difference_amount:0,exception_count:0,prepared_by:"acct@example.com",approved_by:""}];
+MOCK.admin_accountingCreateAllocationRun=function(period,ids){ var id="ALR-MOCK-"+(_mAccRuns.length+1); _mAccRuns.unshift({allocation_run_id:id,sales_period:period,status:"DRAFT",source_total_amount:"",allocated_total_amount:"",difference_amount:"",exception_count:"",prepared_by:"you",approved_by:""}); return {allocation_run_id:id}; };
+MOCK.admin_accountingCalculateAllocation=function(id){ var r=_mAccRuns.find(function(x){return x.allocation_run_id===id;}); if(r){ r.status="READY_FOR_APPROVAL"; r.source_total_amount=r.allocated_total_amount=12345; r.difference_amount=0; r.exception_count=0; } return {job_id:"job-mock"}; };
+MOCK.admin_accountingListAllocationRuns=function(){ return _mAccRuns; };
+MOCK.admin_accountingGetAllocationSummary=function(id){ return { run:{allocation_run_id:id,sales_period:"2026-06"},
+  partners:[{partner_id:"PRT-ARK",count:7401,amount:4148645,payable:4148645},{partner_id:"PRT-DRACO",count:45,amount:460961,payable:460961}],
+  works:[{work_id:"WRK-ARK00012",count:7401,amount:4148645},{work_id:"WRK-BKK00019",count:45,amount:460961}] }; };
+MOCK.admin_accountingApproveAllocation=function(id){ var r=_mAccRuns.find(function(x){return x.allocation_run_id===id;}); if(r){ r.status="APPROVED"; r.approved_by="legal@example.com"; } return true; };
+MOCK.admin_accountingVoidAllocation=function(id){ var r=_mAccRuns.find(function(x){return x.allocation_run_id===id;}); if(r) r.status="VOID"; return true; };
+MOCK.admin_accountingManualMatch=function(){ return {updated:1}; };
 MOCK.admin_accountingListJobs=function(){ return [
   {job_type:"SALES_PARSE",target_id:"IMB-202606-0001",status:"DONE",processed_count:7446,total_count:7446,retry_count:0,last_error:""},
   {job_type:"SALES_MATCH",target_id:"IMB-202606-0001",status:"DONE",processed_count:7446,total_count:7446,retry_count:0,last_error:""}

@@ -22,9 +22,9 @@ function accNormalizeProductKey_(v){
     .replace(/[\s　【】\[\]（）()「」『』・,、。．.\-〜～!！?？:：;；]/g, '')
     .toUpperCase();
 }
-/** 旧SPLL番号から原作コードを抽出（例：E107009 → 107・§6.1）。 */
+/** 旧SPLL番号から原作コードを抽出（例：SPLL:E107009／E107009 → 107・§6.1）。 */
 function accExtractLegacyCode_(ref){
-  const m = accNormalizeLicenseRef_(ref).match(/^[A-Z](\d{3})\d{2,}$/);
+  const m = accNormalizeLicenseRef_(ref).replace(/^SPLL[:：\-]?/, '').match(/^[A-Z](\d{3})\d{2,}$/);
   return m ? m[1] : '';
 }
 
@@ -233,6 +233,46 @@ function admin_accountingLinkLicenseRef(externalRef, contractId){
   }]);
   logEvent_('license_identifier', id, actor.email, null, { ref: norm, contract_id: contractId || '' });
   return { license_identifier_id: id, updated: false };
+}
+
+/** 行単位の手動突合（番号なし明細等・match_method=MANUAL）。works=[{work_id,weight}] */
+function admin_accountingManualMatch(salesRowIds, works, contractId){
+  const actor = requireRole_(['ACCOUNTING','OPERATIONS']);
+  const ids = (salesRowIds || []).slice();
+  if(!ids.length) throw new Error('VALIDATION_ERROR: 対象明細を指定してください');
+  if(!works || !works.length) throw new Error('VALIDATION_ERROR: 原作を指定してください');
+  const workRows = readRows_(ssMaster_(), 'Works_Master');
+  works.forEach(function(w){
+    if(!workRows.some(function(x){ return x.work_id === w.work_id; })) throw new Error('DATA_NOT_FOUND: 原作がありません: ' + w.work_id);
+  });
+  const yearSs = ssAccYear_();
+  const inSet = {}; ids.forEach(function(id){ inSet[id] = true; });
+  const olds = readTableBulk_(yearSs, 'Sales_Match_Results')
+    .filter(function(r){ return inSet[r.sales_row_id] && r.status !== 'SUPERSEDED'; })
+    .map(function(r){ return { match_result_id: r.match_result_id, status: 'SUPERSEDED' }; });
+  upsertRowsBulk_(yearSs, 'Sales_Match_Results', 'match_result_id', olds);
+  const nowIso = new Date().toISOString();
+  const results = [];
+  ids.forEach(function(rowId){
+    works.forEach(function(w, i){
+      results.push({ match_result_id: Utilities.getUuid(), sales_row_id: rowId,
+        contract_id: contractId || '', work_id: w.work_id, match_method: 'MANUAL',
+        confidence: 1, mapping_id: '', status: 'CONFIRMED', reviewed_by: actor.email, reviewed_at: nowIso, note: '' });
+    });
+  });
+  appendRowsBulk_(yearSs, 'Sales_Match_Results', results);
+  upsertRowsBulk_(yearSs, 'Sales_Ledger', 'sales_row_id',
+    ids.map(function(id){ return { sales_row_id: id, match_status: 'MATCHED' }; }));
+  // バッチ状態の再評価
+  const batchIds = {};
+  readTableBulk_(yearSs, 'Sales_Ledger').forEach(function(r){ if(inSet[r.sales_row_id]) batchIds[r.import_batch_id] = true; });
+  Object.keys(batchIds).forEach(function(bid){
+    const unresolved = readTableBulk_(yearSs, 'Sales_Ledger')
+      .filter(function(r){ return r.import_batch_id === bid && ['MATCHED','SUPERSEDED'].indexOf(r.match_status) < 0; }).length;
+    upsertRowsBulk_(yearSs, 'Sales_Import_Batches', 'import_batch_id', [{ import_batch_id: bid, status: unresolved ? 'REVIEW_REQUIRED' : 'READY' }]);
+  });
+  logEvent_('sales_match', ids.join(',').slice(0, 100), actor.email, null, { manual: true, rows: ids.length, works: works.length });
+  return { updated: ids.length };
 }
 
 /** 再突合：既存結果をSUPERSEDEDにしてSALES_MATCHを再実行。 */
