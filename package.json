@@ -11,7 +11,8 @@
     "push:portal": "npm run build && cd apps/portal && clasp push -f",
     "push:workflow": "npm run build && cd apps/workflow && clasp push -f",
     "push:admin": "npm run build && cd apps/admin && clasp push -f",
-    "push:all": "npm run build && cd apps/portal && clasp push -f && cd ../workflow && clasp push -f && cd ../admin && clasp push -f"
+    "push:accounting": "npm run build && cd apps/accounting && clasp push -f",
+    "push:all": "npm run build && cd apps/portal && clasp push -f && cd ../workflow && clasp push -f && cd ../admin && clasp push -f && cd ../accounting && clasp push -f"
   },
   "devDependencies": {
     "@google/clasp": "^2.4.2",

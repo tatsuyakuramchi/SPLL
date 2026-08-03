@@ -67,6 +67,7 @@ function Blob(content, type, name){
   else bytes=Array.from(Buffer.from(String(content),'utf8'));
   return { bytes, type:type||'application/octet-stream', name:name||'blob',
     getBytes:function(){return this.bytes;}, getContentType:function(){return this.type;},
+    getDataAsString:function(charset){ return Buffer.from(this.bytes).toString('utf8'); },
     setName:function(n){this.name=n;return this;}, getAs:function(t){ return Blob(content, t, this.name); } };
 }
 const Utilities={
@@ -80,6 +81,20 @@ const Utilities={
   computeHmacSignature:function(a,b,c){ return Array.from(Buffer.from(b+c).slice(0,20)); },
   computeHmacSha256Signature:function(payload,secret){ const crypto=require('crypto'); return Array.from(crypto.createHmac('sha256',String(secret)).update(String(payload)).digest()); },
   base64EncodeWebSafe:function(x){ const b=Array.isArray(x)?Buffer.from(x):Buffer.from(String(x),'utf8'); return b.toString('base64').replace(/\+/g,'-').replace(/\//g,'_'); },
+  parseCsv:function(text){
+    const rows=[]; let row=[], cell='', inQ=false; const s=String(text);
+    for(let i=0;i<s.length;i++){
+      const ch=s[i];
+      if(inQ){ if(ch==='"'){ if(s[i+1]==='"'){ cell+='"'; i++; } else inQ=false; } else cell+=ch; }
+      else if(ch==='"') inQ=true;
+      else if(ch===','){ row.push(cell); cell=''; }
+      else if(ch==='\n'||ch==='\r'){ if(ch==='\r'&&s[i+1]==='\n') i++; row.push(cell); rows.push(row); row=[]; cell=''; }
+      else cell+=ch;
+    }
+    if(cell!==''||row.length){ row.push(cell); rows.push(row); }
+    return rows;
+  },
+  zip:function(blobs,name){ return Blob('ZIP:'+(blobs||[]).map(b=>b.name).join('|'),'application/zip',name||'archive.zip'); },
   DigestAlgorithm:{SHA_256:1}, MacAlgorithm:{HMAC_SHA_1:1}
 };
 
@@ -678,6 +693,64 @@ const due42=G.notifyReportDue_();
 ok(rows(OPS,'Notification_Queue').some(n=>n.type==='REPORT_REQUEST'&&String(n.reference_id).indexOf(contract.contract_id)===0),'期限窓内の未報告契約へ REPORT_REQUEST 起票');
 const due42b=G.notifyReportDue_();
 ok(due42b.processed===0,'同一契約×期は重複起票しない');
+
+// ============ 経理連携（SPLL-SYS-AD-001）P0：基盤 ============
+// 43. ブートストラップ・スキーマ（§17 M1）
+G.setup_accountingBootstrap();
+ok(scriptProps.SS_ACCOUNTING_MASTER && scriptProps.SS_ACCOUNTING_CURRENT,'経理マスタ・年度ブック作成＋プロパティ登録');
+const ACCM=G.ssAccMaster_(), ACCY=G.ssAccYear_();
+ok(rows(ACCM,'Sales_Channels').length===6,'販売チャネル初期値6件（BOOTH/TALTO/DLSITE/BANK_DIRECT/AMBASS/PAPER）');
+ok(rows(ACCM,'Accounting_Export_Profiles').length===4,'出力プロファイル初期値4件');
+ok(rows(ACCM,'Accounting_Books').some(b=>b.status==='OPEN'),'年度台帳にOPEN登録');
+const accBoot2=G.setup_accountingBootstrap();
+ok(accBoot2.reused.SS_ACCOUNTING_MASTER && rows(ACCM,'Sales_Channels').length===6,'再実行は再利用・初期値重複なし（冪等）');
+ok(ACCY.getSheetByName('Sales_Ledger') && ACCY.getSheetByName('Allocation_Runs'),'年度ブックに取引系シート作成');
+
+// 44. 一括I/O（§8.1）
+G.accEnsureSheet_(ACCM,'Bulk_Test',['k','v']);
+const bulkMany=[]; for(let bi=0;bi<1234;bi++) bulkMany.push({k:'K'+bi,v:bi});
+ok(G.appendRowsBulk_(ACCM,'Bulk_Test',bulkMany,500)===1234,'1,234行を一括追記（chunk 500）');
+ok(G.readTableBulk_(ACCM,'Bulk_Test').length===1234,'一括読取りで全行取得');
+const up=G.upsertRowsBulk_(ACCM,'Bulk_Test','k',[{k:'K10',v:'upd'},{k:'K-new',v:'new'}]);
+ok(up.updated===1 && up.inserted===1,'upsert：更新1・追加1');
+ok(G.readTableBulk_(ACCM,'Bulk_Test').find(r=>r.k==='K10').v==='upd','一括更新が反映');
+const bulkIdx=G.buildIndex_(G.readTableBulk_(ACCM,'Bulk_Test'),r=>r.k);
+ok(bulkIdx['K999'] && bulkIdx['K-new'],'buildIndex_ でキー参照');
+G.replaceRowsBulk_(ACCM,'Bulk_Test',[{k:'only',v:1}]);
+ok(G.readTableBulk_(ACCM,'Bulk_Test').length===1,'洗い替えで1行（空行はスキップ）');
+
+// 45. Drive原票保存・二重取込防止（§7.5/§15）
+const accCsv=G.Utilities.newBlob('a,b\n1,2','text/csv','ピクシブ_Booth_明細書_2026.6.csv');
+const accSaved=G.accSaveOriginalFile_('BOOTH',accCsv);
+ok(accSaved.drive_file_id && accSaved.file_hash,'原票をDrive保存しSHA-256記録');
+G.appendRowsBulk_(ACCY,'Sales_Import_Batches',[{import_batch_id:'IB-DUP',channel_id:'BOOTH',file_hash:accSaved.file_hash,status:'PARSED'}]);
+ok(G.accFindBatchByHash_('Sales_Import_Batches',accSaved.file_hash).import_batch_id==='IB-DUP','同一ハッシュの二重取込を検知');
+G.upsertRowsBulk_(ACCY,'Sales_Import_Batches','import_batch_id',[{import_batch_id:'IB-DUP',status:'SUPERSEDED'}]);
+ok(!G.accFindBatchByHash_('Sales_Import_Batches',accSaved.file_hash),'SUPERSEDED後は再取込可');
+
+// 46. ジョブ基盤（§8.2/§8.3）：カーソル分割・再試行・停滞回復
+const realSalesParse=G.accJobSalesParse_;
+G.accJobSalesParse_=function(job){ const total=250, next=Math.min(job.cursor+100,total);
+  return { done: next>=total, cursor: next, processed: next-job.cursor, total: total }; };
+const accJid=G.enqueueAccountingJob_('SALES_PARSE','BATCH-CURSOR',{});
+const accJob=()=>rows(ACCM,'Accounting_Jobs').find(x=>x.job_id===accJid);
+ok(accJob().status==='QUEUED' && String(accJob().cursor)==='100','1ステップ後にカーソル保存（100）して継続待ち');
+G.runAccountingJobs_(); G.runAccountingJobs_();
+ok(accJob().status==='DONE' && String(accJob().processed_count)==='250','カーソルから再開して完了（250行）');
+G.accJobSalesParse_=function(){ throw new Error('parse fail'); };
+const accJid2=G.enqueueAccountingJob_('SALES_PARSE','BATCH-ERR',{});
+const accJob2=()=>rows(ACCM,'Accounting_Jobs').find(x=>x.job_id===accJid2);
+ok(accJob2().status==='RETRY_WAIT' && accJob2().next_retry_at,'失敗はRETRY_WAIT＋バックオフ時刻');
+for(let ri3=0;ri3<6;ri3++){ G.upsertRowsBulk_(ACCM,'Accounting_Jobs','job_id',[{job_id:accJid2,next_retry_at:'2000-01-01T00:00:00.000Z'}]); G.runAccountingJobs_(); }
+ok(accJob2().status==='ERROR' && accJob2().last_error,'再試行上限でERROR（理由記録）');
+G.accJobSalesParse_=function(job){ return { done:true, cursor:0, processed:1 }; };
+const accJid3=G.enqueueAccountingJob_('SALES_PARSE','BATCH-STALE',{});
+G.upsertRowsBulk_(ACCM,'Accounting_Jobs','job_id',[{job_id:accJid3,status:'RUNNING',started_at:'2000-01-01T00:00:00.000Z',finished_at:''}]);
+G.runAccountingJobs_();
+ok(rows(ACCM,'Accounting_Jobs').find(x=>x.job_id===accJid3).status==='DONE','停滞RUNNINGを回復して完了');
+let badType=false; try{ G.enqueueAccountingJob_('NOT_A_TYPE','x',{}); }catch(e){ badType=/不正なジョブ種別/.test(String(e.message)); }
+ok(badType,'不正なジョブ種別は拒否');
+G.accJobSalesParse_=realSalesParse;
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);
