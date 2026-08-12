@@ -14,17 +14,17 @@ const SRC = path.join(ROOT, 'spll_src');
 
 const MANIFEST = {
   portal: {
-    gs: ['00_core.gs','10_auth.gs','15_fee.gs','25_portal.gs'],
-    html: ['index.html'],
+    gs: ['00_core.gs','10_auth.gs','15_fee.gs','25_portal.gs','29_contract_form_v4.gs'],
+    html: ['index.html','portal_contract_v4_patch.html'],
     title: 'SPLL 公開ポータル (GAS①)',
   },
   workflow: {
-    gs: ['00_core.gs','15_fee.gs','20_tokens.gs','30_cloudsign.gs','32_contract.gs','35_webhooks.gs','37_ai.gs','40_public_pages.gs','47_batches.gs'],
+    gs: ['00_core.gs','15_fee.gs','20_tokens.gs','29_contract_form_v4.gs','30_cloudsign.gs','32_contract.gs','33_contract_snapshot_v4.gs','35_webhooks.gs','36_formrun_contract_v4.gs','37_ai.gs','40_public_pages.gs','47_batches.gs'],
     html: ['upload.html'],
     title: 'SPLL 契約・提出 (GAS②)',
   },
   admin: {
-    gs: ['00_core.gs','05_schema.gs','10_auth.gs','15_fee.gs','20_tokens.gs','25_portal.gs','30_cloudsign.gs','32_contract.gs','37_ai.gs','50_admin.gs'],
+    gs: ['00_core.gs','05_schema.gs','10_auth.gs','15_fee.gs','20_tokens.gs','25_portal.gs','29_contract_form_v4.gs','30_cloudsign.gs','32_contract.gs','33_contract_snapshot_v4.gs','37_ai.gs','50_admin.gs'],
     html: ['admin.html'],
     title: 'SPLL 管理コンソール (GAS③)',
   },
@@ -36,17 +36,15 @@ const GAS_GLOBALS = new Set(['SpreadsheetApp','DriveApp','Utilities','Properties
 function definedNames(code){
   const names = new Set();
   for(const m of code.matchAll(/^(?:function\s+([A-Za-z0-9_]+)|const\s+([A-Za-z0-9_]+)|var\s+([A-Za-z0-9_]+))/gm)) names.add(m[1]||m[2]||m[3]);
-  for(const m of code.matchAll(/\bfunction\s+([A-Za-z0-9_]+)\s*\(/g)) names.add(m[1]);   // ネスト定義も認識
+  for(const m of code.matchAll(/\bfunction\s+([A-Za-z0-9_]+)\s*\(/g)) names.add(m[1]);
   return names;
 }
 function referencedPrivate(code){
-  // 私有関数呼出し（末尾_）を収集。定数はチェック対象外（文字列との誤検知が多いため）。
   const refs = new Set();
   for(const m of code.matchAll(/\b([A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)*_)\s*\(/g)) refs.add(m[1]);
   return refs;
 }
 
-// 各distに含まれてはならない関数（修正設計書v2 P0-01）
 const FORBIDDEN = {
   portal:   [/function admin_/, /function setup_/, /function receiveWebhook_/, /function web_submitWork/, /function report_submit/, /function issueToken_/],
   workflow: [/function admin_save/, /function setup_reset/, /function setup_setInitialAdmin/, /function serveAdmin_/, /function setup_bootstrap/],
@@ -65,25 +63,20 @@ for(const [app, mf] of Object.entries(MANIFEST)){
     fs.writeFileSync(path.join(dist, f), body);
     combined += body + '\n';
   }
-  // アプリ固有エントリ
   const entry = fs.readFileSync(path.join(appDir, 'entry.gs'), 'utf8');
   fs.writeFileSync(path.join(dist, '99_entry.gs'), entry);
   combined += entry + '\n';
-  // HTML
   for(const h of mf.html) fs.copyFileSync(path.join(SRC, h), path.join(dist, h));
-  // マニフェスト（appsscript.json はアプリ側の最小権限版）
   fs.copyFileSync(path.join(appDir, 'appsscript.json'), path.join(dist, 'appsscript.json'));
 
-  // クローズドチェック：私有関数・定数の未解決参照を検出
-  // 禁止関数の混入検査（P0-01）
   for(const re of (FORBIDDEN[app] || [])){
     if(re.test(combined)){ console.error('[' + app + '] 禁止関数が混入: ' + re); failed = true; }
   }
-  // マニフェスト検査：admin=DOMAIN限定、portal=最小スコープ
   const manifest = JSON.parse(fs.readFileSync(path.join(appDir, 'appsscript.json'), 'utf8'));
   if(app === 'admin' && manifest.webapp.access !== 'DOMAIN'){ console.error('[' + app + '] webapp.access は DOMAIN 必須'); failed = true; }
   if(app === 'portal' && manifest.oauthScopes.some(s => /drive|cloud-platform|external_request|presentations/.test(s))){
-    console.error('[portal] OAuthスコープが過大'); failed = true; }
+    console.error('[portal] OAuthスコープが過大'); failed = true;
+  }
   if(fs.existsSync(path.join(dist, '90_main.gs'))){ console.error('[' + app + '] モノリスエントリが混入'); failed = true; }
 
   const defined = definedNames(combined);
