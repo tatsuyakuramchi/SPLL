@@ -5,6 +5,10 @@
  *   ・portal   … 匿名公開。原作検索・申込作成のみ（admin_/webhook/トークン処理を含めない）
  *   ・workflow … Webhook・提出・報告・バッジ・検証・バッチ
  *   ・admin    … 管理コンソール（組織内限定）・セットアップ
+ *
+ * CloudSign FORM v4 の既存関数差替えは overlay として同じ dist ファイル末尾へ連結する。
+ * Apps Script 上の「別ファイルに同名関数がある場合の評価順」に依存させないための措置。
+ *
  * 使い方: node scripts/build.js   → 各 dist/ を再生成（クローズドチェック付き）
  */
 const fs = require('fs');
@@ -15,16 +19,24 @@ const SRC = path.join(ROOT, 'spll_src');
 const MANIFEST = {
   portal: {
     gs: ['00_core.gs','10_auth.gs','15_fee.gs','25_portal.gs','28_contract_form_v4_shared.gs','29_contract_form_v4.gs'],
+    overlays: {},
     html: ['index.html','portal_contract_v4_patch.html'],
     title: 'SPLL 公開ポータル (GAS①)',
   },
   workflow: {
-    gs: ['00_core.gs','15_fee.gs','20_tokens.gs','28_contract_form_v4_shared.gs','30_cloudsign.gs','32_contract.gs','33_contract_snapshot_v4.gs','35_webhooks.gs','36_formrun_contract_v4.gs','37_ai.gs','40_public_pages.gs','47_batches.gs'],
+    gs: ['00_core.gs','15_fee.gs','20_tokens.gs','28_contract_form_v4_shared.gs','30_cloudsign.gs','32_contract.gs','35_webhooks.gs','37_ai.gs','40_public_pages.gs','47_batches.gs'],
+    overlays: {
+      '32_contract.gs': ['33_contract_snapshot_v4.gs'],
+      '35_webhooks.gs': ['36_formrun_contract_v4.gs'],
+    },
     html: ['upload.html'],
     title: 'SPLL 契約・提出 (GAS②)',
   },
   admin: {
-    gs: ['00_core.gs','05_schema.gs','10_auth.gs','15_fee.gs','20_tokens.gs','25_portal.gs','28_contract_form_v4_shared.gs','29_contract_form_v4.gs','30_cloudsign.gs','32_contract.gs','33_contract_snapshot_v4.gs','37_ai.gs','50_admin.gs','51_admin_contract_v4.gs'],
+    gs: ['00_core.gs','05_schema.gs','10_auth.gs','15_fee.gs','20_tokens.gs','25_portal.gs','28_contract_form_v4_shared.gs','29_contract_form_v4.gs','30_cloudsign.gs','32_contract.gs','37_ai.gs','50_admin.gs','51_admin_contract_v4.gs'],
+    overlays: {
+      '32_contract.gs': ['33_contract_snapshot_v4.gs'],
+    },
     html: ['admin.html','admin_contract_v4_patch.html'],
     title: 'SPLL 管理コンソール (GAS③)',
   },
@@ -58,7 +70,11 @@ for(const [app, mf] of Object.entries(MANIFEST)){
 
   let combined = '';
   for(const f of mf.gs){
-    const body = fs.readFileSync(path.join(SRC, f), 'utf8');
+    let body = fs.readFileSync(path.join(SRC, f), 'utf8');
+    const overlays = (mf.overlays && mf.overlays[f]) || [];
+    overlays.forEach(function(of){
+      body += '\n\n// ===== build overlay: ' + of + ' =====\n' + fs.readFileSync(path.join(SRC, of), 'utf8');
+    });
     fs.writeFileSync(path.join(dist, f), body);
     combined += body + '\n';
   }
@@ -85,7 +101,8 @@ for(const [app, mf] of Object.entries(MANIFEST)){
     console.error('[' + app + '] 未解決参照: ' + unresolved.join(', '));
     failed = true;
   }
-  console.log('[' + app + '] dist生成: ' + mf.gs.length + ' gs + entry + ' + mf.html.length + ' html' + (unresolved.length ? '（要修正）' : ' / closure OK'));
+  const overlayCount = Object.values(mf.overlays || {}).reduce((n,a)=>n+a.length,0);
+  console.log('[' + app + '] dist生成: ' + mf.gs.length + ' gs + ' + overlayCount + ' overlay + entry + ' + mf.html.length + ' html' + (unresolved.length ? '（要修正）' : ' / closure OK'));
 }
 if(failed){ console.error('ビルド失敗：マニフェストにファイルを追加してください'); process.exit(1); }
 console.log('build done');
