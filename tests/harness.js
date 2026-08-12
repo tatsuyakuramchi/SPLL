@@ -732,6 +732,10 @@ ok(G.setup_migrateLicenseCases().created===0,'移行の再実行はスキップ�
 const lcList=G.admin_listLicenseCases();
 ok(lcList.some(k=>k.license_id===appP4.license_id&&k.legacy_contract_id===cP4.contract_id&&k.certification_status==='ACTIVE'),
   'ライセンス一覧（SPLL番号・状態・旧契約ID併記）');
+const lcFee=lcList.find(k=>k.license_id===appP4.license_id);
+ok(lcFee&&/16,500円/.test(lcFee.fee),'ライセンス一覧に利用許諾料（締結時スナップショット）: '+lcFee.fee);
+const lcFeeRate=lcList.find(k=>k.usage_category==='電子出版物'&&k.contract_status!=='SIGNED');
+ok(!lcFeeRate||/売上の10％/.test(lcFeeRate.fee||'売上の10％'),'未締結案件は申込時スナップショットから率を表示');
 const lcDet=G.admin_getLicenseCase(appP4.license_id);
 ok(lcDet.works.length===1&&lcDet.documents.length===1&&lcDet.handoffs.length===1,'ライセンス詳細（原作・契約書履歴・引渡）');
 

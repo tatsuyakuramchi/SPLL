@@ -793,21 +793,36 @@ function admin_saveContractTemplates(cfg){
 
 // ---- SPLLライセンス台帳（RP-001 §6：管理画面の主台帳）----
 function admin_listLicenseCases(){ requireRole_([]);
-  const worksBy = {};
+  const worksBy = {}, feeBy = {};
   readRows_(ssOps_(),'License_Works').forEach(function(w){
-    if(String(w.active) !== 'false') (worksBy[w.license_id] = worksBy[w.license_id] || []).push(w.work_name_snapshot || w.work_id); });
-  const contractBy = {};
+    if(String(w.active) !== 'false'){
+      (worksBy[w.license_id] = worksBy[w.license_id] || []).push(w.work_name_snapshot || w.work_id);
+      if(!feeBy[w.license_id]) feeBy[w.license_id] = licenseFeeLabel_(w);   // 料金は契約単位（原作間で共通）
+    }});
+  const contractBy = {}, feeSnapBy = {};
   readRows_(ssOps_(),'Contracts').forEach(function(c){
-    if(c.license_id && !contractBy[c.license_id]) contractBy[c.license_id] = c.contract_id; });
+    if(c.license_id && !contractBy[c.license_id]){
+      contractBy[c.license_id] = c.contract_id;
+      try{ feeSnapBy[c.license_id] = JSON.parse(c.terms_snapshot || '{}').fee_amount_or_rate || ''; }catch(e){}
+    }});
   return readRows_(ssOps_(),'License_Cases').slice(-200).reverse().map(function(k){ return {
     license_id: k.license_id, application_ref: k.application_ref,
     party_type: k.party_type, party_display_name: k.party_display_name,
     usage_category: k.usage_category, works: (worksBy[k.license_id] || []).join('、'),
+    fee: feeSnapBy[k.license_id] || feeBy[k.license_id] || '',   // 締結済は契約スナップショット、未締結は申込時スナップショット
     case_status: k.case_status, contract_status: k.contract_status,
     review_status: k.review_status, certification_status: k.certification_status,
     finance_handoff_status: k.finance_handoff_status,
     signed_at: String(k.signed_at || '').slice(0, 10),
     legacy_contract_id: contractBy[k.license_id] || '' }; });
+}
+/** License_Worksのスナップショットから料金表示ラベル（締結前の案件用） */
+function licenseFeeLabel_(w){
+  const model = String(w.fee_model_snapshot || '').toUpperCase();
+  const v = num_(w.fee_value_snapshot);
+  if(model === 'RATE') return '売上の' + Math.round(v * 1000) / 10 + '％';
+  if(model === 'FLAT') return v > 0 ? yen_(v) + '／契約' : '無償';
+  return '';
 }
 /** ライセンス詳細（契約書履歴・引渡状況つき）。 */
 function admin_getLicenseCase(licenseId){ requireRole_([]);
