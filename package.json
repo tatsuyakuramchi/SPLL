@@ -11,13 +11,11 @@
     "push:portal": "npm run build && cd apps/portal && clasp push -f",
     "push:workflow": "npm run build && cd apps/workflow && clasp push -f",
     "push:admin": "npm run build && cd apps/admin && clasp push -f",
-    "push:accounting": "npm run build && cd apps/accounting && clasp push -f",
-    "push:all": "npm run build && cd apps/portal && clasp push -f && cd ../workflow && clasp push -f && cd ../admin && clasp push -f && cd ../accounting && clasp push -f",
+    "push:all": "npm run build && cd apps/portal && clasp push -f && cd ../workflow && clasp push -f && cd ../admin && clasp push -f",
     "deploy:portal": "npm run build && node scripts/deploy.js portal",
     "deploy:workflow": "npm run build && node scripts/deploy.js workflow",
     "deploy:admin": "npm run build && node scripts/deploy.js admin",
-    "deploy:accounting": "npm run build && node scripts/deploy.js accounting",
-    "deploy:all": "npm run build && node scripts/deploy.js portal && node scripts/deploy.js workflow && node scripts/deploy.js admin && node scripts/deploy.js accounting"
+    "deploy:all": "npm run build && node scripts/deploy.js portal && node scripts/deploy.js workflow && node scripts/deploy.js admin"
   },
   "devDependencies": {
     "@google/clasp": "^2.4.2",

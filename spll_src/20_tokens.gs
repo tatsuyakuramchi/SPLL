@@ -1,7 +1,7 @@
 /** SPLL 20_tokens ― 用途別アクセストークン（修正設計書 SEC-06/§9.1） */
 
 // ---- 用途別アクセストークン（修正設計書 SEC-06/§9.1）----
-//   purpose: SUBMISSION（提出）/ REPORT（利用報告）/ BADGE_DOWNLOAD（バッジ取得）
+//   purpose: SUBMISSION（提出）/ BADGE_DOWNLOAD（バッジ取得）
 //   平文は発行時のみ返し、台帳にはハッシュのみ保存。期限・回数をサーバー側で検証。
 function issueToken_(contractId, purpose, days, maxUses){
   const token = Utilities.getUuid() + randCode_(8);

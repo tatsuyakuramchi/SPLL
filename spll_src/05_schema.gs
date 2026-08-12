@@ -39,7 +39,7 @@ const SCHEMA_OPS = {
   Contracts:            ['contract_id','cloudsign_document_id','cloudsign_title','application_id','application_ref','usage_category','terms_snapshot','status','link_status','signed_at','contract_file_id','contract_file_hash','folder_id','form_submission_id','route_type','terms_verification_status','terms_verification_detail','delivery_status','last_delivery_event_at','license_id'],
   // 清算は契約時スナップショットを正本とする（V2-011）：権利者・登録番号・料率・配分方式まで固定
   Contract_Works:       ['contract_work_id','contract_id','work_id','work_name_snapshot','publisher_snapshot','credit_snapshot','partner_id_snapshot','partner_name_snapshot','invoice_reg_number_snapshot','allocation_scheme_snapshot','royalty_rate_snapshot','handling_fee_rate_snapshot'],
-  // 用途別アクセストークン（SEC-06/§9.1）：SUBMISSION / REPORT / BADGE_DOWNLOAD
+  // 用途別アクセストークン（SEC-06/§9.1）：SUBMISSION / BADGE_DOWNLOAD
   Access_Tokens:        ['token_id','contract_id','purpose','token_hash','status','expires_at','max_uses','used_count','last_used_at','issued_at','revoked_at'],
   Submissions:          ['submission_id','contract_id','title','status','submitted_at'],
   Submission_Versions:  ['version_id','submission_id','version_no','status','submitted_at'],
@@ -48,17 +48,8 @@ const SCHEMA_OPS = {
   AI_Findings:          ['finding_id','ai_review_id','work_id','rule_id','severity','result','page','evidence','recommended_action','confidence'],
   Human_Reviews:        ['human_review_id','submission_id','version_id','reviewer','result','comments','reviewed_at'],
   Compliance_Alerts:    ['alert_id','contract_id','submission_id','severity','status','settlement_block'],
-  // 利用報告（FUN-01/§11.1）：SUBMITTED→RETURNED/APPROVED→LOCKED（→SUPERSEDED）
-  Usage_Reports:        ['report_id','contract_id','period','channel','qty','gross_sales','returns','deductions','net_sales','sales_url','status','submitted_at','approved_by','approved_at','locked_at','returned_reason','supersedes_report_id'],
-  // 請求（FUN-02）：source_type=CONTRACT（FLAT/PER_WORK締結時）/ REPORT（RATE報告承認後）
-  // 請求は累計残高方式（V2-010）：ISSUED/UNPAID/PARTIALLY_PAID/PAID/OVERPAID/VOID
-  Invoices:             ['invoice_id','invoice_number','contract_id','period','source_type','source_id','amount_rule','amount','tax_rate','tax_amount','total_amount','paid_amount','balance_amount','currency','due_date','status','payment_status_updated_at','issued_at','void_reason'],
-  Payments:             ['payment_id','invoice_id','contract_id','amount','paid_at','method','payment_reference','note','status','recorded_by','void_reason','voided_at','voided_by'],
-  Settlements:          ['settlement_id','partner_id','period','amount','status','hold_reason'],
-  // 清算明細（FLOW-04/§12.2）：原作・権利者・配分方式・比率を明示
-  Settlement_Details:   ['settlement_detail_id','settlement_id','contract_id','report_id','work_id','partner_id','allocation_scheme','allocation_ratio','rate_snapshot','amount','source_type','source_id','accounting_allocation_detail_id'],
-  // 清算ステータスは CONFIRMED を使わず OBJECTION_PERIOD→NO_OBJECTION_RECORDED→FINALIZED
-  Settlement_Statements:['statement_id','settlement_id','partner_id','period','type','reg_number_snapshot','status','effective_date','objection_due','pdf_file_id','sheet_id','version','sent_at','finalized_at','cloudsign_document_id','send_attempt_id','send_status','send_error','approved_by','approved_at','objection_note','objection_received_at'],
+  // ※利用報告・請求・入金・清算（Usage_Reports/Invoices/Payments/Settlements系）は
+  //   本システムの管理対象外（経理は独自運用）。既存シートがあっても触らない。
   Partners:             ['partner_id','name','invoice_reg_number','is_qualified_issuer','bank','contact'],
   Badges:               ['badge_id','contract_id','issued_at','png_l','png_m','png_s','token_hash','status'],
   // 認証：状態＋変更理由・承認記録
@@ -195,8 +186,6 @@ function setup_bootstrap(opts){
   if(!prop_('FORM_MAX_WORKS'))               sp.setProperty('FORM_MAX_WORKS', '5');   // 契約書テンプレートの原作枠（当面5）
   if(!getConfig_('DEFAULT_ALLOCATION_SCHEME','')) setConfig_('DEFAULT_ALLOCATION_SCHEME','BY_WORK_EQUAL');  // 配分方式（FLOW-04）
   if(!getConfig_('APPLICATION_RETENTION_DAYS','')) setConfig_('APPLICATION_RETENTION_DAYS','365');           // 未成立申込の保有期間
-  if(!getConfig_('TAX_RATE',''))                  setConfig_('TAX_RATE','0.10');                             // 消費税率（請求）
-  if(!getConfig_('INVOICE_DUE_DAYS',''))          setConfig_('INVOICE_DUE_DAYS','30');                       // 支払期日（発行から日数）
   if(!getConfig_('REVIEW_SLA_DAYS',''))           setConfig_('REVIEW_SLA_DAYS','5');                         // 人手審査SLA（営業日相当・暦日）
 
   // 5) サンプル投入（既定ON・既存があればスキップ）
@@ -234,7 +223,7 @@ function setup_seedSamples_(){
 }
 
 // ---- スキーマ移行（修正設計書v2 V2-003）----
-const SCHEMA_VERSION = 5;   // v5: SPLLライセンス台帳（License_Cases系・SPLL-SYS-RP-001 §6/§10）＋license_id列
+const SCHEMA_VERSION = 6;   // v6: Finance領域を管理対象から除外（契約管理・認証専用化）。v5: SPLLライセンス台帳＋license_id列
 
 /**
  * 既存スプレッドシートへ不足シート・不足列を追加する（既存列の削除・並び替えはしない）。
@@ -338,8 +327,8 @@ function setup_status(){
 
 // ============================================================
 // 一括初期設定（adminのGASエディタから setup_all を1回実行）
-//   台帳・Drive・スキーマ移行・初期管理者・経理台帳までを一気に整え、
-//   他プロジェクト（portal/workflow/accounting）へ転記するプロパティ一覧をログに出力する。
+//   台帳・Drive・スキーマ移行・初期管理者までを一気に整え、
+//   他プロジェクト（portal/workflow）へ転記するプロパティ一覧をログに出力する。
 //   冪等：既存の設定・台帳は再利用し、作り直さない。
 // ============================================================
 function setup_all(adminEmail){
@@ -371,26 +360,19 @@ function setup_all(adminEmail){
     report.steps.push('HANDOFF_SECRET を生成（portal/workflowへ転記が必要）');
   }
 
-  // 5) 経理台帳（SPLL-SYS-AD-001）：マスタ・年度ブック・Driveフォルダ・初期値
-  try{ const acc = setup_accountingBootstrap(); report.steps.push('setup_accountingBootstrap: ' + JSON.stringify({ created: Object.keys(acc.created||{}), reused: Object.keys(acc.reused||{}) })); }
-  catch(e){ report.steps.push('setup_accountingBootstrap 失敗: ' + String(e && e.message || e)); }
-  // 5.5) ライセンス台帳移行（RP-001）：既存申込・契約をSPLL番号（License_Cases）へ
+  // 5) ライセンス台帳移行（RP-001）：既存申込・契約をSPLL番号（License_Cases）へ
   try{ const lm = setup_migrateLicenseCases(); report.steps.push('setup_migrateLicenseCases: ' + JSON.stringify(lm)); }
   catch(e){ report.steps.push('setup_migrateLicenseCases 失敗: ' + String(e && e.message || e)); }
 
   // 6) 転記用プロパティ一覧（ScriptPropertiesはプロジェクトごとに独立）
   const P = function(k){ return sp.getProperty(k) || ''; };
   report.properties = { ENVIRONMENT: P('ENVIRONMENT'), SS_MASTER: P('SS_MASTER'), SS_OPS: P('SS_OPS'),
-    DRIVE_ROOT: P('DRIVE_ROOT'), SS_ACCOUNTING_MASTER: P('SS_ACCOUNTING_MASTER'),
-    SS_ACCOUNTING_CURRENT: P('SS_ACCOUNTING_CURRENT'), HANDOFF_SECRET: P('HANDOFF_SECRET') };
+    DRIVE_ROOT: P('DRIVE_ROOT'), HANDOFF_SECRET: P('HANDOFF_SECRET') };
   report.copy_to_other_projects = {
     portal:     { ENVIRONMENT: P('ENVIRONMENT'), SS_MASTER: P('SS_MASTER'), SS_OPS: P('SS_OPS'),
                   HANDOFF_SECRET: P('HANDOFF_SECRET'), ADMIN_CONSOLE_URL: '（adminのウェブアプリURL /exec を設定）' },
     workflow:   { ENVIRONMENT: P('ENVIRONMENT'), SS_MASTER: P('SS_MASTER'), SS_OPS: P('SS_OPS'),
-                  DRIVE_ROOT: P('DRIVE_ROOT'), HANDOFF_SECRET: P('HANDOFF_SECRET') },
-    accounting: { ENVIRONMENT: P('ENVIRONMENT'), SS_MASTER: P('SS_MASTER'), SS_OPS: P('SS_OPS'),
-                  DRIVE_ROOT: P('DRIVE_ROOT'), SS_ACCOUNTING_MASTER: P('SS_ACCOUNTING_MASTER'),
-                  SS_ACCOUNTING_CURRENT: P('SS_ACCOUNTING_CURRENT') } };
+                  DRIVE_ROOT: P('DRIVE_ROOT'), HANDOFF_SECRET: P('HANDOFF_SECRET') } };
 
   Logger.log('===== setup_all 完了 =====');
   report.steps.forEach(function(s){ Logger.log('・' + s); });
@@ -404,7 +386,6 @@ function setup_all(adminEmail){
   Logger.log('');
   Logger.log('▼ 残りの手作業');
   Logger.log('・workflow のエディタで setup_workflowAll を実行（トリガー作成）');
-  Logger.log('・accounting のエディタで setup_accountingAll を実行（経理ジョブトリガー作成）');
   Logger.log('・portal の ADMIN_CONSOLE_URL に adminのウェブアプリURL（/exec）を設定');
   return report;
 }

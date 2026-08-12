@@ -212,7 +212,7 @@ function parseJson_(s, def){ try{ const v = JSON.parse(s); return (v==null ? def
 function createContractFolder_(contractId){
   const root = DriveApp.getFolderById(cfg_('DRIVE_ROOT'));
   const f = root.createFolder(contractId);
-  ['01_Contract','02_Submissions','03_AI_Reviews','04_Human_Reviews','05_Usage_Reports','06_Settlements']
+  ['01_Contract','02_Submissions','03_AI_Reviews','04_Human_Reviews']
     .forEach(n=>f.createFolder(n));
   return f.getId();
 }

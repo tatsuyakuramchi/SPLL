@@ -15,11 +15,11 @@ function combined(app){
 let pass = 0, fail = 0;
 function ok(c, msg){ if(c){ pass++; } else { fail++; console.log('  FAIL:', msg); } }
 
-for(const app of ['portal','workflow','admin','accounting']){
+for(const app of ['portal','workflow','admin']){
   const c = combined(app);
   try{ new vm.Script(c); ok(true, ''); }catch(e){ ok(false, app + ' 構文エラー: ' + e.message); }
 }
-const p = combined('portal'), w = combined('workflow'), a = combined('admin'), ac = combined('accounting');
+const p = combined('portal'), w = combined('workflow'), a = combined('admin');
 
 // portal（匿名公開・最小権限）
 ok(!/function admin_/.test(p),               'portal に admin_ 関数が含まれない');
@@ -39,13 +39,6 @@ ok(!/function receiveWebhook_/.test(a),      'admin にWebhook受信が無い');
 ok(!/function web_submitWork/.test(a),       'admin に匿名提出処理が無い');
 ok(/function admin_dashboard/.test(a),       'admin に管理機能がある');
 ok(/function setup_bootstrap/.test(a),       'admin に setup_bootstrap がある');
-// accounting（経理設計書 §4.1：Webhook・匿名公開関数を含めない）
-ok(!/function receiveWebhook_/.test(ac),     'accounting にWebhook受信が無い');
-ok(!/function web_createApplication/.test(ac),'accounting に匿名申込処理が無い');
-ok(!/function web_submitWork/.test(ac),      'accounting に匿名提出処理が無い');
-ok(!/function serveVerify_/.test(ac),        'accounting に公開検証ポータルが無い');
-ok(/function runAccountingJobs_/.test(ac),   'accounting に経理ジョブ基盤がある');
-ok(/function setup_accountingBootstrap/.test(ac), 'accounting に経理セットアップがある');
 // マニフェスト（最小権限・公開範囲）
 const pj = JSON.parse(fs.readFileSync(path.join(ROOT,'apps/portal/dist/appsscript.json'),'utf8'));
 ok(!pj.oauthScopes.some(s => /drive|cloud-platform|external_request|presentations/.test(s)),
@@ -54,10 +47,5 @@ const aj = JSON.parse(fs.readFileSync(path.join(ROOT,'apps/admin/dist/appsscript
 ok(aj.webapp.access === 'DOMAIN',            'admin は組織内限定（DOMAIN）');
 const wj = JSON.parse(fs.readFileSync(path.join(ROOT,'apps/workflow/dist/appsscript.json'),'utf8'));
 ok(wj.webapp.access === 'ANYONE_ANONYMOUS',  'workflow は匿名（トークン/Webhook防御あり）');
-const acj = JSON.parse(fs.readFileSync(path.join(ROOT,'apps/accounting/dist/appsscript.json'),'utf8'));
-ok(acj.webapp.access === 'DOMAIN',           'accounting は組織内限定（DOMAIN）');
-ok(!acj.oauthScopes.some(s => /cloud-platform|external_request|presentations/.test(s)),
-   'accounting のOAuthスコープ最小（GCP/外部API/Slidesなし）');
-
 console.log('\nSEC01 RESULT: ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

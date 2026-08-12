@@ -64,78 +64,11 @@ function admin_cloudSignTest(){ requireRole_(['SYSTEM_ADMIN']);
   }
 }
 
-// ---- 利用報告の管理（FUN-01/§11.1：SUBMITTED→RETURNED/APPROVED→LOCKED）----
-function admin_listReports(){
-  requireRole_([]);
-  const ctrWorks = contractWorksMap_();
-  return readRows_(ssOps_(),'Usage_Reports').map(function(r){ return {
-    report_id:r.report_id, contract_id:r.contract_id, work:contractWorkLabel_(ctrWorks, r.contract_id),
-    period:String(r.period||''), channel:String(r.channel||''), qty:String(r.qty||''),
-    gross:String(r.gross_sales||''), net:String(r.net_sales||''), url:String(r.sales_url||''),
-    status:r.status||'', submitted_at:String(r.submitted_at||'') }; });
-}
-function reportTransition_(reportId, from, patch, actorEmail){
-  const r = readRows_(ssOps_(),'Usage_Reports').find(function(x){ return x.report_id === reportId; });
-  if(!r) throw new Error('DATA_NOT_FOUND: 報告が見つかりません: ' + reportId);
-  if(from.indexOf(r.status) < 0) throw new Error('DATA_CONFLICT: 現在の状態（' + r.status + '）からは実行できません');
-  updateRow_(ssOps_(),'Usage_Reports','report_id',reportId,patch);
-  logEvent_('usage_report', reportId, actorEmail, {status:r.status}, patch);
-  return true;
-}
-/** 承認（SUBMITTED→APPROVED）。RATE契約はここから請求起票が可能になる。 */
-function admin_approveReport(reportId){
-  const actor = requireRole_(['ACCOUNTING']);
-  return reportTransition_(reportId, ['SUBMITTED'], { status:'APPROVED', approved_by:actor.email, approved_at:new Date().toISOString() }, actor.email);
-}
-/** 差戻し（SUBMITTED→RETURNED）。理由必須。利用者は同期間を再提出できる。 */
-function admin_returnReport(reportId, reason){
-  const actor = requireRole_(['ACCOUNTING']);
-  if(!reason) throw new Error('VALIDATION_ERROR: 差戻し理由は必須です');
-  return reportTransition_(reportId, ['SUBMITTED'], { status:'RETURNED', returned_reason:sanitizeCell_(String(reason)) }, actor.email);
-}
-/** ロック（APPROVED→LOCKED）。清算・請求の対象として確定。 */
-function admin_lockReport(reportId){
-  const actor = requireRole_(['ACCOUNTING']);
-  return reportTransition_(reportId, ['APPROVED'], { status:'LOCKED', locked_at:new Date().toISOString() }, actor.email);
-}
-/** RATE契約：承認済み報告から請求を起票（net×契約スナップショット率）。冪等（報告単位）。 */
-function admin_generateInvoicesFromReports(period){
-  const actor = requireRole_(['ACCOUNTING']);
-  period = period || currentPeriod_();
-  const contracts = {}; readRows_(ssOps_(),'Contracts').forEach(function(c){ contracts[c.contract_id] = c; });
-  const invoiced = {}; readRows_(ssOps_(),'Invoices').forEach(function(v){ if(v.source_type==='REPORT') invoiced[v.source_id] = true; });
-  const targets = readRows_(ssOps_(),'Usage_Reports').filter(function(r){
-    return String(r.period) === String(period) && (r.status === 'APPROVED' || r.status === 'LOCKED') && !invoiced[r.report_id]; });
-  const out = [];
-  targets.forEach(function(r){
-    const c = contracts[r.contract_id]; if(!c) return;
-    let t = {}; try{ t = JSON.parse(c.terms_snapshot||'{}'); }catch(e){}
-    if(String(t.fee_model).toUpperCase() !== 'RATE' || t.rate == null) return;
-    const amount = Math.round(num_(r.net_sales) * num_(t.rate));
-    if(amount <= 0) return;
-    const invId = createInvoice_(r.contract_id, period, 'REPORT', r.report_id, t.fee_amount_or_rate||'', amount, actor.email);
-    out.push({ invoice_id:invId, contract_id:r.contract_id, amount:amount });
-  });
-  return { period:period, generated:out.length, invoices:out };
-}
-/** 報告リンクの発行（当社からメール送信はしない） */
-function admin_sendReportLink(contractId){
-  requireRole_(['OPERATIONS','ACCOUNTING']);
-  const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === contractId; });
-  if(!c) throw new Error('契約が見つかりません: ' + contractId);
-  const token = issueToken_(contractId, 'REPORT', 400, 24);
-  let base = ''; try{ base = ScriptApp.getService().getUrl() || ''; }catch(e){}
-  return { url:(base||'') + '?page=report&token=' + token, token:token };
-}
-
-/** ダッシュボード：6KPI＋直近の要対応（作品名を結合） */
+/** ダッシュボード：KPI＋直近の要対応（作品名を結合） */
 function admin_dashboard(){ requireRole_([]);
   const jobs      = readRows_(ssOps_(),'AI_Review_Jobs');
   const findings  = readRows_(ssOps_(),'AI_Findings');
-  const contracts = readRows_(ssOps_(),'Contracts');
   const apps      = readRows_(ssOps_(),'Applications');
-  const invoices  = readRows_(ssOps_(),'Invoices');
-  const reports   = readRows_(ssOps_(),'Usage_Reports');
   const alerts    = readRows_(ssOps_(),'Compliance_Alerts');
   const human     = readRows_(ssOps_(),'Human_Reviews');
   const ctrWorks  = contractWorksMap_();
@@ -146,8 +79,8 @@ function admin_dashboard(){ requireRole_([]);
     highRisk:      findings.filter(isHighRisk_).length,
     unscreened:    jobs.filter(j => j.status==='QUEUED' || j.status==='SCANNING').length,
     signing:       apps.filter(a => a.status && a.status!=='SIGNED' && a.status!=='CANCELLED').length,
-    unpaid:        invoices.filter(v => ['PAID','VOID','OVERPAID'].indexOf(String(v.status)) < 0).length,
-    reporting:     reports.filter(r => r.status && r.status!=='SUBMITTED' && r.status!=='APPROVED' && r.status!=='LOCKED').length
+    unpaid:        0,
+    reporting:     0
   };
 
   const subCtr = {}; readRows_(ssOps_(),'Submissions').forEach(s => { subCtr[s.submission_id] = s.contract_id; });
@@ -155,10 +88,6 @@ function admin_dashboard(){ requireRole_([]);
   alerts.filter(a => a.status!=='CLOSED').forEach(a => rows.push({
     kind:'審査', target:a.submission_id||a.contract_id||'', work:contractWorkLabel_(ctrWorks, a.contract_id||subCtr[a.submission_id]),
     status:String(a.severity||'ALERT'), cls:isHighRisk_(a)?'fail':'review', at:String(a.occurred_at||'')
-  }));
-  invoices.filter(v => ['ISSUED','UNPAID','PARTIALLY_PAID'].indexOf(String(v.status)) >= 0).forEach(v => rows.push({
-    kind:'入金', target:v.contract_id, work:contractWorkLabel_(ctrWorks, v.contract_id),
-    status:(v.status==='PARTIALLY_PAID' ? '一部入金' : '入金待ち'), cls:'unpaid', at:String(v.issued_at||'')
   }));
   rows.sort((a,b) => String(b.at).localeCompare(String(a.at)));
   return { kpis: kpis, alerts: rows.slice(0,8) };
@@ -315,119 +244,9 @@ function admin_linkContract(contractId, applicationId){ requireRole_(['OPERATION
   return true;
 }
 
-/** 入金管理：請求(Invoices)に入金(Payments)状況・作品名を結合 */
-function admin_listPayments(){ requireRole_([]);
-  const invoices  = readRows_(ssOps_(),'Invoices');
-  const payments  = readRows_(ssOps_(),'Payments');
-  const ctrWorks  = contractWorksMap_();
-  return invoices.map(v => {
-    const pays = payments.filter(p => String(p.invoice_id)===String(v.invoice_id) && p.status !== 'VOID');
-    const total = num_(v.total_amount) || num_(v.amount);
-    const lastPay = pays.slice().sort((a,b)=>String(b.paid_at||'').localeCompare(String(a.paid_at||'')))[0];
-    return {
-      invoice_id:v.invoice_id, contract_id:v.contract_id, work:contractWorkLabel_(ctrWorks, v.contract_id),
-      amount:String(total || v.amount_rule || ''), due_date:String(v.due_date||''),
-      status:v.status || 'ISSUED', paid_amount:num_(v.paid_amount), balance:num_(v.balance_amount),
-      paid_at: lastPay ? String(lastPay.paid_at||'') : '',
-      diff: -num_(v.balance_amount)
-    };
-  });
-}
-
-/** 入金記録（結果入力）。recordedBy/paidAt は未指定なら補完。 */
-function admin_recordPayment(contractId, invoiceId, amount, paidAt, paymentReference){
-  const actor = requireRole_(['ACCOUNTING']);
-  // V2-010：請求存在→契約照合→VOID拒否→参照重複→累計→状態決定（一部入金・過入金対応）
-  if(!invoiceId) throw new Error('VALIDATION_ERROR: 請求IDは必須です');
-  const inv = readRows_(ssOps_(),'Invoices').find(function(v){ return String(v.invoice_id)===String(invoiceId); });
-  if(!inv) throw new Error('DATA_NOT_FOUND: 請求が見つかりません: ' + invoiceId);
-  if(contractId && String(inv.contract_id) !== String(contractId))
-    throw new Error('DATA_CONFLICT: 請求の契約と入金対象の契約が一致しません');
-  if(inv.status === 'VOID') throw new Error('DATA_CONFLICT: 取消済み（VOID）の請求には入金できません');
-  const amt = requireNonNegativeNumber_(amount, '入金額');
-  if(amt <= 0) throw new Error('VALIDATION_ERROR: 入金額は正の数値で入力してください');
-  paidAt = String(paidAt || new Date().toISOString().slice(0,10));
-  if(!/^\d{4}-\d{2}-\d{2}$/.test(paidAt)) throw new Error('VALIDATION_ERROR: 入金日は YYYY-MM-DD 形式で入力してください');
-  const ref = String(paymentReference||'').slice(0,64);
-  if(ref && readRows_(ssOps_(),'Payments').some(function(p){ return p.payment_reference === ref && p.status !== 'VOID'; }))
-    throw new Error('DATA_CONFLICT: 同一の入金参照番号が登録済みです: ' + ref);
-  appendRow_(ssOps_(),'Payments',{ payment_id:newId_('PAY'), invoice_id:invoiceId, contract_id:inv.contract_id,
-    amount:amt, paid_at:paidAt, payment_reference:sanitizeCell_(ref), status:'RECORDED', recorded_by:actor.email });
-  const st = recalcInvoiceStatus_(invoiceId);
-  logEvent_('payment', inv.contract_id, actor.email, null, {invoice_id:invoiceId, amount:amt, paid_at:paidAt, status:st.status, balance:st.balance});
-  return { recorded:true, status:st.status, paid_amount:st.paid, balance:st.balance, diff:-st.balance };
-}
-/** 請求の累計入金・残額・状態を再計算（V2-010）。UNPAID/PARTIALLY_PAID/PAID/OVERPAID。 */
-function recalcInvoiceStatus_(invoiceId){
-  const inv = readRows_(ssOps_(),'Invoices').find(function(v){ return String(v.invoice_id)===String(invoiceId); });
-  if(!inv) return { status:'', paid:0, balance:0 };
-  const total = num_(inv.total_amount) || num_(inv.amount);
-  const paid = readRows_(ssOps_(),'Payments')
-    .filter(function(p){ return String(p.invoice_id)===String(invoiceId) && p.status !== 'VOID'; })
-    .reduce(function(s,p){ return s + num_(p.amount); }, 0);
-  const balance = total - paid;
-  const status = inv.status === 'VOID' ? 'VOID'
-    : paid === 0 ? 'UNPAID' : (balance > 0 ? 'PARTIALLY_PAID' : (balance === 0 ? 'PAID' : 'OVERPAID'));
-  updateRow_(ssOps_(),'Invoices','invoice_id',invoiceId,
-    { paid_amount:paid, balance_amount:balance, status:status, payment_status_updated_at:new Date().toISOString() });
-  return { status:status, paid:paid, balance:balance };
-}
-
-/** 入金の取消（請求は入金待ちへ戻す） */
-function admin_voidPayment(invoiceId, reason){
-  const actor = requireRole_(['ACCOUNTING']);
-  if(!String(reason||'').trim()) throw new Error('VALIDATION_ERROR: 取消理由は必須です');
-  const now = new Date().toISOString();
-  const pays = readRows_(ssOps_(),'Payments').filter(p => String(p.invoice_id)===String(invoiceId) && p.status !== 'VOID');
-  if(!pays.length) throw new Error('DATA_NOT_FOUND: 取消対象の入金がありません');
-  pays.forEach(p => updateRow_(ssOps_(),'Payments','payment_id',p.payment_id,
-    { status:'VOID', void_reason:sanitizeCell_(String(reason)), voided_at:now, voided_by:actor.email }));
-  const st = recalcInvoiceStatus_(invoiceId);   // 残額・状態を再計算（V2-010-9）
-  logEvent_('payment', invoiceId, actor.email, {status:'RECORDED'}, {status:'VOID', reason:String(reason), invoice_status:st.status});
-  return true;
-}
-
-/** 半期清算：計算書(Settlement_Statements)に配分額・パートナー名を結合 */
-function admin_listSettlements(){ requireRole_([]);
-  const stmts       = readRows_(ssOps_(),'Settlement_Statements');
-  const settlements = readRows_(ssOps_(),'Settlements');
-  const partners    = readRows_(ssOps_(),'Partners');
-  const pName = {}; partners.forEach(p => { pName[p.partner_id] = p.name; });
-  const sAmt  = {}; settlements.forEach(s => { sAmt[s.settlement_id] = s.amount; });
-  return stmts.map(s => ({
-    statement_id:s.statement_id, period:String(s.period||''), partner:pName[s.partner_id]||String(s.partner_id||''),
-    amount:String(sAmt[s.settlement_id]||''), status:s.status||'', objection_due:String(s.objection_due||'')
-  }));
-}
-
-/** 計算書の承認（DRAFT→APPROVED）。送信は admin_sendApprovedStatements で実施。 */
-function admin_approveStatement(statementId){
-  const actor = requireRole_(['ACCOUNTING']);
-  updateRow_(ssOps_(),'Settlement_Statements','statement_id',statementId,
-    {status:'APPROVED', approved_by:actor.email, approved_at:new Date().toISOString()});
-  logEvent_('settlement_statement', statementId, actor.email, null, {status:'APPROVED'});
-  return true;
-}
-
 // ---- バッチ手動起動（管理コンソールから・時間主導トリガーと共用） ----
 /** QUEUEDのAI審査ジョブを実行 */
 function admin_runAiReviews(){ requireRole_(['OPERATIONS']); const r = batch_runAiReviews_(); logEvent_('batch','ai_reviews',actor_(),null,r); return r; }
-/** 当期（または指定期）の計算書をDRAFT生成 */
-function admin_generateStatements(period){ requireRole_(['ACCOUNTING']); const r = generateStatements_(period||currentPeriod_()); logEvent_('batch','generate_statements',actor_(),null,r); return r; }
-/** 承認済の計算書をCloudSign送信（みなし合意・発効日＋1ヶ月） */
-function admin_sendApprovedStatements(){ requireRole_(['ACCOUNTING']); const r = batch_sendApprovedStatements_(); logEvent_('batch','send_statements',actor_(),null,r); return r; }
-/** 異議申立の記録（管理コンソール） */
-function admin_recordObjection(statementId, note){ requireRole_(['ACCOUNTING','LEGAL_ADMIN']);
-  updateRow_(ssOps_(),'Settlement_Statements','statement_id',statementId,{ status:'OBJECTION_RECEIVED' });
-  logEvent_('settlement_statement', statementId, actor_(), null, { status:'OBJECTION_RECEIVED', note:note||'' });
-  return true;
-}
-/** 支払確定（管理コンソール）：NO_OBJECTION_RECORDED → FINALIZED */
-function admin_finalizeStatement(statementId){ requireRole_(['ACCOUNTING']);
-  updateRow_(ssOps_(),'Settlement_Statements','statement_id',statementId,{ status:'FINALIZED', finalized_at:new Date().toISOString() });
-  logEvent_('settlement_statement', statementId, actor_(), null, { status:'FINALIZED' });
-  return true;
-}
 
 function admin_getLegalTexts(){ requireRole_([]); return api_getLegalTexts(); }
 function admin_saveLegalTexts(privacy, termsTemplate){ requireRole_(['LEGAL_ADMIN']);
@@ -835,19 +654,8 @@ function admin_publishLegalDoc(legalDocumentId){
   return true;
 }
 
-/** 送信失敗した計算書を手動で再送可能に戻す（CloudSign側の書類有無を確認してから実行すること） */
-function admin_retryStatementSend(statementId){
-  const actor = requireRole_(['ACCOUNTING']);
-  const st = readRows_(ssOps_(),'Settlement_Statements').find(function(x){ return x.statement_id === statementId; });
-  if(!st) throw new Error('DATA_NOT_FOUND: 計算書が見つかりません');
-  if(st.status !== 'SEND_FAILED') throw new Error('DATA_CONFLICT: SEND_FAILED のみ再送に戻せます（現在: ' + st.status + '）');
-  updateRow_(ssOps_(),'Settlement_Statements','statement_id',statementId,{ status:'APPROVED', send_error:'' });
-  logEvent_('settlement_statement', statementId, actor.email, {status:'SEND_FAILED'}, {status:'APPROVED', retry:true});
-  return true;
-}
-
 // ============================================================
-// CloudSign例外対応（経理設計書 §10.5/§10.8〜10.11/§12.6）
+// CloudSign例外対応（§10.5/§10.8〜10.11/§12.6）
 // ============================================================
 /** 自動送信失敗・手動送信待ちの申込一覧。 */
 function admin_listCloudSignSendFailures(){ requireRole_([]);

@@ -1128,16 +1128,21 @@ SPLL番号発行
 
 # 23. 実装状況
 
+> **方針転換（2026-08-12）**：経理（Finance）は本システムの外で独自運用を構築することが決定した。
+> 本計画の「Finance側」実装（利用報告・請求・入金・清算・経理連携GAS④）は**全削除**し、
+> 本システムは**契約管理（作品の認証管理・バッジ・検証を含む）専用**とする。
+> License→経理の境界は `Finance_Handoffs`（締結スナップショットのREADY引渡）として存置し、
+> 経理側の独自運用がこれを参照する。P1（Finance DB分離）・P2は対象外となった。
+
 | 項目（§19/§20） | 状態 |
 |---|---|
-| ① License_Cases | **実装済**：SCHEMA_OPSへ追加（SCHEMA_VERSION=5）。申込時に`newId_('SPLL')`でSPLL番号発行・1案件1行 |
+| ① License_Cases | **実装済**：SCHEMA_OPSへ追加。申込時に`newId_('SPLL')`でSPLL番号発行・1案件1行 |
 | ② License_Works | **実装済**：費用＝契約形態（利用目的）×原作構造をポータルで自動確定しスナップショット |
 | ③ Contract_Documents | **実装済**：締結ごとにORIGINAL等を1:N追記（PDF・ハッシュ） |
-| ④ Finance_Handoffs | **実装済**：締結でREADY作成→Finance側バッチ`financeAcceptHandoffs_`がACCEPTED＋FLAT/PER_WORK債権生成（冪等・license_id+version） |
-| ⑤ 既存データ変換 | **実装済**：`setup_migrateLicenseCases`（冪等・旧締結分はACCEPTED扱いで二重請求防止・setup_allに組込み） |
-| ⑥ Admin一覧切替 | **実装済**：「ライセンス」タブ（License_Cases一覧＝SPLL番号/契約者/状態/引渡・旧契約ID併記）。旧タブは移行期間中併存 |
-| ⑦ finishContractLinkage_分解 | **実装済**：`finishLicenseActivation_`（認証・バッジ・提出）＋`createFinanceHandoff_`。License側の請求生成（createInvoiceOnSigning_直接呼出し）を除去 |
+| ④ Finance_Handoffs | **実装済**：締結でREADY作成（冪等・license_id+version）。取込（ACCEPTED化）・請求は経理側の独自運用 |
+| ⑤ 既存データ変換 | **実装済**：`setup_migrateLicenseCases`（冪等・旧締結分はACCEPTED扱い・setup_allに組込み） |
+| ⑥ Admin一覧切替 | **実装済**：「ライセンス」タブ（License_Cases一覧＝SPLL番号/契約者/状態/経理引渡・旧契約ID併記） |
+| ⑦ finishContractLinkage_分解 | **実装済**：`finishLicenseActivation_`（認証・バッジ・提出）＋`createFinanceHandoff_`。請求生成は削除 |
 | CloudSignフォーム簡素化（P0-6） | **実装済（システム側）**：hidden最小化（license_id/application_ref/handoff_token＋表示用）・契約者区分でフォームURL切替（FORM_URL_INDIVIDUAL/CORPORATION）・契約者名/区分の台帳自動反映。フォーム項目設計v2.0（SPLL-SYS-FD-002）を発行。formrun側の作り直しは利用者作業 |
-| P1（Finance DB分離・報告/請求/入金移管・Finance Admin） | 未実装 |
-| P2（旧テーブル書込停止・物理デプロイ分離） | 未実装 |
-| テスト | harness 347件／sec01 30件 全通過（SPLL番号発行・台帳遷移・引渡冪等・移行・区分別フォーム 等22件追加） |
+| Finance領域（利用報告・請求・入金・清算・経理連携GAS④） | **削除済**（2026-08-12 方針転換：経理は独自運用） |
+| テスト | harness 212件／sec01 21件 全通過（Finance関連テストを剪定） |

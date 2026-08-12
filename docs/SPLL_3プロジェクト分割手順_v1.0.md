@@ -1,16 +1,12 @@
-# SPLL GAS プロジェクト分割 セットアップ手順（SEC-01＋経理連携）
+# SPLL GAS プロジェクト分割 セットアップ手順（SEC-01）
 
-**対応**：修正設計書 v1.0（SPLL-SYS-RD-001）§3・§22・§29 ／ SEC-01 ／ 経理設計書（SPLL-SYS-AD-001）§4
-**版**：v1.1（GAS④ Accounting を追加）
+**対応**：修正設計書 v1.0（SPLL-SYS-RD-001）§3・§22・§29 ／ SEC-01
+**版**：v1.2（GAS④ Accounting を廃止・3プロジェクト構成へ戻す）
 
-> **v1.1追記**：経理連携（SPLL-SYS-AD-001）により **GAS④ accounting** が加わりました。
-> セットアップは①〜③と同様（`apps/accounting/.clasp.json` にスクリプトIDを記入し `npm run push:accounting`）。
-> ScriptPropertiesは `ENVIRONMENT`（必須）・`SS_MASTER`・`SS_OPS`・`DRIVE_ROOT` を設定後、
-> **admin または accounting のエディタで `setup_accountingBootstrap` を1回実行**（経理マスタ・年度別台帳・
-> Driveフォルダを自動作成し `SS_ACCOUNTING_MASTER`／`SS_ACCOUNTING_CURRENT` を自動登録。
-> adminで実行した場合は表示されたIDを accounting 側のプロパティにも転記）。
-> 最後に **accounting で `setup_accountingTriggers`**（5分毎の経理ジョブ実行）。
-> 既存3プロジェクトはスキーマ更新のため admin で `setup_migrate` を再実行してください（SCHEMA_VERSION=4）。
+> **v1.2追記（2026-08-12）**：経理は独自運用を構築する方針となり、**GAS④ accounting は廃止**しました。
+> 本システムは portal／workflow／admin の3プロジェクト（契約管理・認証専用）です。
+> 既にGAS④を作成済みの場合は、そのGASプロジェクトをアーカイブし、`apps/accounting/` 関連の
+> ローカル設定（.clasp.json / .deploy.json）は破棄してください。スキーマ更新は admin で `setup_migrate` を再実行。
 
 ## 1. 構成
 
@@ -20,7 +16,7 @@
 | プロジェクト | 役割 | 公開範囲 | 含まれないもの（権限分離） |
 |---|---|---|---|
 | **GAS① portal** | 原作検索・申込作成・公開API | 匿名公開 | admin_関数・setup_・Webhook・トークン発行・Drive/GCP/外部APIスコープ |
-| **GAS② workflow** | Webhook受信・提出・報告・バッジ・検証・バッチ | 匿名公開（トークン/Webhook検証で防御） | admin_関数・setup_bootstrap |
+| **GAS② workflow** | Webhook受信・提出・バッジ・検証・バッチ | 匿名公開（トークン/Webhook検証で防御） | admin_関数・setup_bootstrap |
 | **GAS③ admin** | 管理コンソール・セットアップ | **組織内限定（DOMAIN）** | Webhook受信・匿名提出処理 |
 
 > **モノリス（単一プロジェクト）デプロイ経路は廃止しました（修正設計書v2 P0-01）。**
@@ -53,10 +49,10 @@ copy apps\admin\.clasp.json.example    apps\admin\.clasp.json
 ### 2.3 ビルド＆push
 
 ```bash
-npm run push:all        # build → portal/workflow/admin/accounting を順に push
+npm run push:all        # build → portal/workflow/admin を順に push
 ```
 
-個別push：`npm run push:portal` / `push:workflow` / `push:admin` / `push:accounting`
+個別push：`npm run push:portal` / `push:workflow` / `push:admin`
 
 > **注意**：`push` はコードを更新するだけで、公開URL（/exec）には反映されません。
 > 公開URLへの反映は次の 2.4 の `deploy` コマンドを使うか、GASエディタで「デプロイ→編集→新バージョン」。
@@ -73,13 +69,13 @@ npm run push:all        # build → portal/workflow/admin/accounting を順に p
 { "deploymentId": "AKfycb..." }
 ```
 
-（workflow / admin / accounting も同様）
+（workflow / admin も同様）
 
 以後は次の1コマンドで build → push → 公開URLへ新バージョン反映まで完了します（URLは変わりません）：
 
 ```bash
-npm run deploy:all          # 4プロジェクトすべて
-npm run deploy:portal       # 個別（deploy:workflow / deploy:admin / deploy:accounting）
+npm run deploy:all          # 3プロジェクトすべて
+npm run deploy:portal       # 個別（deploy:workflow / deploy:admin）
 ```
 
 バージョンメモは自動で「日時＋gitハッシュ」が入ります（`node scripts/deploy.js portal "任意メモ"` で指定も可）。
@@ -105,16 +101,15 @@ npm run deploy:portal       # 個別（deploy:workflow / deploy:admin / deploy:a
 
 ### 実行する関数（GASエディタから1回ずつ）
 
-**推奨：一括初期設定（3関数だけ・すべて冪等）**
+**推奨：一括初期設定（2関数だけ・すべて冪等）**
 
 | 関数 | 実行場所 | 内容 |
 |---|---|---|
-| `setup_all` | **admin** | ENVIRONMENT既定値→台帳・Drive作成→スキーマ移行→初期管理者（実行者を自動登録。指定は `setup_all("you@example.com")`）→HANDOFF_SECRET生成→経理台帳作成。**他プロジェクトへ転記するプロパティ一覧をログに出力** |
+| `setup_all` | **admin** | ENVIRONMENT既定値→台帳・Drive作成→スキーマ移行→初期管理者（実行者を自動登録。指定は `setup_all("you@example.com")`）→HANDOFF_SECRET生成→ライセンス台帳移行。**他プロジェクトへ転記するプロパティ一覧をログに出力** |
 | `setup_workflowAll` | **workflow** | （プロパティ転記後）必須設定の検査＋5分毎・日次トリガー作成 |
-| `setup_accountingAll` | **accounting** | （プロパティ転記後）経理台帳の確認/作成＋経理ジョブトリガー作成 |
 
-実行順：admin `setup_all` → ログの一覧を portal/workflow/accounting のスクリプト プロパティへ転記 →
-workflow `setup_workflowAll` → accounting `setup_accountingAll` → portal に `ADMIN_CONSOLE_URL` を設定。
+実行順：admin `setup_all` → ログの一覧を portal/workflow のスクリプト プロパティへ転記 →
+workflow `setup_workflowAll` → portal に `ADMIN_CONSOLE_URL` を設定。
 
 **個別関数（必要時のみ）**
 
@@ -123,8 +118,7 @@ workflow `setup_workflowAll` → accounting `setup_accountingAll` → portal に
 | `setup_bootstrap` | **admin** | 台帳・マスタ・Drive作成＋初期設定＋スキーマ移行（作り直しは `setup_reset`※devのみ） |
 | `setup_migrate` | **admin** | **既存シートへ不足列を追加**（スキーマ更新時。productionでも実行可・冪等） |
 | `setup_setInitialAdmin("you@example.com","SYSTEM_ADMIN")` | **admin** | 初期管理者登録（2人目以降はSYSTEM_ADMIN権限が必要） |
-| `setup_triggers` | **workflow** | 5分毎（Webhook再処理・AI審査）＋日次（期限・みなし確認・削除）トリガー作成（冪等） |
-| `setup_accountingBootstrap` / `setup_accountingTriggers` | **admin／accounting** | 経理台帳の作成／経理ジョブトリガー |
+| `setup_triggers` | **workflow** | 5分毎（Webhook再処理・AI審査・バッジ再試行）＋日次（期限・SLA・削除）トリガー作成（冪等） |
 
 ### デプロイ（ウェブアプリ）
 

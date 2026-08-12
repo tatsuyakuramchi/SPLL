@@ -1,7 +1,6 @@
-/** GAS② 契約・提出・報告・Webhook エントリ（SEC-01） */
+/** GAS② 契約・提出・Webhook エントリ（SEC-01） */
 function doGet(e){
   const page = (e && e.parameter && e.parameter.page) || '';
-  if(page === 'report') return serveReport_(e);
   if(page === 'upload') return serveUpload_(e);
   if(page === 'badge')  return serveBadge_(e);
   if(page === 'verify') return serveVerify_(e);

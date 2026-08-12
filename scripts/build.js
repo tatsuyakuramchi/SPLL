@@ -19,19 +19,14 @@ const MANIFEST = {
     title: 'SPLL 公開ポータル (GAS①)',
   },
   workflow: {
-    gs: ['00_core.gs','15_fee.gs','20_tokens.gs','30_cloudsign.gs','32_contract.gs','35_webhooks.gs','37_ai.gs','40_public_pages.gs','45_settlement.gs','47_batches.gs'],
-    html: ['upload.html','report.html'],
-    title: 'SPLL 契約・提出・報告 (GAS②)',
+    gs: ['00_core.gs','15_fee.gs','20_tokens.gs','30_cloudsign.gs','32_contract.gs','35_webhooks.gs','37_ai.gs','40_public_pages.gs','47_batches.gs'],
+    html: ['upload.html'],
+    title: 'SPLL 契約・提出 (GAS②)',
   },
   admin: {
-    gs: ['00_core.gs','05_schema.gs','10_auth.gs','15_fee.gs','20_tokens.gs','25_portal.gs','30_cloudsign.gs','32_contract.gs','37_ai.gs','45_settlement.gs','50_admin.gs','55_accounting_master.gs','60_sales_import.gs','62_sales_match.gs','64_sales_allocation.gs','66_bank_reconciliation.gs','68_accounting_export.gs','69_accounting_jobs.gs'],
+    gs: ['00_core.gs','05_schema.gs','10_auth.gs','15_fee.gs','20_tokens.gs','25_portal.gs','30_cloudsign.gs','32_contract.gs','37_ai.gs','50_admin.gs'],
     html: ['admin.html'],
     title: 'SPLL 管理コンソール (GAS③)',
-  },
-  accounting: {
-    gs: ['00_core.gs','10_auth.gs','15_fee.gs','55_accounting_master.gs','60_sales_import.gs','62_sales_match.gs','64_sales_allocation.gs','66_bank_reconciliation.gs','68_accounting_export.gs','69_accounting_jobs.gs'],
-    html: [],
-    title: 'SPLL 経理連携 (GAS④)',
   },
 };
 
@@ -56,8 +51,6 @@ const FORBIDDEN = {
   portal:   [/function admin_/, /function setup_/, /function receiveWebhook_/, /function web_submitWork/, /function report_submit/, /function issueToken_/],
   workflow: [/function admin_save/, /function setup_reset/, /function setup_setInitialAdmin/, /function serveAdmin_/, /function setup_bootstrap/],
   admin:    [/function receiveWebhook_/, /function web_submitWork/, /function report_submit/],
-  // 経理（SPLL-SYS-AD-001 §4.1）：CloudSign Webhook・匿名公開関数・契約者向け公開処理を含めない
-  accounting: [/function receiveWebhook_/, /function web_createApplication/, /function web_submitWork/, /function report_submit/, /function serveVerify_/, /function serveUpload_/, /function serveBadge_/, /function setup_bootstrap\(/, /function setup_reset/],
 };
 let failed = false;
 for(const [app, mf] of Object.entries(MANIFEST)){
@@ -88,7 +81,7 @@ for(const [app, mf] of Object.entries(MANIFEST)){
   }
   // マニフェスト検査：admin=DOMAIN限定、portal=最小スコープ
   const manifest = JSON.parse(fs.readFileSync(path.join(appDir, 'appsscript.json'), 'utf8'));
-  if((app === 'admin' || app === 'accounting') && manifest.webapp.access !== 'DOMAIN'){ console.error('[' + app + '] webapp.access は DOMAIN 必須'); failed = true; }
+  if(app === 'admin' && manifest.webapp.access !== 'DOMAIN'){ console.error('[' + app + '] webapp.access は DOMAIN 必須'); failed = true; }
   if(app === 'portal' && manifest.oauthScopes.some(s => /drive|cloud-platform|external_request|presentations/.test(s))){
     console.error('[portal] OAuthスコープが過大'); failed = true; }
   if(fs.existsSync(path.join(dist, '90_main.gs'))){ console.error('[' + app + '] モノリスエントリが混入'); failed = true; }

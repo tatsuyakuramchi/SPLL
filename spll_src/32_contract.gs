@@ -1,4 +1,4 @@
-/** SPLL 32_contract ― 契約成立処理：スナップショット・認証・バッジ・締結PDF・請求起票（GAS②/③共用） */
+/** SPLL 32_contract ― 契約成立処理：スナップショット・認証・バッジ・締結PDF（GAS②/③共用） */
 
 
 /** 締結済PDFをCloudSign APIから取得し、契約フォルダへハッシュ付きで保存（FUN-04/§8.2） */
@@ -26,6 +26,20 @@ function extractDocTitle_(body){
   if(body && body.title) return String(body.title);
   const m = String((body && body.text) || '').match(/:\s*(.+?)\s+sent by/i);
   return m ? m[1].trim() : String((body && body.text) || '');
+}
+
+/** 原作→権利者の解決（partner_id優先→出版社名の部分一致→未割当）。契約時スナップショットで使用。 */
+function resolveWorkPartner_(work, partners){
+  if(work.partner_id){
+    const p = partners.find(x => x.partner_id===work.partner_id);
+    if(p) return p;
+  }
+  const pub = String(work.publisher||'');
+  if(pub){
+    const p = partners.find(x => x.name && (pub.indexOf(x.name)>=0 || String(x.name).indexOf(pub)>=0));
+    if(p) return p;
+  }
+  return { partner_id: pub ? ('PUB:'+pub) : 'UNKNOWN', name: pub || '(未割当)', invoice_reg_number:'' };
 }
 
 /**
@@ -63,11 +77,10 @@ function snapshotContractTerms_(contractId, app){
   return terms;
 }
 
-/** 締結後の発行処理（認証ACTIVE＋バッジ＋提出/報告トークン＋定額系の請求起票）。冪等。紐付け完了時に呼ぶ。 */
 /**
  * 契約成立後処理（RP-001 §13.1で分解）：
- *   License活性化（認証・バッジ・提出）と Finance引渡データ作成のみを行う。
- *   License側では請求書を生成しない（請求はFinance側が引渡受領時に生成・原則1）。
+ *   License活性化（認証・バッジ・提出）と経理向け引渡データ作成のみを行う。
+ *   請求・入金・清算は本システムの対象外（経理側の独自運用が引渡データを参照する）。
  */
 function finishContractLinkage_(contractId){
   finishLicenseActivation_(contractId);
@@ -78,14 +91,13 @@ function finishLicenseActivation_(contractId){
   const cert = issueCert_(contractId);   // 平文コードはここでのみ取得可能（バッジQRへ焼き込む）
   if(prop_('BADGE_AUTO') !== 'false'){ enqueueBadgeJob_(contractId, cert && cert.verify_url); }   // 失敗時はBadge_Jobsで再実行（V2-014-8）
   prepareSubmissionToken_(contractId);
-  issueToken_(contractId, 'REPORT', 400, 24);              // 利用報告トークン（P1でFinanceへ移管予定・暫定でLicense発行）
   enqueueNotification_(contractId, 'UPLOAD_GUIDE', contractId, { note:'締結完了。提出リンクを利用者へ案内してください（契約管理→提出リンク発行）' });
   const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === contractId; });
   if(c && c.license_id) updateLicenseCase_(c.license_id, { certification_status:'ACTIVE', review_status:'PENDING' });
 }
 /**
- * Finance引渡データの作成（RP-001 §10）。LicenseはFinanceの請求処理を直接呼ばず、
- * Finance_Handoffs（READY）を置くだけ。Finance側バッチが取込んでACCEPTEDにする。
+ * 経理向け引渡データの作成（RP-001 §10）。締結内容のスナップショットを
+ * Finance_Handoffs（READY）へ置くだけ。取込・請求は経理側の独自運用で行う。
  * 冪等キー：license_id + handoff_version。
  */
 function createFinanceHandoff_(contractId){
@@ -123,35 +135,6 @@ function syncLicenseOnSigning_(contractId, licenseId, caseStatus){
   appendContractDocument_(licenseId, 'ORIGINAL', c.cloudsign_document_id || '', 'SIGNED',
     c.signed_at || '', c.contract_file_id || '', c.contract_file_hash || '');
   return true;
-}
-
-/** FLAT/PER_WORK 契約の請求を締結時に起票（無償・RATEは起票しない）。冪等。 */
-function createInvoiceOnSigning_(contractId){
-  const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === contractId; });
-  if(!c || !c.terms_snapshot) return null;
-  if(readRows_(ssOps_(),'Invoices').some(function(v){ return v.contract_id === contractId && v.source_type === 'CONTRACT'; })) return null;
-  let t = {}; try{ t = JSON.parse(c.terms_snapshot); }catch(e){ return null; }
-  const model = String(t.fee_model||'').toUpperCase();
-  if(model !== 'FLAT' && model !== 'PER_WORK') return null;    // RATE は利用報告承認後に起票
-  const amount = num_(t.amount);
-  if(amount <= 0){ logEvent_('invoice', contractId, 'system', null, { skipped:'NOT_REQUIRED（無償）' }); return null; }
-  return createInvoice_(contractId, currentPeriod_(), 'CONTRACT', contractId, t.fee_amount_or_rate||'', amount, 'system');
-}
-
-/** 請求起票の共通処理（§11.3）：税額・税込合計・支払期日を計算して記帳。 */
-function createInvoice_(contractId, period, sourceType, sourceId, amountRule, amount, actorEmail){
-  const taxRate = num_(getConfig_('TAX_RATE','0.10'));
-  const taxAmount = Math.round(amount * taxRate);
-  const dueDays = num_(getConfig_('INVOICE_DUE_DAYS','30')) || 30;
-  const invId = newId_('INV');
-  appendRow_(ssOps_(),'Invoices',{ invoice_id:invId, invoice_number:invId, contract_id:contractId, period:period,
-    source_type:sourceType, source_id:sourceId, amount_rule:amountRule, amount:amount,
-    tax_rate:taxRate, tax_amount:taxAmount, total_amount:amount + taxAmount,
-    paid_amount:0, balance_amount:amount + taxAmount, currency:'JPY',
-    due_date:addDaysIso_(dueDays).slice(0,10), status:'ISSUED',
-    payment_status_updated_at:'', issued_at:new Date().toISOString().slice(0,10) });
-  logEvent_('invoice', invId, actorEmail||'system', null, { contract_id:contractId, amount:amount, tax:taxAmount, source:sourceType });
-  return invId;
 }
 
 /**

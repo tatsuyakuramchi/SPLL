@@ -193,7 +193,6 @@ ok(cert && cert.status==='ACTIVE' && cert.reason_code==='ISSUED','cert ACTIVE IS
 ok(cert.check_code_hash && !cert.check_code,'cert stores hash only (no plaintext)');
 ok(rows(OPS,'Badges').length===1,'badge issued at signing');
 ok(rows(OPS,'Access_Tokens').filter(t=>t.contract_id===contract.contract_id&&t.purpose==='SUBMISSION').length>=1,'SUBMISSION token prepared');
-ok(rows(OPS,'Access_Tokens').filter(t=>t.contract_id===contract.contract_id&&t.purpose==='REPORT').length>=1,'REPORT token prepared');
 
 // 5. get submit token (need raw token). prepareSubmissionToken_ stores only hash. Use admin_sendUploadLink to get raw token.
 const link=G.admin_sendUploadLink(contract.contract_id);
@@ -289,21 +288,6 @@ ok(vout._h.indexOf('確認済み')>=0,'verify shows active');
 const vbad=G.serveVerify_({ parameter:{ page:'verify', id:rot.cert_id, c:'WRONG1' } });
 ok(vbad._h.indexOf('確認できません')>=0,'verify rejects wrong code');
 
-// 13. settlement flow (multi-work split)
-// approve a usage report first
-const rlink=G.admin_sendReportLink(contract.contract_id);
-const rptId=G.report_submit(rlink.token, { period:G.currentPeriod_(), channel:'DL', qty:10, gross:100000, returns:0, deductions:0, url:'' });
-ok(rptId,'usage report submitted');
-G.updateRow_(OPS,'Usage_Reports','report_id',rptId,{ status:'APPROVED' });
-const gen=G.generateStatements_(G.currentPeriod_());
-ok(gen.generated>=1,'statements generated: '+gen.generated);
-const details=rows(OPS,'Settlement_Details');
-ok(details.length>=1,'settlement details created');
-const stmt=rows(OPS,'Settlement_Statements')[0];
-ok(stmt.status==='DRAFT','statement DRAFT');
-G.admin_approveStatement(stmt.statement_id);
-ok(rows(OPS,'Settlement_Statements').find(s=>s.statement_id===stmt.statement_id).status==='APPROVED','statement APPROVED');
-
 // 14. 未紐付け締結（ref無し）→ 手動紐付けフォールバック
 geminiResponder=()=>({overall_result:'PASS_CANDIDATE',findings:[]});
 // 別の申込を作成（複数原作）
@@ -377,18 +361,6 @@ const feeCtr=rows(OPS,'Contracts').find(c=>c.application_ref===appR.application_
 ok(feeCtr.usage_category==='電子出版物','契約にusage_categoryスナップショット');
 const snap=JSON.parse(feeCtr.terms_snapshot||'{}');
 ok(snap.fee_model==='RATE' && snap.rate===0.10,'terms_snapshot に RATE/率0.10');
-// 清算：契約のスナップショット率(0.10)が使われる（既定と別の率で検証）
-G.setConfig_('DEFAULT_ROYALTY_RATE','0.99');   // 既定を極端値に→スナップショット率が優先されることを確認
-const rptF=G.report_submit(G.admin_sendReportLink(feeCtr.contract_id).token, { period:G.currentPeriod_(), channel:'DL', qty:1, gross:10000, returns:0, deductions:0, url:'' });
-G.updateRow_(OPS,'Usage_Reports','report_id',rptF,{ status:'APPROVED' });
-const genF=G.generateStatements_(G.currentPeriod_());   // 追加清算（per-report冪等・V2-011）
-ok(genF.generated>=1,'後から承認された報告だけを追加清算できる: '+genF.generated);
-const genAgain=G.generateStatements_(G.currentPeriod_());
-ok(genAgain.generated===0,'再実行では二重清算しない（report_id単位の冪等）');
-const detF=rows(OPS,'Settlement_Details').filter(d=>d.contract_id===feeCtr.contract_id);
-ok(detF.length>=1,'清算明細が作成される');
-const snapF=JSON.parse(detF[0].rate_snapshot||'{}');
-ok(snapF.royalty_rate===0.10,'清算はスナップショット率0.10を使用（既定0.99ではない）: '+snapF.royalty_rate);
 
 // ============ 修正設計書 セキュリティテスト（§23.3） ============
 // 17. Webhook受信記録
@@ -416,7 +388,7 @@ G.Session={ getActiveUser:()=>({ getEmail:()=>'' }) };   // 匿名
 let anonErr=false; try{ G.admin_dashboard(); }catch(e){ anonErr=/AUTHENTICATION_ERROR/.test(String(e.message)); }
 ok(anonErr,'production: 匿名の admin_ 呼出しは AUTHENTICATION_ERROR');
 G.Session={ getActiveUser:()=>({ getEmail:()=>'stranger@example.com' }) };
-let unregErr=false; try{ G.admin_recordPayment('C','I',1,'2026-01-01'); }catch(e){ unregErr=/AUTHORIZATION_ERROR/.test(String(e.message)); }
+let unregErr=false; try{ G.admin_runAiReviews(); }catch(e){ unregErr=/AUTHORIZATION_ERROR/.test(String(e.message)); }
 ok(unregErr,'production: 未登録ユーザーは AUTHORIZATION_ERROR');
 // ロール登録＋権限外（初回登録は無条件、以降はSYSTEM_ADMIN必須）
 G.setup_setInitialAdmin('admin@example.com','SYSTEM_ADMIN');    // 初回（テーブル空）
@@ -429,8 +401,8 @@ ok(hijack,'未登録ユーザーによる管理者追加は拒否（bootstrap乗
 G.Session={ getActiveUser:()=>({ getEmail:()=>'admin@example.com' }) };
 G.Session={ getActiveUser:()=>({ getEmail:()=>'auditor@example.com' }) };
 ok(Array.isArray(G.admin_dashboard().alerts),'AUDITOR: 読取り関数は許可');
-let roleErr=false; try{ G.admin_recordPayment('C','I',1,'2026-01-01'); }catch(e){ roleErr=/AUTHORIZATION_ERROR/.test(String(e.message)); }
-ok(roleErr,'AUDITOR: 入金記録（ACCOUNTING専用）は拒否');
+let roleErr=false; try{ G.admin_runAiReviews(); }catch(e){ roleErr=/AUTHORIZATION_ERROR/.test(String(e.message)); }
+ok(roleErr,'AUDITOR: OPERATIONS専用のバッチ起動は拒否');
 G.Session={ getActiveUser:()=>({ getEmail:()=>'admin@example.com' }) };
 G.setup_setInitialAdmin('acct@example.com','ACCOUNTING');
 G.Session={ getActiveUser:()=>({ getEmail:()=>'acct@example.com' }) };
@@ -455,42 +427,13 @@ ok(extErr,'拡張子exeは拒否');
 let mimeErr=false; try{ G.web_submitWork(linkV.token,{ title:'x', filename:'a.pdf', mimeType:'text/html', dataBase64:b64 }); }catch(e){ mimeErr=/MIMEタイプ/.test(String(e.message)); }
 ok(mimeErr,'MIME不一致は拒否');
 
-// 21. 利用報告の入力検証・重複
-const rl2=G.admin_sendReportLink(contract.contract_id);
-let negErr=false; try{ G.report_submit(rl2.token,{ period:G.currentPeriod_(), channel:'委託販売', qty:-1, gross:100, returns:0, deductions:0 }); }catch(e){ negErr=/0以上/.test(String(e.message)); }
-ok(negErr,'負数は拒否');
-let dedErr=false; try{ G.report_submit(rl2.token,{ period:G.currentPeriod_(), channel:'委託販売', qty:1, gross:100, returns:60, deductions:50 }); }catch(e){ dedErr=/超えています/.test(String(e.message)); }
-let futErr=false; try{ G.report_submit(rl2.token,{ period:'2098H1', channel:'委託販売', qty:1, gross:100, returns:0, deductions:0 }); }catch(e){ futErr=/報告できない期/.test(String(e.message)); }
-ok(futErr,'将来期の報告は拒否');
-let fmtErr=false; try{ G.report_submit(rl2.token,{ period:'2026-上期', channel:'委託販売', qty:1, gross:100, returns:0, deductions:0 }); }catch(e){ fmtErr=/期の形式/.test(String(e.message)); }
-ok(fmtErr,'期の形式違反は拒否');
-ok(dedErr,'控除+返品>総売上は拒否');
-const rpt98=G.report_submit(rl2.token,{ period:G.currentPeriod_(), channel:'委託販売', qty:1, gross:100000, returns:0, deductions:0 });
-let dupErr2=false; try{ G.report_submit(rl2.token,{ period:G.currentPeriod_(), channel:'委託販売', qty:1, gross:200, returns:0, deductions:0 }); }catch(e){ dupErr2=/既に提出/.test(String(e.message)); }
-ok(dupErr2,'同一期間・チャネルの重複報告は拒否');
-
 // 22. トークン期限・失効
-const expTok=G.issueToken_(contract.contract_id,'REPORT',-1,5);   // 期限切れ
-G.issueToken_(contract.contract_id,'REPORT',-1,5);                // バッチ用にもう1本
-ok(G.resolveToken_(expTok,'REPORT')===null,'期限切れトークンは拒否');
-ok(G.resolveToken_(rl2.token,'SUBMISSION')===null,'用途違い（REPORT→SUBMISSION）は拒否');
+const expTok=G.issueToken_(contract.contract_id,'BADGE_DOWNLOAD',-1,5);   // 期限切れ
+G.issueToken_(contract.contract_id,'BADGE_DOWNLOAD',-1,5);                // バッチ用にもう1本
+ok(G.resolveToken_(expTok,'BADGE_DOWNLOAD')===null,'期限切れトークンは拒否');
+ok(G.resolveToken_(linkV.token,'BADGE_DOWNLOAD')===null,'用途違い（SUBMISSION→BADGE）は拒否');
 const exp=G.expireAccessTokens_();
 ok(exp.processed>=1,'期限切れトークンをEXPIREDへ: '+exp.processed);
-
-// 23. 請求起票（FUN-02。RP-001でLicense→Finance引渡経由に変更：締結時はREADY、受領時に起票）
-ok(!rows(OPS,'Invoices').some(v=>v.source_type==='CONTRACT'),'License側は締結時に請求を作らない（RP-001 原則1）');
-G.financeAcceptHandoffs_();
-ok(rows(OPS,'Invoices').some(v=>v.source_type==='CONTRACT'),'Finance引渡の受領でPER_WORK債権を起票');
-// RATE: 承認→起票
-G.admin_approveReport(rpt98);
-const gen2=G.admin_generateInvoicesFromReports(G.currentPeriod_());
-ok(gen2.generated>=1,'RATE請求を承認済み報告から起票: '+gen2.generated);
-ok(rows(OPS,'Invoices').some(v=>v.source_type==='REPORT'),'REPORT由来の請求が存在');
-
-// 24. 配分スキーム明示（FLOW-04）
-const det2=rows(OPS,'Settlement_Details');
-ok(det2.length && det2.every(d=>d.allocation_scheme==='BY_WORK_EQUAL'),'明細に配分スキーム記録');
-ok(det2.some(d=>d.work_id),'明細に原作ID記録');
 
 // 25. 人手審査のサーバー検証（§9.4：コメント必須・最新版チェック・列挙値）
 let cmtErr=false; try{ G.admin_setHumanReview(sub1.submission_id,'CORRECTION_REQUIRED',''); }catch(e){ cmtErr=/コメント（理由）が必須/.test(String(e.message)); }
@@ -510,7 +453,7 @@ const subCtx=ctx2.submissions.find(x=>x.submission_id===sub1.submission_id);
 ok(subCtx && subCtx.correction && /クレジット表記/.test(subCtx.correction.comment),'提出ページに是正コメントが返る');
 ok(ctx2.badge_url && ctx2.badge_url.indexOf('page=badge')>=0,'提出ページにバッジ取得URLが返る');
 
-// ============ A-中（通知・SLA・AI証跡・請求・版管理・レート制限） ============
+// ============ A-中（通知・SLA・AI証跡・版管理・レート制限） ============
 // 27. 通知キュー（§10）
 ok(rows(OPS,'Notification_Queue').some(n=>n.type==='UPLOAD_GUIDE'),'締結時に提出案内の通知を起票');
 ok(rows(OPS,'Notification_Queue').some(n=>n.type==='CORRECTION_REQUEST'),'是正要求で通知を起票');
@@ -531,40 +474,12 @@ G.updateRow_(OPS,'Submission_Versions','version_id',lv28.version_id,{ submitted_
 const sla=G.notifyReviewSla_();
 ok(sla.processed>=1,'審査SLA超過を通知キューへ: '+sla.processed);
 ok(rows(OPS,'Notification_Queue').some(n=>n.type==='REVIEW_SLA_OVERDUE'),'REVIEW_SLA_OVERDUE 起票');
-const due=G.notifyReportDue_();
-ok(typeof due.processed==='number'||due.skipped,'報告期限監視が実行できる: '+JSON.stringify(due));
 
 // 29. AI審査の証跡（§9.3）
 const jobDone=rows(OPS,'AI_Review_Jobs').find(j=>j.status==='COMPLETED');
 ok(jobDone.overall_result,'ジョブに overall_result 記録: '+jobDone.overall_result);
 ok(jobDone.response_file_id,'AI生レスポンスをDrive保存（response_file_id）');
 ok(jobDone.started_at && jobDone.completed_at,'開始・完了日時を記録');
-
-// 30. 請求の税・期日・入金検証（§11.3/§11.4）
-const invT=rows(OPS,'Invoices').find(v=>v.source_type==='CONTRACT');
-ok(num_ll(invT.tax_amount)===Math.round(num_ll(invT.amount)*0.10),'税額=本体×10%: '+invT.tax_amount);
-ok(num_ll(invT.total_amount)===num_ll(invT.amount)+num_ll(invT.tax_amount),'税込合計が一致');
-ok(invT.due_date && /^\d{4}-\d{2}-\d{2}$/.test(invT.due_date),'支払期日を設定: '+invT.due_date);
-function num_ll(v){ return parseFloat(String(v))||0; }
-// 過入金の検出
-// 一部入金→残額→全額→過入金（V2-010）
-const half=Math.floor(num_ll(invT.total_amount)/2);
-const p1=G.admin_recordPayment(invT.contract_id, invT.invoice_id, half, '2026-07-14', 'BANK-001');
-ok(p1.status==='PARTIALLY_PAID' && p1.balance===num_ll(invT.total_amount)-half,'一部入金で PARTIALLY_PAID＋残額');
-let refDup=false; try{ G.admin_recordPayment(invT.contract_id, invT.invoice_id, 1, '2026-07-14', 'BANK-001'); }catch(e){ refDup=/入金参照番号/.test(String(e.message)); }
-ok(refDup,'同一入金参照番号は拒否');
-const p2=G.admin_recordPayment(invT.contract_id, invT.invoice_id, num_ll(invT.total_amount)-half+500, '2026-07-15', 'BANK-002');
-ok(p2.status==='OVERPAID' && p2.diff===500,'累計で過入金 +500 を検出（OVERPAID）');
-let wrongC=false; try{ G.admin_recordPayment('CTR-WRONG', invT.invoice_id, 1, '2026-07-15', 'BANK-003'); }catch(e){ wrongC=/契約が一致しません/.test(String(e.message)); }
-ok(wrongC,'別契約の請求への入金は拒否');
-let noInv=false; try{ G.admin_recordPayment(invT.contract_id, 'INV-NONE', 1, '2026-07-15'); }catch(e){ noInv=/請求が見つかりません/.test(String(e.message)); }
-ok(noInv,'存在しない請求への入金は拒否');
-// 取消は理由必須
-let vrErr=false; try{ G.admin_voidPayment(invT.invoice_id,''); }catch(e){ vrErr=/取消理由は必須/.test(String(e.message)); }
-ok(vrErr,'取消理由なしは拒否');
-G.admin_voidPayment(invT.invoice_id,'金額誤り（過入金の訂正）');
-ok(rows(OPS,'Payments').some(p=>p.status==='VOID'&&p.void_reason&&p.voided_by),'取消理由・取消者を記録');
-ok(rows(OPS,'Invoices').find(v=>v.invoice_id===invT.invoice_id).status==='UNPAID','取消後に UNPAID へ再計算');
 
 // 31. 規約の版管理（§7.2）
 const d1=G.admin_saveLegalDraft('PRIVACY','<p>新しい同意文 v-next</p>');
@@ -641,20 +556,6 @@ let resetErr=false; try{ G.setup_reset(); }catch(e){ resetErr=/production では
 ok(resetErr,'production: setup_reset禁止');
 scriptProps.ENVIRONMENT='development';
 
-// 37. 清算送信の冪等（V2-012）
-scriptProps.CLOUDSIGN_CLIENT_ID='cs-test-client';
-const apStmts=rows(OPS,'Settlement_Statements').filter(x=>x.status==='APPROVED');
-if(apStmts.length){
-  const s1=G.batch_sendApprovedStatements_();
-  ok(s1.sent>=1,'承認済み計算書を送信: '+s1.sent);
-  const stSent=rows(OPS,'Settlement_Statements').find(x=>x.send_status==='SENT');
-  ok(stSent && stSent.send_attempt_id,'送信試行ID・send_statusを記録');
-  G.updateRow_(OPS,'Settlement_Statements','statement_id',stSent.statement_id,{status:'APPROVED'});   // 台帳更新失敗を再現
-  const s2=G.batch_sendApprovedStatements_();
-  ok(rows(OPS,'Settlement_Statements').filter(x=>x.statement_id===stSent.statement_id&&x.cloudsign_document_id).length===1 && s2.sent===0,
-    '外部書類ID保持により二重送信しない');
-}
-delete scriptProps.CLOUDSIGN_CLIENT_ID;
 
 // ============ P1（V2-014〜018）追加検証 ============
 // 38. 照合コードの暗号学的生成（V2-015：Math.random不使用・紛らわしい文字なし）
@@ -691,277 +592,6 @@ ok(rows(OPS,'Submissions').find(s=>s.submission_id===subAI.submission_id).status
 ok(rows(OPS,'Notification_Queue').some(n=>n.reference_id==='AIERR:'+deadJob.version_id),'人手対応の通知を起票');
 geminiResponder=()=>({ overall_result:'PASS_CANDIDATE', findings:[] });
 
-// 42. 報告期限監視（V2-017：契約条件から期限窓を判定・契約×期で1回）
-const t42=JSON.parse(rows(OPS,'Contracts').find(c=>c.contract_id===contract.contract_id).terms_snapshot||'{}');
-t42.requires_usage_report=true; t42.report_due_days=400;   // テスト実行日に依らず期限窓内にする
-G.updateRow_(OPS,'Contracts','contract_id',contract.contract_id,{ signed_at:'2020-01-15', terms_snapshot:JSON.stringify(t42) });
-const due42=G.notifyReportDue_();
-ok(rows(OPS,'Notification_Queue').some(n=>n.type==='REPORT_REQUEST'&&String(n.reference_id).indexOf(contract.contract_id)===0),'期限窓内の未報告契約へ REPORT_REQUEST 起票');
-const due42b=G.notifyReportDue_();
-ok(due42b.processed===0,'同一契約×期は重複起票しない');
-
-// ============ 経理連携（SPLL-SYS-AD-001）P0：基盤 ============
-// 43. ブートストラップ・スキーマ（§17 M1）
-G.setup_accountingBootstrap();
-ok(scriptProps.SS_ACCOUNTING_MASTER && scriptProps.SS_ACCOUNTING_CURRENT,'経理マスタ・年度ブック作成＋プロパティ登録');
-const ACCM=G.ssAccMaster_(), ACCY=G.ssAccYear_();
-ok(rows(ACCM,'Sales_Channels').length===6,'販売チャネル初期値6件（BOOTH/TALTO/DLSITE/BANK_DIRECT/AMBASS/PAPER）');
-ok(rows(ACCM,'Accounting_Export_Profiles').length===4,'出力プロファイル初期値4件');
-ok(rows(ACCM,'Accounting_Books').some(b=>b.status==='OPEN'),'年度台帳にOPEN登録');
-const accBoot2=G.setup_accountingBootstrap();
-ok(accBoot2.reused.SS_ACCOUNTING_MASTER && rows(ACCM,'Sales_Channels').length===6,'再実行は再利用・初期値重複なし（冪等）');
-ok(ACCY.getSheetByName('Sales_Ledger') && ACCY.getSheetByName('Allocation_Runs'),'年度ブックに取引系シート作成');
-
-// 44. 一括I/O（§8.1）
-G.accEnsureSheet_(ACCM,'Bulk_Test',['k','v']);
-const bulkMany=[]; for(let bi=0;bi<1234;bi++) bulkMany.push({k:'K'+bi,v:bi});
-ok(G.appendRowsBulk_(ACCM,'Bulk_Test',bulkMany,500)===1234,'1,234行を一括追記（chunk 500）');
-ok(G.readTableBulk_(ACCM,'Bulk_Test').length===1234,'一括読取りで全行取得');
-const up=G.upsertRowsBulk_(ACCM,'Bulk_Test','k',[{k:'K10',v:'upd'},{k:'K-new',v:'new'}]);
-ok(up.updated===1 && up.inserted===1,'upsert：更新1・追加1');
-ok(G.readTableBulk_(ACCM,'Bulk_Test').find(r=>r.k==='K10').v==='upd','一括更新が反映');
-const bulkIdx=G.buildIndex_(G.readTableBulk_(ACCM,'Bulk_Test'),r=>r.k);
-ok(bulkIdx['K999'] && bulkIdx['K-new'],'buildIndex_ でキー参照');
-G.replaceRowsBulk_(ACCM,'Bulk_Test',[{k:'only',v:1}]);
-ok(G.readTableBulk_(ACCM,'Bulk_Test').length===1,'洗い替えで1行（空行はスキップ）');
-
-// 45. Drive原票保存・二重取込防止（§7.5/§15）
-const accCsv=G.Utilities.newBlob('a,b\n1,2','text/csv','ピクシブ_Booth_明細書_2026.6.csv');
-const accSaved=G.accSaveOriginalFile_('BOOTH',accCsv);
-ok(accSaved.drive_file_id && accSaved.file_hash,'原票をDrive保存しSHA-256記録');
-G.appendRowsBulk_(ACCY,'Sales_Import_Batches',[{import_batch_id:'IB-DUP',channel_id:'BOOTH',file_hash:accSaved.file_hash,status:'PARSED'}]);
-ok(G.accFindBatchByHash_('Sales_Import_Batches',accSaved.file_hash).import_batch_id==='IB-DUP','同一ハッシュの二重取込を検知');
-G.upsertRowsBulk_(ACCY,'Sales_Import_Batches','import_batch_id',[{import_batch_id:'IB-DUP',status:'SUPERSEDED'}]);
-ok(!G.accFindBatchByHash_('Sales_Import_Batches',accSaved.file_hash),'SUPERSEDED後は再取込可');
-
-// 46. ジョブ基盤（§8.2/§8.3）：カーソル分割・再試行・停滞回復
-const realSalesParse=G.accJobSalesParse_;
-G.accJobSalesParse_=function(job){ const total=250, next=Math.min(job.cursor+100,total);
-  return { done: next>=total, cursor: next, processed: next-job.cursor, total: total }; };
-const accJid=G.enqueueAccountingJob_('SALES_PARSE','BATCH-CURSOR',{});
-const accJob=()=>rows(ACCM,'Accounting_Jobs').find(x=>x.job_id===accJid);
-ok(accJob().status==='QUEUED' && String(accJob().cursor)==='100','1ステップ後にカーソル保存（100）して継続待ち');
-G.runAccountingJobs_(); G.runAccountingJobs_();
-ok(accJob().status==='DONE' && String(accJob().processed_count)==='250','カーソルから再開して完了（250行）');
-G.accJobSalesParse_=function(){ throw new Error('parse fail'); };
-const accJid2=G.enqueueAccountingJob_('SALES_PARSE','BATCH-ERR',{});
-const accJob2=()=>rows(ACCM,'Accounting_Jobs').find(x=>x.job_id===accJid2);
-ok(accJob2().status==='RETRY_WAIT' && accJob2().next_retry_at,'失敗はRETRY_WAIT＋バックオフ時刻');
-for(let ri3=0;ri3<6;ri3++){ G.upsertRowsBulk_(ACCM,'Accounting_Jobs','job_id',[{job_id:accJid2,next_retry_at:'2000-01-01T00:00:00.000Z'}]); G.runAccountingJobs_(); }
-ok(accJob2().status==='ERROR' && accJob2().last_error,'再試行上限でERROR（理由記録）');
-G.accJobSalesParse_=function(job){ return { done:true, cursor:0, processed:1 }; };
-const accJid3=G.enqueueAccountingJob_('SALES_PARSE','BATCH-STALE',{});
-G.upsertRowsBulk_(ACCM,'Accounting_Jobs','job_id',[{job_id:accJid3,status:'RUNNING',started_at:'2000-01-01T00:00:00.000Z',finished_at:''}]);
-G.runAccountingJobs_();
-ok(rows(ACCM,'Accounting_Jobs').find(x=>x.job_id===accJid3).status==='DONE','停滞RUNNINGを回復して完了');
-let badType=false; try{ G.enqueueAccountingJob_('NOT_A_TYPE','x',{}); }catch(e){ badType=/不正なジョブ種別/.test(String(e.message)); }
-ok(badType,'不正なジョブ種別は拒否');
-G.accJobSalesParse_=realSalesParse;
-
-// ============ 経理連携 P1：販売原票取込・突合 ============
-// 47. パーサー単体（§7）
-const taltoText='集計期間,2025/12/01-2025/12/31\n総額,4591\n\n許諾番号,プロジェクトID,作品名,販売数,販売額計,売上計,販売許諾料小計\nSPLL-T0001,PJ-1,作品A,3,3000,2400,300\nSPLL-T0002,PJ-2,作品B,1,"1,000",800,100';
-const taltoRes=G.parseSalesFile_(taltoText,{parser_type:'TALTO',channel_id:'TALTO',sales_period:'2025-12'});
-ok(taltoRes.rows.length===2 && taltoRes.source_total_amount===400,'TALTO: プリアンブル付きCSVを解析（2件・許諾料400円）');
-ok(taltoRes.rows[1].quantity===1 && taltoRes.rows[1].gross_sales_amount===1000,'TALTO: 引用符付き金額を数値化');
-const dlText='DLsite作品ID,作品名,SPLL申請番号,販売本数,ライセンス料合計\nRJ001,作品X,SPLL:E107009,10,657\nRJ002,作品Y,SPLL:E108001,5,500';
-const dlRes=G.parseSalesFile_(dlText,{parser_type:'DLSITE',channel_id:'DLSITE',sales_period:'2026-05'});
-ok(dlRes.rows.length===2 && dlRes.source_total_amount===1157,'DLsite: 2件・許諾料合計1,157円（受入基準の形）');
-let hdrErr=false; try{ G.parseSalesFile_(dlText,{parser_type:'BOOTH',channel_id:'BOOTH',sales_period:'2026-05'}); }catch(e){ hdrErr=/一致しません/.test(String(e.message)); }
-ok(hdrErr,'ヘッダ不一致は取込停止');
-let negAmtErr=false; try{ G.parseSalesFile_('DLsite作品ID,作品名,SPLL申請番号,販売本数,ライセンス料合計\nRJ,X,S,1,-100',{parser_type:'DLSITE'}); }catch(e){ negAmtErr=/負数/.test(String(e.message)); }
-ok(negAmtErr,'負数金額は拒否');
-ok(G.accNormalizeLicenseRef_('ｓｐｌｌ－ e107009 ')==='SPLL-E107009','SPLL番号正規化（全角・空白・大文字）');
-ok(G.accExtractLegacyCode_('E107009')==='107','旧SPLL番号から原作コード抽出（E107009→107）');
-
-// 48. BOOTH取込→突合（License_Identifiers／Legacy_Work_Codes／マッピング）
-G.appendRowsBulk_(ACCM,'Legacy_Work_Codes',[{legacy_code:'107',work_id:'WRK-ARK00012',status:'ACTIVE',updated_by:'t',updated_at:'2026-01-01'}]);
-G.admin_accountingLinkLicenseRef('REF-LINKED-1', unlinkedC.contract_id);   // 単一原作契約へ紐付け
-const boothCsv=['ショップ名,商品番号,商品名,SPLL申請番号,小売価格,数量,BOOST計,売上（税込）,ライセンス料（税込）',
-  'ショップA,P-100,狂気山脈シナリオ,E107009,"1,500",2,0,3000,300',
-  'ショップB,P-200,インセイン本,REF-LINKED-1,1000,1,100,1100,110',
-  'ショップC,P-300,未知の作品,E999001,500,1,0,500,50',
-  'ショップD,P-400,番号なし商品,,500,1,0,500,25'].join('\n');
-const upRes=G.admin_accountingUploadSalesFile({channelId:'BOOTH',salesPeriod:'2026-06',fileName:'ピクシブ_Booth_明細書_2026.6.csv'},Buffer.from(boothCsv,'utf8').toString('base64'));
-ok(upRes.import_batch_id && upRes.file_hash,'BOOTH原票アップロード（原本保存＋ハッシュ）');
-let dupUp=false; try{ G.admin_accountingUploadSalesFile({channelId:'BOOTH',salesPeriod:'2026-06',fileName:'x.csv'},Buffer.from(boothCsv,'utf8').toString('base64')); }catch(e){ dupUp=/取込済み/.test(String(e.message)); }
-ok(dupUp,'同一内容の二重取込を拒否（§18.2-13）');
-const pv=G.admin_accountingPreviewImport(upRes.import_batch_id);
-ok(pv.source_row_count===4 && pv.source_total_amount===485,'プレビュー：原票4件・許諾料合計485円');
-G.admin_accountingStartImport(upRes.import_batch_id);
-let ledger=G.readTableBulk_(ACCY,'Sales_Ledger').filter(r=>r.import_batch_id===upRes.import_batch_id);
-ok(ledger.length===4,'Sales_Ledger へ4行を一括正規化');
-const batchRow=()=>G.readTableBulk_(ACCY,'Sales_Import_Batches').find(b=>b.import_batch_id===upRes.import_batch_id);
-ok(String(batchRow().normalized_total_amount)==='485' && String(batchRow().source_total_amount)==='485','原票合計＝正規化合計（485円）');
-ok(batchRow().status==='REVIEW_REQUIRED','未解決ありでREVIEW_REQUIRED');
-ok(ledger.find(r=>r.external_license_ref==='E107009').match_status==='MATCHED','旧原作コードで自動突合');
-ok(ledger.find(r=>r.external_license_ref==='REF-LINKED-1').match_status==='MATCHED','License_Identifiers→単一原作契約で自動突合');
-ok(ledger.find(r=>r.external_license_ref==='E999001').match_status==='REVIEW_REQUIRED','未知の番号は要確認');
-ok(ledger.find(r=>!r.external_license_ref).match_status==='UNMATCHED','番号なしはUNMATCHED');
-const mres=G.readTableBulk_(ACCY,'Sales_Match_Results');
-ok(mres.some(r=>r.match_method==='LEGACY_CODE'&&r.work_id==='WRK-ARK00012'),'突合結果にLEGACY_CODE記録');
-ok(mres.some(r=>r.match_method==='CONTRACT_SNAPSHOT'&&r.contract_id===unlinkedC.contract_id&&r.work_id==='WRK-BKK00019'),'突合結果にCONTRACT_SNAPSHOT記録');
-
-// 49. 未解決画面→マッピング保存→再突合（§11.4/§12.2）
-const unm=G.admin_accountingListUnmatched({});
-ok(unm.length===2,'未解決2グループ（E999001＋番号なし）');
-G.admin_accountingSaveMapping({external_license_ref:'E999001',match_scope:'LICENSE_ONLY',works:[{work_id:'WRK-ARK00012',weight:2},{work_id:'WRK-BKK00019',weight:1}]});
-let mapErr=false; try{ G.admin_accountingSaveMapping({external_license_ref:'EX',match_scope:'LICENSE_ONLY',works:[{work_id:'WRK-NONE',weight:1}]}); }catch(e){ mapErr=/原作がありません/.test(String(e.message)); }
-ok(mapErr,'存在しない原作のマッピングは拒否');
-G.admin_accountingRematch(upRes.import_batch_id);
-ledger=G.readTableBulk_(ACCY,'Sales_Ledger').filter(r=>r.import_batch_id===upRes.import_batch_id);
-ok(ledger.find(r=>r.external_license_ref==='E999001').match_status==='MATCHED','マッピング適用で解決');
-const multiRes=G.readTableBulk_(ACCY,'Sales_Match_Results').filter(r=>r.sales_row_id===ledger.find(x=>x.external_license_ref==='E999001').sales_row_id&&r.status==='CONFIRMED');
-ok(multiRes.length===2,'複数原作マッピングは原作ごとに結果2行');
-ok(G.admin_accountingListUnmatched({}).length===1,'残る未解決は番号なし1グループ');
-ok(batchRow().status==='REVIEW_REQUIRED','番号なしが残るためREVIEW_REQUIRED維持');
-
-// 50. 形式不正の取込はバッチERROR（再試行しない）
-const badUp=G.admin_accountingUploadSalesFile({channelId:'DLSITE',salesPeriod:'2026-05',fileName:'bad.csv'},Buffer.from(boothCsv+'\n','utf8').toString('base64'));
-G.admin_accountingStartImport(badUp.import_batch_id);
-const badBatch=G.readTableBulk_(ACCY,'Sales_Import_Batches').find(b=>b.import_batch_id===badUp.import_batch_id);
-ok(badBatch.status==='ERROR' && /一致しません/.test(badBatch.error_summary),'ヘッダ不一致はバッチERROR＋理由記録');
-ok(rows(ACCM,'Accounting_Jobs').filter(j=>j.target_id===badUp.import_batch_id&&j.job_type==='SALES_PARSE').every(j=>j.status==='DONE'),'形式不正は再試行せずジョブ完了');
-
-// ============ 経理連携 P2：配分（最大剰余法・職務分離） ============
-// 51. 配分プロファイル（§6.1）
-let res2Err=false; try{ G.admin_accountingSaveDistributionProfile({work_id:'WRK-ARK00012',lines:[
-  {partner_id:'P-A',calculation_type:'RESIDUAL'},{partner_id:'P-B',calculation_type:'RESIDUAL'}]}); }catch(e){ res2Err=/RESIDUAL行は1行まで/.test(String(e.message)); }
-ok(res2Err,'RESIDUAL2行は拒否');
-G.admin_accountingSaveDistributionProfile({work_id:'WRK-ARK00012',profile_name:'ARK標準',lines:[
-  {partner_id:'P-A',calculation_type:'RATE',rate:0.05},
-  {partner_id:'P-B',calculation_type:'RATE',rate:0.25},
-  {partner_id:'P-C',calculation_type:'RATE',rate:0.08},
-  {partner_id:'P-D',calculation_type:'RATE',rate:0.12},
-  {partner_id:'P-E',calculation_type:'RESIDUAL'}]});
-G.admin_accountingSaveDistributionProfile({work_id:'WRK-BKK00019',lines:[{partner_id:'P-F',calculation_type:'RESIDUAL'}]});
-const prof2=G.admin_accountingSaveDistributionProfile({work_id:'WRK-BKK00019',lines:[{partner_id:'P-F',calculation_type:'RATE',rate:1}]});
-ok(prof2.version===2,'プロファイル更新は新版採番（旧版RETIRED・直接編集しない）');
-ok(G.admin_accountingListDistributionProfiles().filter(p=>p.work_id==='WRK-BKK00019').length===1,'ACTIVE版は原作ごとに1つ');
-
-// 52. 最大剰余法（§6.3・受入18.2-10）
-ok(JSON.stringify(G.accLargestRemainder_(25,[1,1]))==='[13,12]','25円を同率2原作へ13円/12円（合計25円維持）');
-ok(G.accLargestRemainder_(100,[5,25,8,12,50]).reduce((a,b)=>a+b,0)===100,'任意比率でも合計維持');
-
-// 53. 配分run（受入18.2-11/12）
-const norefRow=G.readTableBulk_(ACCY,'Sales_Ledger').find(r=>r.import_batch_id===upRes.import_batch_id&&!r.external_license_ref);
-G.admin_accountingManualMatch([norefRow.sales_row_id],[{work_id:'WRK-BKK00019',weight:1}],'');
-ok(batchRow().status==='READY','手動突合（MANUAL）で全解決→READY');
-let notReady=false; try{ G.admin_accountingCreateAllocationRun('2026-06',[badUp.import_batch_id]); }catch(e){ notReady=true; }
-ok(notReady,'未解決バッチのrun作成は拒否');
-const runRes=G.admin_accountingCreateAllocationRun('2026-06',[upRes.import_batch_id]);
-G.admin_accountingCalculateAllocation(runRes.allocation_run_id);
-const runRow=()=>G.readTableBulk_(ACCY,'Allocation_Runs').find(r=>r.allocation_run_id===runRes.allocation_run_id);
-ok(runRow().status==='READY_FOR_APPROVAL','計算完了で承認待ち');
-ok(String(runRow().source_total_amount)==='485'&&String(runRow().allocated_total_amount)==='485'&&Number(runRow().difference_amount)===0,
-  '原票合計＝配分合計＝485円・差額0円（整合性条件）');
-const dets=G.readTableBulk_(ACCY,'Allocation_Details').filter(d=>d.allocation_run_id===runRes.allocation_run_id&&d.status==='CALCULATED');
-const r300=dets.filter(d=>String(d.base_license_fee_amount)==='300');
-ok(Number(r300.find(d=>d.partner_id==='P-A').allocated_amount)===15&&Number(r300.find(d=>d.partner_id==='P-B').allocated_amount)===75&&
-   Number(r300.find(d=>d.partner_id==='P-C').allocated_amount)===24&&Number(r300.find(d=>d.partner_id==='P-D').allocated_amount)===36&&
-   Number(r300.find(d=>d.partner_id==='P-E').allocated_amount)===150,'5%/25%/8%/12%/残額の配分を再現（受入18.2-11）');
-const r50=dets.filter(d=>String(d.base_license_fee_amount)==='50');
-ok(r50.filter(d=>d.work_id==='WRK-ARK00012').reduce((s,d)=>s+Number(d.allocated_amount),0)===33&&
-   r50.filter(d=>d.work_id==='WRK-BKK00019').reduce((s,d)=>s+Number(d.allocated_amount),0)===17,'複数原作2:1按分（50円→33円/17円）');
-const accSum=G.admin_accountingGetAllocationSummary(runRes.allocation_run_id);
-ok(accSum.partners.reduce((s,p)=>s+p.amount,0)===485,'権利者別サマリー合計＝485円');
-const detPage=G.admin_accountingListAllocationDetails(runRes.allocation_run_id,{},1);
-ok(detPage.rows.length<=100&&detPage.total===dets.length,'明細は100件/ページ（全件返却しない）');
-
-// 54. 承認の職務分離（§6.3/§13）
-let selfAppr2=false; try{ G.admin_accountingApproveAllocation(runRes.allocation_run_id,''); }catch(e){ selfAppr2=/作成者本人/.test(String(e.message)); }
-ok(selfAppr2,'作成者本人の承認は拒否（職務分離）');
-G.Session={ getActiveUser:()=>({ getEmail:()=>'acct@example.com' }) };
-G.admin_accountingApproveAllocation(runRes.allocation_run_id,'');
-G.Session=SessRef;
-ok(runRow().status==='APPROVED'&&runRow().approved_by==='acct@example.com','別担当者（ACCOUNTING）の承認でAPPROVED');
-let recalcErr=false; try{ G.admin_accountingCalculateAllocation(runRes.allocation_run_id); }catch(e){ recalcErr=true; }
-ok(recalcErr,'承認済みrunの再計算は拒否');
-
-// 55. 例外（プロファイル未設定）→承認不可→取消（§11.5）
-const dlUp=G.admin_accountingUploadSalesFile({channelId:'DLSITE',salesPeriod:'2026-05',fileName:'エイシス_DLsite_TRPG集計2026年05月.csv'},Buffer.from(dlText,'utf8').toString('base64'));
-G.admin_accountingStartImport(dlUp.import_batch_id);
-const dlLedger=()=>G.readTableBulk_(ACCY,'Sales_Ledger').filter(r=>r.import_batch_id===dlUp.import_batch_id);
-ok(dlLedger().find(r=>r.external_license_ref==='SPLL:E107009').match_status==='MATCHED','SPLL:プレフィックス付き旧番号も突合');
-const dlRow=dlLedger().find(r=>r.external_license_ref==='SPLL:E108001');
-G.admin_accountingManualMatch([dlRow.sales_row_id],[{work_id:'WRK-ARK00045',weight:1}],'');
-const run2=G.admin_accountingCreateAllocationRun('2026-05',[dlUp.import_batch_id]);
-G.admin_accountingCalculateAllocation(run2.allocation_run_id);
-const run2Row=()=>G.readTableBulk_(ACCY,'Allocation_Runs').find(r=>r.allocation_run_id===run2.allocation_run_id);
-ok(run2Row().status==='REVIEW_REQUIRED'&&Number(run2Row().exception_count)>0,'プロファイル未設定は例外→REVIEW_REQUIRED');
-let excErr=false; try{ G.admin_accountingApproveAllocation(run2.allocation_run_id,''); }catch(e){ excErr=true; }
-ok(excErr,'例外あり・承認待ち以外は承認不可');
-// プロファイル設定→再計算→緊急承認（EMERGENCY_OVERRIDE）
-G.admin_accountingSaveDistributionProfile({work_id:'WRK-ARK00045',lines:[{partner_id:'P-G',calculation_type:'RESIDUAL'}]});
-G.admin_accountingCalculateAllocation(run2.allocation_run_id);
-ok(run2Row().status==='READY_FOR_APPROVAL'&&Number(run2Row().difference_amount)===0,'プロファイル設定後の再計算で承認待ち（洗い替え・重複なし）');
-const dl2dets=G.readTableBulk_(ACCY,'Allocation_Details').filter(d=>d.allocation_run_id===run2.allocation_run_id&&d.status==='CALCULATED');
-ok(dl2dets.length===6&&dl2dets.reduce((s,d)=>s+Number(d.allocated_amount),0)===1157,'再計算後の明細に重複がない（5配分行＋1残額行・合計1,157円）');
-G.admin_accountingApproveAllocation(run2.allocation_run_id,'月次締切のため緊急承認');
-ok(run2Row().status==='APPROVED','EMERGENCY_OVERRIDE（理由必須）で本人承認可・記録');
-G.admin_accountingVoidAllocation(run2.allocation_run_id,'テスト取消');
-ok(run2Row().status==='VOID','承認済み（未連携）は取消可能→VOID');
-ok(dlLedger().every(r=>r.allocation_status==='PENDING'),'取消で販売行を未配分へ戻す');
-
-// ============ 経理連携 P3：銀行照合・出力・清算連携 ============
-// 56. 三菱UFJ銀行取込＋照合候補（§7.4/§6.4・受入18.2-3/6）
-const invU=rows(OPS,'Invoices').find(v=>['ISSUED','UNPAID','PARTIALLY_PAID'].indexOf(String(v.status))>=0&&Number(v.balance_amount)>0);
-const mufgCsv=['1,20260731,ヘッダ行,,,,',
-  '2,2026-07-31,振込,ピクシブ（カ,0,485,100485',
-  '2,2026-07-28,振込,カ）エイシス,0,1157,101642',
-  '2,2026-07-27,振込,ヤマダタロウ,0,'+invU.balance_amount+',999999',
-  '9,合計,3,,,,'].join('\n');
-const bkRes=G.admin_accountingUploadBankFile({bankCode:'MUFG',fileName:'三菱UFJ銀行_入金明細_20260731.csv'},Buffer.from(mufgCsv,'utf8').toString('base64'));
-ok(bkRes.rows===3,'MUFG: レコード種別判定で取引行のみ3件登録');
-let dupBank=false; try{ G.admin_accountingUploadBankFile({fileName:'x.csv'},Buffer.from(mufgCsv,'utf8').toString('base64')); }catch(e){ dupBank=/取込済み/.test(String(e.message)); }
-ok(dupBank,'銀行明細の二重取込を拒否');
-const sug=G.admin_accountingSuggestReconciliations('');
-const boothSug=sug.find(s=>s.target_type==='PLATFORM_BATCH'&&s.target_id===upRes.import_batch_id);
-ok(boothSug&&boothSug.candidates.some(c=>c.exact&&Number(c.credit_amount)===485),'ピクシブ入金をBOOTH対象月の候補として提示（名義＋金額一致）');
-ok(sug.some(s=>s.target_type==='PLATFORM_BATCH'&&s.target_id===dlUp.import_batch_id&&s.candidates.some(c=>Number(c.credit_amount)===1157)),'エイシス入金1,157円をDLsite候補として提示（受入18.2-6）');
-const invSug=sug.find(s=>s.target_type==='INVOICE'&&s.target_id===invU.invoice_id);
-ok(!!invSug,'未入金請求への直接入金候補を提示（自動確定しない）');
-
-// 57. 照合の確定・入金連携・取消
-const boothTx=boothSug.candidates.find(c=>c.exact).bank_transaction_id;
-const conf=G.admin_accountingConfirmReconciliation({target_type:'PLATFORM_BATCH',target_id:upRes.import_batch_id,
-  expected_amount:485,lines:[{bank_transaction_id:boothTx,applied_amount:485}],note:'BOOTH 2026-06'});
-ok(conf.difference_amount===0,'プラットフォーム入金の照合確定（差額0）');
-ok(G.readTableBulk_(ACCY,'Bank_Transactions').find(t=>t.bank_transaction_id===boothTx).match_status==='MATCHED','全額充当でMATCHED');
-G.admin_accountingConfirmReconciliation({target_type:'INVOICE',target_id:invU.invoice_id,
-  expected_amount:Number(invU.balance_amount),recordPayment:true,
-  lines:[{bank_transaction_id:invSug.candidates[0].bank_transaction_id,applied_amount:Number(invU.balance_amount)}]});
-ok(rows(OPS,'Invoices').find(v=>v.invoice_id===invU.invoice_id).status==='PAID','直接入金の照合→入金記録連携でPAID（参照番号=入金明細ID）');
-G.admin_accountingVoidReconciliation(conf.reconciliation_id,'テスト取消');
-ok(G.readTableBulk_(ACCY,'Bank_Transactions').find(t=>t.bank_transaction_id===boothTx).match_status==='UNMATCHED','照合取消で入金明細をUNMATCHEDへ戻す');
-
-// 58. 経理向け出力（§6.5：LEGACY_V3_07・版管理）
-const ex1=G.admin_accountingGenerateExport(runRes.allocation_run_id,'LEGACY_V3_07');
-const exRow=()=>G.readTableBulk_(ACCY,'Accounting_Exports').find(e=>e.export_id===ex1.export_id);
-ok(exRow().status==='GENERATED'&&exRow().drive_file_id&&exRow().file_hash,'旧形式（LEGACY_V3_07）生成＋ハッシュ記録');
-const legacySs=G.SpreadsheetApp.openById(exRow().drive_file_id);
-ok(!!(legacySs.getSheetByName('説明文')&&legacySs.getSheetByName('各社への支払')&&legacySs.getSheetByName('明細')&&legacySs.getSheetByName('BOOTH')&&legacySs.getSheetByName('複数原作明細①')&&legacySs.getSheetByName('原作マスタ')),'旧形式のシート構成（説明文/各社への支払/明細/チャネル別/複数原作/原作マスタ）');
-ok(G.readRows_(legacySs,'各社への支払').reduce((s,r)=>s+Number(r['配分額']||0),0)===485,'「各社への支払」合計＝485円（原票と一致）');
-const ex2=G.admin_accountingGenerateExport(runRes.allocation_run_id,'CONSOLIDATED_V1');
-const consSs=G.SpreadsheetApp.openById(G.readTableBulk_(ACCY,'Accounting_Exports').find(e=>e.export_id===ex2.export_id).drive_file_id);
-ok(!!(consSs.getSheetByName('サマリー')&&consSs.getSheetByName('入金照合')&&consSs.getSheetByName('支払先別集計')&&consSs.getSheetByName('未解決・警告')),'統合版（CONSOLIDATED_V1）のシート構成');
-const ex3=G.admin_accountingGenerateExport(runRes.allocation_run_id,'LEGACY_V3_07');
-ok(Number(G.readTableBulk_(ACCY,'Accounting_Exports').find(e=>e.export_id===ex3.export_id).version)===2,'再生成はversion増加（上書きしない）');
-
-// 59. 権利者別ファイル＋ZIP（§6.5）
-const px=G.admin_accountingGeneratePartnerExports(runRes.allocation_run_id,'MONTHLY');
-const pxRow=G.readTableBulk_(ACCY,'Accounting_Exports').find(e=>e.export_id===px.export_id);
-ok(pxRow.status==='GENERATED'&&pxRow.zip_file_id,'権利者別月次ファイル生成＋全権利者ZIP');
-
-// 60. 既存清算への連携・二重計上防止（§12.3・受入18.2-14）
-G.admin_accountingApproveExport(ex1.export_id);
-const post=G.admin_accountingPostSettlements(runRes.allocation_run_id);
-ok(post.settlements===6,'権利者別（6者）でSettlements作成');
-const postedDets=rows(OPS,'Settlement_Details').filter(d=>d.source_type==='ACCOUNTING_ALLOCATION'&&d.source_id===runRes.allocation_run_id);
-ok(postedDets.length>0&&postedDets.reduce((s,d)=>s+Number(d.amount),0)===485,'Settlement_Detailsへ確定額485円をsource付き連携');
-let dupPost=false; try{ G.admin_accountingPostSettlements(runRes.allocation_run_id); }catch(e){ dupPost=/二重計上/.test(String(e.message)); }
-ok(dupPost,'同一runの二重連携を拒否（受入18.2-14）');
-ok(runRow().status==='POSTED'&&batchRow().status==='POSTED','run・対象バッチがPOSTED');
 
 // ============ P4：CloudSign運用拡張（§10） ============
 // 61. 自動送信／手動確認の経路判定（§10.3）
@@ -1037,45 +667,23 @@ ok(G.admin_getContractTemplates().STANDARD_RATE.template_id==='SPLL_STD_RATE_v2'
 const appRt=mkApp(['WRK-ARK00012'],'電子出版物',docExtra);
 ok(appRt.form_url==='https://form.run/rate-v2','経路別フォームURLを申込応答で配信');
 
-// ============ 一括初期設定（setup_all／setup_workflowAll／setup_accountingAll） ============
+// ============ 一括初期設定（setup_all／setup_workflowAll） ============
 // 68. adminの setup_all：冪等・転記用プロパティ一覧・HANDOFF_SECRET生成
 const allRep=G.setup_all('admin@example.com');
 ok(allRep.properties.SS_OPS && allRep.copy_to_other_projects.workflow.SS_OPS===allRep.properties.SS_OPS &&
-   allRep.copy_to_other_projects.accounting.SS_ACCOUNTING_MASTER===allRep.properties.SS_ACCOUNTING_MASTER,
-  'setup_all: 他プロジェクト転記用のプロパティ一覧を出力');
+   !allRep.copy_to_other_projects.accounting,
+  'setup_all: 他プロジェクト転記一覧を出力（accountingは対象外）');
 ok(!!scriptProps.HANDOFF_SECRET,'setup_all: HANDOFF_SECRETを自動生成');
 const adminCount=()=>rows(OPS,'Admin_Users').filter(u=>u.email==='admin@example.com').length;
 const cntBefore=adminCount();
 G.setup_all('admin@example.com');
 ok(adminCount()===cntBefore,'setup_all: 再実行で管理者・台帳が重複しない（冪等）');
-// 69. workflow／accounting の一括初期設定：トリガー作成（冪等）
+// 69. workflow の一括初期設定：トリガー作成（冪等）
 const wfAll=G.setup_workflowAll();
 ok(wfAll.steps.some(s=>/trigger_every5min/.test(s)),'setup_workflowAll: トリガー作成');
 const wfAll2=G.setup_workflowAll();
 ok(wfAll2.steps.some(s=>/作成=\[\]/.test(s)),'setup_workflowAll: 再実行はスキップ（冪等）');
-const accAll=G.setup_accountingAll();
-ok(accAll.steps.some(s=>/trigger_accountingJobs/.test(s)),'setup_accountingAll: 経理ジョブトリガー作成');
-
-// 70. 新規契約の自動識別（登録不要の突合）：契約ID／申込番号／SPLL-プレフィックス表記
-const autoCsv='DLsite作品ID,作品名,SPLL申請番号,販売本数,ライセンス料合計\nRJ100,新契約の作品,SPLL-'+cP4.contract_id+',3,900\nRJ101,新契約の作品2,'+appP4.application_ref+',1,100';
-const autoUp=G.admin_accountingUploadSalesFile({channelId:'DLSITE',salesPeriod:'2026-07',fileName:'auto_ident.csv'},Buffer.from(autoCsv,'utf8').toString('base64'));
-G.admin_accountingStartImport(autoUp.import_batch_id);
-const autoLedger=G.readTableBulk_(ACCY,'Sales_Ledger').filter(r=>r.import_batch_id===autoUp.import_batch_id);
-ok(autoLedger.length===2&&autoLedger.every(r=>r.match_status==='MATCHED'),'新規契約の売上をLicense_Identifiers登録なしで自動突合');
-const autoRes=G.readTableBulk_(ACCY,'Sales_Match_Results').filter(r=>r.status==='CONFIRMED'&&autoLedger.some(l=>l.sales_row_id===r.sales_row_id));
-ok(autoRes.length===2&&autoRes.every(r=>r.contract_id===cP4.contract_id&&r.work_id==='WRK-BKK00019'),'契約ID・申込番号（SPLL-表記含む）→契約スナップショット原作へ解決');
-
-// 71. 配分プロファイルの一括作成（Works_Masterのpartner_idから）
-G.appendRow_(MAS,'Works_Master',{work_id:'WRK-SEED01',work_name:'一括投入テスト作品',publish_status:'DRAFT',partner_id:'PRT-TEST'});
-G.appendRow_(MAS,'Works_Master',{work_id:'WRK-SEED02',work_name:'複数権利者テスト',publish_status:'DRAFT',partner_id:'PRT-A／PRT-B'});
-const seedRes=G.admin_accountingSeedProfilesFromWorks();
-ok(seedRes.created===1,'単一権利者の原作にRESIDUAL100%プロファイルを一括作成（複数権利者・作成済みはスキップ）');
-const seedRes2=G.admin_accountingSeedProfilesFromWorks();
-ok(seedRes2.created===0,'再実行は作成済みをスキップ（冪等）');
-ok(G.admin_accountingListDistributionProfiles().some(p=>p.work_id==='WRK-SEED01'&&p.lines.length===1&&p.lines[0].calculation_type==='RESIDUAL'&&p.lines[0].partner_id==='PRT-TEST'),
-  '作成されたプロファイルはpartner_idへのRESIDUAL 1行');
-
-// ============ RP-001（分断・簡素化）：SPLL番号・ライセンス台帳・Finance引渡 ============
+// ============ RP-001（分断・簡素化）：SPLL番号・ライセンス台帳・経理引渡 ============
 // 72. SPLL番号と台帳（§6：主台帳License_Cases・原作スナップショット・契約書履歴）
 ok(/^SPLL-\d{6}-\d{4}$/.test(appP4.license_id),'申込でSPLL番号（license_id）発行: '+appP4.license_id);
 const kaseP4=()=>rows(OPS,'License_Cases').find(k=>k.license_id===appP4.license_id);
@@ -1086,15 +694,10 @@ ok(lwP4.length===1&&lwP4[0].fee_model_snapshot==='FLAT'&&Number(lwP4[0].fee_valu
   '費用は契約形態（利用目的）×原作構造で自動確定しLicense_Worksへスナップショット');
 ok(rows(OPS,'Contract_Documents').filter(d=>d.license_id===appP4.license_id&&d.document_type==='ORIGINAL'&&d.status==='SIGNED').length===1,'契約書履歴（ORIGINAL・1:N）');
 
-// 73. Finance引渡（§10）：READY→ACCEPTED→債権生成・冪等
+// 73. 経理引渡（§10）：締結でREADYを作成（取込・請求・入金は経理側の独自運用）
 const hoP4=()=>rows(OPS,'Finance_Handoffs').find(h=>h.license_id===appP4.license_id);
-ok(hoP4().status==='READY'&&kaseP4().finance_handoff_status==='READY','締結でFinance引渡READY（License側は請求を作らない）');
-ok(!rows(OPS,'Invoices').some(v=>v.contract_id===cP4.contract_id),'引渡受領前は債権なし');
-G.financeAcceptHandoffs_();
-ok(hoP4().status==='ACCEPTED'&&kaseP4().finance_handoff_status==='ACCEPTED','Finance側の取込でACCEPTED');
-ok(rows(OPS,'Invoices').filter(v=>v.contract_id===cP4.contract_id&&v.source_type==='CONTRACT').length===1,'受領時にPER_WORK債権を起票');
-G.financeAcceptHandoffs_();
-ok(rows(OPS,'Invoices').filter(v=>v.contract_id===cP4.contract_id&&v.source_type==='CONTRACT').length===1,'同じ引渡の再実行で債権が重複しない（受入18.1）');
+ok(hoP4().status==='READY'&&kaseP4().finance_handoff_status==='READY','締結で経理引渡READY（License側は請求を作らない）');
+ok(JSON.parse(hoP4().works_snapshot_json||'[]').length===1&&hoP4().billing_terms_json,'引渡に原作・請求条件のスナップショットを含む');
 
 // 74. フォームは「誰と契約するか」のみ（§8）：契約者情報の台帳反映
 scriptProps.FORMRUN_FIELD_MAP=JSON.stringify({'氏名':'party_name','契約者区分':'party_type','申込番号':'application_ref','handoff':'handoff_token'});
@@ -1122,9 +725,7 @@ ok(migLC.created>=1,'旧データ（Applications+Contracts）からライセン�
 const legacyApp=rows(OPS,'Applications').find(a=>a.application_id==='APP-LEGACY-1');
 ok(/^SPLL-/.test(legacyApp.license_id),'旧申込へSPLL番号を付与');
 const legacyKase=rows(OPS,'License_Cases').find(k=>k.license_id===legacyApp.license_id);
-ok(legacyKase.contract_status==='SIGNED'&&legacyKase.finance_handoff_status==='ACCEPTED','旧締結分の引渡はACCEPTED扱い');
-G.financeAcceptHandoffs_();
-ok(!rows(OPS,'Invoices').some(v=>v.contract_id==='CTR-LEGACY-1'),'移行済み旧契約へ新規債権を作らない（二重請求防止）');
+ok(legacyKase.contract_status==='SIGNED'&&legacyKase.finance_handoff_status==='ACCEPTED','旧締結分の引渡はACCEPTED扱い（経理側で処理済み）');
 ok(G.setup_migrateLicenseCases().created===0,'移行の再実行はスキップ（冪等）');
 
 // 77. ライセンス一覧・詳細（§18.2：SPLL番号で申込〜認証まで追跡）
@@ -1134,7 +735,7 @@ ok(lcList.some(k=>k.license_id===appP4.license_id&&k.legacy_contract_id===cP4.co
 const lcDet=G.admin_getLicenseCase(appP4.license_id);
 ok(lcDet.works.length===1&&lcDet.documents.length===1&&lcDet.handoffs.length===1,'ライセンス詳細（原作・契約書履歴・引渡）');
 
-// 78. 定額×複数原作＝契約単位定額を権利者間で分配（費用ロジック訂正）
+// 78. 定額×複数原作＝契約単位定額（費用は原作数で増えない）
 ok(G.computeFeeTerms_('書籍',2).amount===16500,'2原作でも契約単位の定額16,500円');
 scriptProps.FORMRUN_FIELD_MAP=JSON.stringify({'handoff':'handoff_token'});
 const appFlat=mkApp(['WRK-ARK00012','WRK-BKK00019'],'書籍',docExtra);
@@ -1144,18 +745,10 @@ G.doPost({parameter:{},postData:{contents:JSON.stringify({document_id:'DOC-FLAT-
 delete scriptProps.FORMRUN_FIELD_MAP;
 const cFlat=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-FLAT-1');
 ok(cFlat&&cFlat.status==='SIGNED','2原作の定額契約が締結');
-G.financeAcceptHandoffs_();
-const invFlat=rows(OPS,'Invoices').find(v=>v.contract_id===cFlat.contract_id&&v.source_type==='CONTRACT');
-ok(invFlat&&Number(invFlat.amount)===16500,'複数原作でも債権は定額16,500円（×原作数にしない）');
-G.admin_recordPayment(cFlat.contract_id,invFlat.invoice_id,Number(invFlat.total_amount),'2026-08-12','BANK-FLAT-1');
-G.generateStatements_(G.currentPeriod_());
-const flatDets=rows(OPS,'Settlement_Details').filter(d=>d.source_type==='CONTRACT_FEE'&&d.source_id===invFlat.invoice_id);
-ok(flatDets.length===2&&flatDets.reduce((s,d)=>s+Number(d.amount),0)===Math.round(16500*0.7),
-  '入金済み定額を対象原作の権利者2者へ均等分配（手数料30%控除後11,550円・合計維持）');
-ok(flatDets.every(d=>d.report_id===''&&d.work_id),'定額分配の明細は原作単位（報告に依存しない）');
-G.generateStatements_(G.currentPeriod_());
-ok(rows(OPS,'Settlement_Details').filter(d=>d.source_type==='CONTRACT_FEE'&&d.source_id===invFlat.invoice_id).length===2,
-  '同一請求の再清算なし（invoice単位で冪等）');
+const hoFlat=rows(OPS,'Finance_Handoffs').find(h=>h.license_id===appFlat.license_id);
+ok(hoFlat&&JSON.parse(hoFlat.works_snapshot_json||'[]').length===2,'複数原作のスナップショットを経理引渡へ含める');
+const btFlat=JSON.parse(hoFlat.billing_terms_json||'{}');
+ok(btFlat.fee_model==='FLAT'&&Number(btFlat.amount)===16500,'引渡の請求条件は契約単位の定額16,500円（×原作数にしない）');
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);
