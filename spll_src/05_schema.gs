@@ -31,12 +31,12 @@ const SCHEMA_MASTER = {
 const SCHEMA_OPS = {
   // 申込：複数原作は中間テーブル Application_Works で管理（B経路固定・A/B分岐なし）
   //   usage_category：利用目的（別紙2の料金計算キー）／privacy_hash・terms_hash：同意時文書ハッシュ（§7.2）
-  Applications:         ['application_id','application_ref','usage_category','privacy_hash','terms_hash','handoff_expires_at','status','created_at','form_submission_id','form_submitted_at','cloudsign_send_status','cloudsign_send_error','manual_review_reason','supersedes_application_id','superseded_by_application_id'],
+  Applications:         ['application_id','application_ref','usage_category','privacy_hash','terms_hash','handoff_expires_at','status','created_at','form_submission_id','form_submitted_at','cloudsign_send_status','cloudsign_send_error','manual_review_reason','supersedes_application_id','superseded_by_application_id','license_id'],
   Application_Works:    ['application_work_id','application_id','work_id'],
   // 契約：締結時に対象原作を Contract_Works へスナップショット（法務証跡）
   //   link_status: LINKED（申込突合済）/ UNLINKED（未突合＝手動紐付け待ち）
   //   contract_file_id/hash：締結済原本PDF（FUN-04）
-  Contracts:            ['contract_id','cloudsign_document_id','cloudsign_title','application_id','application_ref','usage_category','terms_snapshot','status','link_status','signed_at','contract_file_id','contract_file_hash','folder_id','form_submission_id','route_type','terms_verification_status','terms_verification_detail','delivery_status','last_delivery_event_at'],
+  Contracts:            ['contract_id','cloudsign_document_id','cloudsign_title','application_id','application_ref','usage_category','terms_snapshot','status','link_status','signed_at','contract_file_id','contract_file_hash','folder_id','form_submission_id','route_type','terms_verification_status','terms_verification_detail','delivery_status','last_delivery_event_at','license_id'],
   // 清算は契約時スナップショットを正本とする（V2-011）：権利者・登録番号・料率・配分方式まで固定
   Contract_Works:       ['contract_work_id','contract_id','work_id','work_name_snapshot','publisher_snapshot','credit_snapshot','partner_id_snapshot','partner_name_snapshot','invoice_reg_number_snapshot','allocation_scheme_snapshot','royalty_rate_snapshot','handling_fee_rate_snapshot'],
   // 用途別アクセストークン（SEC-06/§9.1）：SUBMISSION / REPORT / BADGE_DOWNLOAD
@@ -72,6 +72,15 @@ const SCHEMA_OPS = {
   System_Errors:        ['error_id','error_code','source','message','detail','occurred_at','status'],
   Batch_Runs:           ['batch_run_id','batch_name','started_at','finished_at','processed','errors','status','detail'],
   X_Posts:              ['x_post_id','work_id','tweet_id','text','posted_by','posted_at'],
+  // ---- SPLLライセンス台帳（分断・簡素化計画 SPLL-SYS-RP-001 §6）----
+  // 主台帳：1案件（SPLL番号）1行。申込〜契約〜審査〜認証を1つの状態遷移として扱う
+  License_Cases:        ['license_id','application_ref','party_type','party_display_name','usage_category','case_status','contract_status','cloudsign_document_id','signed_at','signed_pdf_file_id','signed_pdf_hash','review_status','certification_status','finance_handoff_status','created_at','updated_at'],
+  // 対象原作（1:N）：契約条件は申込時点でスナップショット（費用＝契約形態×原作構造で自動確定）
+  License_Works:        ['license_work_id','license_id','work_id','work_name_snapshot','credit_snapshot','fee_model_snapshot','fee_value_snapshot','reporting_requirement_snapshot','active'],
+  // 契約書履歴（1:N）：原本は締結済PDF＋ハッシュ（台帳に契約全文を再現しない）
+  Contract_Documents:   ['contract_document_id','license_id','document_type','version','cloudsign_document_id','status','signed_at','file_id','file_hash','created_at'],
+  // License→Finance引渡（§10）：契約成立とFinance処理の境界。READY→ACCEPTED（冪等キー license_id+handoff_version）
+  Finance_Handoffs:     ['handoff_id','license_id','handoff_version','signed_at','party_display_name','usage_category','works_snapshot_json','billing_terms_json','contract_status','status','created_at','accepted_at'],
   // 規約・同意文の版管理（§7.2）：DRAFT→PUBLISHED→RETIRED
   Legal_Documents:      ['legal_document_id','document_type','version','content_html','content_hash','effective_from','effective_to','status','approved_by','approved_at'],
   Application_Consents: ['consent_id','application_id','document_type','legal_document_id','legal_document_version','content_hash','display_hash','consent_session_id','accepted','accepted_at','consented_at','consent_method','evidence_version'],
@@ -225,7 +234,7 @@ function setup_seedSamples_(){
 }
 
 // ---- スキーマ移行（修正設計書v2 V2-003）----
-const SCHEMA_VERSION = 4;   // v4: Applications/Contracts/Webhook_ReceiptsへCloudSign運用拡張列を追加（SPLL-SYS-AD-001 §9）
+const SCHEMA_VERSION = 5;   // v5: SPLLライセンス台帳（License_Cases系・SPLL-SYS-RP-001 §6/§10）＋license_id列
 
 /**
  * 既存スプレッドシートへ不足シート・不足列を追加する（既存列の削除・並び替えはしない）。
@@ -365,6 +374,9 @@ function setup_all(adminEmail){
   // 5) 経理台帳（SPLL-SYS-AD-001）：マスタ・年度ブック・Driveフォルダ・初期値
   try{ const acc = setup_accountingBootstrap(); report.steps.push('setup_accountingBootstrap: ' + JSON.stringify({ created: Object.keys(acc.created||{}), reused: Object.keys(acc.reused||{}) })); }
   catch(e){ report.steps.push('setup_accountingBootstrap 失敗: ' + String(e && e.message || e)); }
+  // 5.5) ライセンス台帳移行（RP-001）：既存申込・契約をSPLL番号（License_Cases）へ
+  try{ const lm = setup_migrateLicenseCases(); report.steps.push('setup_migrateLicenseCases: ' + JSON.stringify(lm)); }
+  catch(e){ report.steps.push('setup_migrateLicenseCases 失敗: ' + String(e && e.message || e)); }
 
   // 6) 転記用プロパティ一覧（ScriptPropertiesはプロジェクトごとに独立）
   const P = function(k){ return sp.getProperty(k) || ''; };
@@ -395,4 +407,47 @@ function setup_all(adminEmail){
   Logger.log('・accounting のエディタで setup_accountingAll を実行（経理ジョブトリガー作成）');
   Logger.log('・portal の ADMIN_CONSOLE_URL に adminのウェブアプリURL（/exec）を設定');
   return report;
+}
+
+/**
+ * 既存データのライセンス台帳移行（RP-001 §16 Phase1・冪等）。
+ * Applications＋Contracts＋Contract_Works から License_Cases／License_Works／
+ * Contract_Documents／Finance_Handoffs を生成する。既存の旧テーブルは削除しない。
+ * 旧フローで請求済みの締結案件は引渡をACCEPTEDで記録（二重請求防止）。
+ */
+function setup_migrateLicenseCases(){
+  if(readRows_(ssOps_(),'Admin_Users').length > 0) requireRole_(['SYSTEM_ADMIN']);
+  const ops = ssOps_();
+  const contracts = readRows_(ops,'Contracts');
+  const certs = readRows_(ops,'Certificates');
+  const appWorks = readRows_(ops,'Application_Works');
+  let created = 0, skipped = 0;
+  readRows_(ops,'Applications').forEach(function(a){
+    if(a.license_id || a.status === 'PURGED'){ skipped++; return; }
+    const workIds = appWorks.filter(function(w){ return w.application_id === a.application_id; })
+      .map(function(w){ return w.work_id; });
+    const lid = createLicenseCase_(a.application_id, a.application_ref, a.usage_category, workIds, '');
+    updateRow_(ops,'Applications','application_id',a.application_id,{ license_id: lid });
+    const st = { APPLICATION_CREATED:'APPLIED', FORM_PENDING:'APPLIED', CONTRACT_PENDING:'CONTRACTING',
+      SIGNED:'SIGNED', SUPERSEDED:'CLOSED', CANCELLED:'CLOSED' };
+    updateLicenseCase_(lid, { case_status: st[String(a.status)] || 'APPLIED' });
+    const c = contracts.find(function(x){ return x.application_id === a.application_id; });
+    if(c){
+      updateRow_(ops,'Contracts','contract_id',c.contract_id,{ license_id: lid });
+      syncLicenseOnSigning_(c.contract_id, lid, 'SIGNED');
+      const cert = certs.find(function(x){ return x.contract_id === c.contract_id; });
+      updateLicenseCase_(lid, {
+        certification_status: cert ? String(cert.status) : 'NOT_ISSUED',
+        review_status: cert ? 'PENDING' : 'NOT_REQUIRED',
+        finance_handoff_status: 'ACCEPTED' });
+      const now = new Date().toISOString();
+      appendRow_(ops,'Finance_Handoffs',{ handoff_id: Utilities.getUuid(), license_id: lid, handoff_version: 1,
+        signed_at: c.signed_at || '', party_display_name: '', usage_category: c.usage_category || '',
+        works_snapshot_json: '[]', billing_terms_json: c.terms_snapshot || '{}',
+        contract_status: 'ACTIVE', status: 'ACCEPTED', created_at: now, accepted_at: now });
+    }
+    created++;
+  });
+  logEvent_('license_case', 'migrateLicenseCases', actor_(), null, { created: created, skipped: skipped });
+  return { created: created, skipped: skipped };
 }

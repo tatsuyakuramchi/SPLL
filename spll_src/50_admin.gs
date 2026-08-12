@@ -298,10 +298,12 @@ function admin_linkContract(contractId, applicationId){ requireRole_(['OPERATION
   if(dup) throw new Error('この申込は既に契約 ' + dup.contract_id + ' に紐付いています');
 
   updateRow_(ssOps_(),'Contracts','contract_id',contractId,
-    { application_id: applicationId, application_ref: app.application_ref || '', link_status: 'LINKED' });
+    { application_id: applicationId, application_ref: app.application_ref || '', link_status: 'LINKED',
+      license_id: app.license_id || '' });
   snapshotContractWorks_(contractId, applicationId);
   snapshotContractTerms_(contractId, app);
   updateRow_(ssOps_(),'Applications','application_id',applicationId,{ status:'SIGNED' });
+  syncLicenseOnSigning_(contractId, app.license_id, 'SIGNED');
   finishContractLinkage_(contractId);
   // 手動確認キューの解消（V2-008）：該当書類の受信を PROCESSED に更新
   readRows_(ssOps_(),'Webhook_Receipts')
@@ -979,4 +981,35 @@ function admin_saveContractTemplates(cfg){
   });
   logEvent_('config', 'CS_TEMPLATES', actor.email, null, { routes: Object.keys(cfg) });
   return true;
+}
+
+// ---- SPLLライセンス台帳（RP-001 §6：管理画面の主台帳）----
+function admin_listLicenseCases(){ requireRole_([]);
+  const worksBy = {};
+  readRows_(ssOps_(),'License_Works').forEach(function(w){
+    if(String(w.active) !== 'false') (worksBy[w.license_id] = worksBy[w.license_id] || []).push(w.work_name_snapshot || w.work_id); });
+  const contractBy = {};
+  readRows_(ssOps_(),'Contracts').forEach(function(c){
+    if(c.license_id && !contractBy[c.license_id]) contractBy[c.license_id] = c.contract_id; });
+  return readRows_(ssOps_(),'License_Cases').slice(-200).reverse().map(function(k){ return {
+    license_id: k.license_id, application_ref: k.application_ref,
+    party_type: k.party_type, party_display_name: k.party_display_name,
+    usage_category: k.usage_category, works: (worksBy[k.license_id] || []).join('、'),
+    case_status: k.case_status, contract_status: k.contract_status,
+    review_status: k.review_status, certification_status: k.certification_status,
+    finance_handoff_status: k.finance_handoff_status,
+    signed_at: String(k.signed_at || '').slice(0, 10),
+    legacy_contract_id: contractBy[k.license_id] || '' }; });
+}
+/** ライセンス詳細（契約書履歴・引渡状況つき）。 */
+function admin_getLicenseCase(licenseId){ requireRole_([]);
+  const k = readRows_(ssOps_(),'License_Cases').find(function(x){ return x.license_id === String(licenseId||''); });
+  if(!k) throw new Error('DATA_NOT_FOUND: ライセンスがありません: ' + licenseId);
+  return {
+    case: k,
+    works: readRows_(ssOps_(),'License_Works').filter(function(w){ return w.license_id === k.license_id; }),
+    documents: readRows_(ssOps_(),'Contract_Documents').filter(function(d){ return d.license_id === k.license_id; }),
+    handoffs: readRows_(ssOps_(),'Finance_Handoffs').filter(function(h){ return h.license_id === k.license_id; })
+      .map(function(h){ return { handoff_version: h.handoff_version, status: h.status, created_at: h.created_at, accepted_at: h.accepted_at }; }),
+  };
 }

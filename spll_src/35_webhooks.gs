@@ -182,7 +182,7 @@ function processCloudSignEvent_(body, e){
     snapshotContractTerms_(contractId, app);
     updateRow_(ssOps_(),'Applications','application_id',app.application_id,{ status:'SIGNED', cloudsign_send_status:'SIGNED' });
     updateRow_(ssOps_(),'Contracts','contract_id',contractId,{
-      form_submission_id: app.form_submission_id || '',
+      form_submission_id: app.form_submission_id || '', license_id: app.license_id || '',
       route_type: app.manual_review_reason ? 'MANUAL' : 'AUTO', delivery_status: 'DELIVERED' });
     // 条件照合（経理設計書 §10.8）：認証・バッジ・請求の前に主要条件を検証
     const verify = verifyContractTerms_(contractId, app);
@@ -190,6 +190,7 @@ function processCloudSignEvent_(body, e){
       updateRow_(ssOps_(),'Contracts','contract_id',contractId,{
         link_status:'TERMS_MISMATCH', terms_verification_status:'TERMS_MISMATCH',
         terms_verification_detail: sanitizeCell_(verify.detail.slice(0, 300)) });
+      syncLicenseOnSigning_(contractId, app.license_id, 'HOLD');
       enqueueNotification_(contractId, 'TERMS_MISMATCH', contractId,
         { application_ref: ref, detail: verify.detail.slice(0, 200), action: '法務・運営が内容確認のうえ「条件確認済み」にしてください（自動有効化は停止中）' });
       logEvent_('contract', contractId, 'cloudsign', null,
@@ -197,6 +198,7 @@ function processCloudSignEvent_(body, e){
       return 'manual-review:条件不一致（' + verify.detail.slice(0, 100) + '）';
     }
     updateRow_(ssOps_(),'Contracts','contract_id',contractId,{ terms_verification_status:'VERIFIED' });
+    syncLicenseOnSigning_(contractId, app.license_id, 'SIGNED');
     logEvent_('contract', contractId, 'cloudsign', null, { status:'SIGNED', link_status:'LINKED', application_ref:ref });
     finishContractLinkage_(contractId);
     return 'ok';
@@ -256,6 +258,16 @@ function processFormrunEvent_(body){
     return 'ok-send-failed';
   }
   sendPatch.cloudsign_send_status = 'CLOUDSIGN_SENDING';
+  // ライセンス台帳へ契約者情報を反映（RP-001 §8：フォームは「誰と契約するか」のみ取得）
+  if(app.license_id){
+    const partyName = canon.company_name || canon.party_name || canon.name || '';
+    const rawType = String(canon.party_type || '');
+    const casePatch = { case_status: 'CONTRACTING' };
+    if(partyName) casePatch.party_display_name = sanitizeCell_(String(partyName).slice(0, 100));
+    if(rawType) casePatch.party_type = /法人/.test(rawType) ? 'CORPORATION'
+      : (/個人事業/.test(rawType) ? 'SOLE_PROPRIETOR' : (/個人/.test(rawType) ? 'INDIVIDUAL' : sanitizeCell_(rawType).slice(0, 20)));
+    updateLicenseCase_(app.license_id, casePatch);
+  }
   // 逆行禁止：FORM_PENDING/APPLICATION_CREATED からのみ前進
   if(app.status === 'APPLICATION_CREATED' || app.status === 'FORM_PENDING'){
     sendPatch.status = 'CONTRACT_PENDING';

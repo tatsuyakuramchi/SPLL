@@ -96,15 +96,28 @@ function web_createApplication(params){
   const route = decideContractRoute_({ usageCategory: usageCategory, workIds: ids,
     isMinor: params.isMinor === true, isOverseas: params.isOverseas === true,
     hasSpecialTerms: params.hasSpecialTerms === true });
+  // SPLL番号（license_id）発行＋ライセンス台帳作成（SPLL-SYS-RP-001 原則2/3）
+  const partyType = ['INDIVIDUAL','SOLE_PROPRIETOR','CORPORATION'].indexOf(String(params.partyType||'')) >= 0
+    ? String(params.partyType) : '';
+  const licenseId = createLicenseCase_(appId, ref, usageCategory, ids, partyType);
   updateRow_(ssOps_(),'Applications','application_id',appId,{ status:'FORM_PENDING',
-    cloudsign_send_status:'NOT_STARTED',
+    license_id: licenseId, cloudsign_send_status:'NOT_STARTED',
     manual_review_reason: route.route === 'MANUAL_REVIEW' ? sanitizeCell_(route.reasons.join('、')) : '' });
-  logEvent_('application', appId, 'portal', null,
-    { application_ref:ref, works:ids.length, usage_category:usageCategory, route:route.route, reasons:route.reasons });
+  logEvent_('license_case', licenseId, 'portal', null,
+    { application_ref:ref, works:ids.length, usage_category:usageCategory, route:route.route, reasons:route.reasons, party_type:partyType });
   // 引継ぎ改変検知トークン（フォーム項目設計 §4.1.1）
   const handoff = makeHandoffToken_(appId, ref, ids, usageCategory, termsHash, handoffExpires);
-  return { application_id:appId, application_ref:ref, handoff_token:handoff, handoff_expires_at:handoffExpires,
-    template_route: route.route, route_reasons: route.reasons, form_url: routeFormUrl_(route.route) };
+  return { application_id:appId, application_ref:ref, license_id:licenseId,
+    handoff_token:handoff, handoff_expires_at:handoffExpires,
+    template_route: route.route, route_reasons: route.reasons,
+    form_url: partyFormUrl_(partyType, route.route) };
+}
+
+/** 契約者区分別フォームURL（フォーム簡素化・RP-001 §8.3/8.4）。未設定は経路別→共通へフォールバック。 */
+function partyFormUrl_(partyType, route){
+  const byParty = partyType === 'CORPORATION' ? getConfig_('FORM_URL_CORPORATION','')
+    : (partyType ? getConfig_('FORM_URL_INDIVIDUAL','') : '');
+  return byParty || routeFormUrl_(route);
 }
 
 /**

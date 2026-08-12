@@ -21,10 +21,11 @@ function batchRun_(name, fn){
   }
 }
 // ---- トリガー・ハンドラ（setup_triggers で作成） ----
-function trigger_every5min(){                     // Webhook再処理＋AI審査キュー＋バッジ再試行
+function trigger_every5min(){                     // Webhook再処理＋AI審査キュー＋バッジ再試行＋Finance引渡取込
   batchRun_('processWebhookReceipts', processWebhookReceipts_);
   batchRun_('runAiReviews', batch_runAiReviews_);
   batchRun_('retryBadgeJobs', retryBadgeJobs_);
+  batchRun_('financeAcceptHandoffs', financeAcceptHandoffs_);   // READY→ACCEPTED＋債権生成（RP-001 §10.3）
 }
 function trigger_daily(){                         // 期限処理・みなし確認・SLA・データ削除
   batchRun_('expireAccessTokens', expireAccessTokens_);

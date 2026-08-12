@@ -225,6 +225,13 @@
       </select>
       <div id="feePreview" style="margin-top:14px;"></div>
 
+      <h2 class="wtitle" style="font-size:18px;margin-top:22px;">契約者の区分</h2>
+      <p class="wsub">利用料は「利用目的 × 選択した原作」で自動決定されるため、フォームでの条件入力はありません。区分により契約フォームが切り替わります。</p>
+      <select id="partySel" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:12px 13px;font-size:14px;font-family:inherit;background:var(--surface);">
+        <option value="INDIVIDUAL">個人・個人事業主</option>
+        <option value="CORPORATION">法人</option>
+      </select>
+
       <div class="navbar"><button class="prev" onclick="show('search')">原作を追加する</button><button class="next" id="n0" disabled onclick="goStep(1)">この内容で申込へ進む →</button></div>
     </div>
 
@@ -262,7 +269,7 @@
     <div class="wstep" id="wsDone" style="display:none;">
       <div class="done">
         <div class="big">✓ お申込みを作成しました</div>
-        <p style="color:var(--soft);font-size:13px;">申込参照番号（application_ref）</p>
+        <p style="color:var(--soft);font-size:13px;">SPLL番号（license_id）</p>
         <div class="refbox mono" id="refBox">—</div>
         <p id="doneMsg" style="color:var(--soft);font-size:13px;max-width:52ch;margin:0 auto;"></p>
         <div style="margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
@@ -501,6 +508,7 @@ function buildFormUrl(res){
   const map=APPLY.hiddenMap||{};
   const params=[];
   const add=(k,v)=>{ if(k) params.push(encodeURIComponent(k)+"="+encodeURIComponent(v||"")); };
+  add(map.license_id||"license_id", (res&&res.license_id)||"");
   add(map.application_ref||APPLY.refParam, ref);
   if(res){ add(map.handoff_token, res.handoff_token||""); }
   add(map.usage_category, selectedUsage||"");
@@ -568,6 +576,7 @@ function submitApplication(){
   const btn=document.getElementById("submit"); btn.disabled=true; btn.textContent="申込を作成中…";
   const ids=cart.slice();
   const params={ workIds:ids, usageCategory:selectedUsage,
+    partyType:(document.getElementById("partySel")||{}).value||"INDIVIDUAL",
     privacyConsent:true, termsConsent:true,                       // チェックボックスは updateGates で担保済み
     privacyDocumentId:LEGAL_META.privacy_doc_id, termsDocumentId:LEGAL_META.terms_doc_id,
     consentSessionId:CONSENT_SESSION_ID, displayHash:displayHash() };
@@ -583,10 +592,11 @@ function submitApplication(){
   }
 }
 function onCreated(res){
-  const ref=(res&&res.application_ref)||"—";
+  const ref=(res&&res.license_id)||(res&&res.application_ref)||"—";
   document.getElementById("refBox").textContent=ref;
   document.getElementById("doneMsg").innerHTML=
-    "続けてクラウドサインフォームで申込者情報・同意を入力し、CloudSignで契約を締結してください。<br>この参照番号（application_ref）で申込と契約が紐付きます。控えとして保管してください。";
+    "あなたの<b>SPLL番号</b>です。申込から契約・審査・認証まで、この番号で管理されます。控えとして保管してください。<br>"+
+    "続けてクラウドサインフォームで契約者情報を入力し、CloudSignで契約を締結してください（条件の再入力はありません）。";
   const toForm=document.getElementById("toForm");
   const url=buildFormUrl(res);
   if(url){

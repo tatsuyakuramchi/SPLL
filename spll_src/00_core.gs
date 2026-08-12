@@ -371,3 +371,59 @@ function addDaysIso_(d){ const t=new Date(); t.setDate(t.getDate()+d); return t.
 function addMonthsIso_(date, m){ const t=new Date(date.getTime()); t.setMonth(t.getMonth()+m); return t.toISOString(); }
 function num_(v){ const n=parseFloat(String(v).replace(/[^0-9.\-]/g,'')); return isNaN(n)?0:n; }
 function currentPeriod_(){ const d=new Date(); return d.getFullYear()+(d.getMonth()<6?'H1':'H2'); }
+
+// ============================================================
+// SPLLライセンス台帳ヘルパー（分断・簡素化計画 SPLL-SYS-RP-001 §6）
+//   license_id（SPLL番号）を全業務の主キーとし、申込〜認証を1案件として扱う。
+// ============================================================
+/** 申込からライセンス案件（License_Cases＋License_Works）を作成し license_id を返す。 */
+function createLicenseCase_(appId, applicationRef, usageCategory, workIds, partyType){
+  const licenseId = newId_('SPLL');
+  const now = new Date().toISOString();
+  appendRow_(ssOps_(), 'License_Cases', {
+    license_id: licenseId, application_ref: applicationRef,
+    party_type: sanitizeCell_(String(partyType || '')), party_display_name: '',
+    usage_category: sanitizeCell_(String(usageCategory || '')),
+    case_status: 'APPLIED', contract_status: 'NOT_STARTED',
+    cloudsign_document_id: '', signed_at: '', signed_pdf_file_id: '', signed_pdf_hash: '',
+    review_status: 'NOT_REQUIRED', certification_status: 'NOT_ISSUED',
+    finance_handoff_status: 'NOT_REQUIRED', created_at: now, updated_at: now,
+  });
+  // 対象原作＋契約条件スナップショット（費用＝契約形態（利用目的）×原作構造で自動確定・原則5）
+  const master = readRows_(ssMaster_(), 'Works_Master');
+  const rule = (typeof feeRuleFor_ === 'function') ? feeRuleFor_(usageCategory) : null;
+  (workIds || []).forEach(function(wid){
+    const w = master.find(function(x){ return x.work_id === wid; }) || {};
+    appendRow_(ssOps_(), 'License_Works', {
+      license_work_id: Utilities.getUuid(), license_id: licenseId, work_id: wid,
+      work_name_snapshot: sanitizeCell_(String(w.work_name || wid)),
+      credit_snapshot: sanitizeCell_(String(w.credit_text || '')),
+      fee_model_snapshot: rule ? String(rule.fee_model || '') : '',
+      fee_value_snapshot: rule ? String(rule.fee_value || '') : '',
+      reporting_requirement_snapshot: rule ? String(rule.requires_usage_report || '') : '',
+      active: 'true',
+    });
+  });
+  return licenseId;
+}
+/** ライセンス案件の更新（updated_at自動）。 */
+function updateLicenseCase_(licenseId, patch){
+  if(!licenseId) return false;
+  patch = patch || {};
+  patch.updated_at = new Date().toISOString();
+  return updateRow_(ssOps_(), 'License_Cases', 'license_id', licenseId, patch);
+}
+/** 契約書履歴の追記（1案件1書類とは限らない・§6.3）。 */
+function appendContractDocument_(licenseId, docType, cloudsignDocId, status, signedAt, fileId, fileHash){
+  const versions = readRows_(ssOps_(), 'Contract_Documents')
+    .filter(function(d){ return d.license_id === licenseId; });
+  const docId = Utilities.getUuid();
+  appendRow_(ssOps_(), 'Contract_Documents', {
+    contract_document_id: docId, license_id: licenseId,
+    document_type: docType || 'ORIGINAL', version: versions.length + 1,
+    cloudsign_document_id: cloudsignDocId || '', status: status || 'SIGNED',
+    signed_at: signedAt || '', file_id: fileId || '', file_hash: fileHash || '',
+    created_at: new Date().toISOString(),
+  });
+  return docId;
+}

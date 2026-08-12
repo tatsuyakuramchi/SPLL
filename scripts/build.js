@@ -29,7 +29,7 @@ const MANIFEST = {
     title: 'SPLL 管理コンソール (GAS③)',
   },
   accounting: {
-    gs: ['00_core.gs','10_auth.gs','55_accounting_master.gs','60_sales_import.gs','62_sales_match.gs','64_sales_allocation.gs','66_bank_reconciliation.gs','68_accounting_export.gs','69_accounting_jobs.gs'],
+    gs: ['00_core.gs','10_auth.gs','15_fee.gs','55_accounting_master.gs','60_sales_import.gs','62_sales_match.gs','64_sales_allocation.gs','66_bank_reconciliation.gs','68_accounting_export.gs','69_accounting_jobs.gs'],
     html: [],
     title: 'SPLL 経理連携 (GAS④)',
   },

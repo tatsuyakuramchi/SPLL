@@ -223,3 +223,33 @@ function confirmDeemed_(){
       logEvent_('settlement_statement', s.statement_id, 'system', {status:'OBJECTION_PERIOD'}, {status:'NO_OBJECTION_RECORDED'});
     });
 }
+
+// ============================================================
+// Finance引渡の取込（RP-001 §10.3）。Finance側バッチとして動作し、
+// READYの引渡を受領（ACCEPTED）して債権（FLAT/PER_WORK請求）を生成する。
+// 冪等：license_id+handoff_version はREADY→ACCEPTEDの一方向のみ。請求は契約単位の既存重複チェックで防止。
+// ============================================================
+function financeAcceptHandoffs_(){
+  const ops = ssOps_();
+  const handoffs = readRows_(ops, 'Finance_Handoffs').filter(function(h){ return h.status === 'READY'; });
+  let accepted = 0, errors = 0;
+  handoffs.forEach(function(h){
+    try{
+      const contract = readRows_(ops, 'Contracts').find(function(c){
+        return c.license_id === h.license_id && c.status === 'SIGNED'; });
+      if(contract) createInvoiceOnSigning_(contract.contract_id);   // FLAT/PER_WORKの債権生成（重複は内部で防止）
+      updateRow_(ops, 'Finance_Handoffs', 'handoff_id', h.handoff_id,
+        { status: 'ACCEPTED', accepted_at: new Date().toISOString() });
+      updateLicenseCase_(h.license_id, { finance_handoff_status: 'ACCEPTED' });
+      logEvent_('finance_handoff', h.handoff_id, 'finance', { status:'READY' },
+        { status:'ACCEPTED', license_id: h.license_id, version: h.handoff_version });
+      accepted++;
+    }catch(err){
+      updateRow_(ops, 'Finance_Handoffs', 'handoff_id', h.handoff_id, { status: 'ERROR' });
+      updateLicenseCase_(h.license_id, { finance_handoff_status: 'ERROR' });
+      logError_('PROCESSING_ERROR', 'financeAcceptHandoff', err, { handoff_id: h.handoff_id, license_id: h.license_id });
+      errors++;
+    }
+  });
+  return { processed: handoffs.length, accepted: accepted, errors: errors };
+}

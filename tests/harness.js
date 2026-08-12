@@ -477,9 +477,10 @@ ok(G.resolveToken_(rl2.token,'SUBMISSION')===null,'用途違い（REPORT→SUBMI
 const exp=G.expireAccessTokens_();
 ok(exp.processed>=1,'期限切れトークンをEXPIREDへ: '+exp.processed);
 
-// 23. 請求起票（FUN-02）
-// FLAT/PER_WORK: 書籍(PER_WORK)契約=app2由来 → 締結時起票済みのはず
-ok(rows(OPS,'Invoices').some(v=>v.source_type==='CONTRACT'),'PER_WORK契約の請求が締結時に起票');
+// 23. 請求起票（FUN-02。RP-001でLicense→Finance引渡経由に変更：締結時はREADY、受領時に起票）
+ok(!rows(OPS,'Invoices').some(v=>v.source_type==='CONTRACT'),'License側は締結時に請求を作らない（RP-001 原則1）');
+G.financeAcceptHandoffs_();
+ok(rows(OPS,'Invoices').some(v=>v.source_type==='CONTRACT'),'Finance引渡の受領でPER_WORK債権を起票');
 // RATE: 承認→起票
 G.admin_approveReport(rpt98);
 const gen2=G.admin_generateInvoicesFromReports(G.currentPeriod_());
@@ -1073,6 +1074,65 @@ const seedRes2=G.admin_accountingSeedProfilesFromWorks();
 ok(seedRes2.created===0,'再実行は作成済みをスキップ（冪等）');
 ok(G.admin_accountingListDistributionProfiles().some(p=>p.work_id==='WRK-SEED01'&&p.lines.length===1&&p.lines[0].calculation_type==='RESIDUAL'&&p.lines[0].partner_id==='PRT-TEST'),
   '作成されたプロファイルはpartner_idへのRESIDUAL 1行');
+
+// ============ RP-001（分断・簡素化）：SPLL番号・ライセンス台帳・Finance引渡 ============
+// 72. SPLL番号と台帳（§6：主台帳License_Cases・原作スナップショット・契約書履歴）
+ok(/^SPLL-\d{6}-\d{4}$/.test(appP4.license_id),'申込でSPLL番号（license_id）発行: '+appP4.license_id);
+const kaseP4=()=>rows(OPS,'License_Cases').find(k=>k.license_id===appP4.license_id);
+ok(kaseP4().contract_status==='SIGNED'&&kaseP4().cloudsign_document_id==='DOC-P4-OK','締結でcase更新（契約状態・CloudSign書類ID）');
+ok(kaseP4().certification_status==='ACTIVE'&&kaseP4().case_status==='SIGNED'&&kaseP4().review_status==='PENDING','活性化で認証ACTIVE・審査PENDING');
+const lwP4=rows(OPS,'License_Works').filter(w=>w.license_id===appP4.license_id);
+ok(lwP4.length===1&&lwP4[0].fee_model_snapshot==='PER_WORK'&&Number(lwP4[0].fee_value_snapshot)===16500,
+  '費用は契約形態（利用目的）×原作構造で自動確定しLicense_Worksへスナップショット');
+ok(rows(OPS,'Contract_Documents').filter(d=>d.license_id===appP4.license_id&&d.document_type==='ORIGINAL'&&d.status==='SIGNED').length===1,'契約書履歴（ORIGINAL・1:N）');
+
+// 73. Finance引渡（§10）：READY→ACCEPTED→債権生成・冪等
+const hoP4=()=>rows(OPS,'Finance_Handoffs').find(h=>h.license_id===appP4.license_id);
+ok(hoP4().status==='READY'&&kaseP4().finance_handoff_status==='READY','締結でFinance引渡READY（License側は請求を作らない）');
+ok(!rows(OPS,'Invoices').some(v=>v.contract_id===cP4.contract_id),'引渡受領前は債権なし');
+G.financeAcceptHandoffs_();
+ok(hoP4().status==='ACCEPTED'&&kaseP4().finance_handoff_status==='ACCEPTED','Finance側の取込でACCEPTED');
+ok(rows(OPS,'Invoices').filter(v=>v.contract_id===cP4.contract_id&&v.source_type==='CONTRACT').length===1,'受領時にPER_WORK債権を起票');
+G.financeAcceptHandoffs_();
+ok(rows(OPS,'Invoices').filter(v=>v.contract_id===cP4.contract_id&&v.source_type==='CONTRACT').length===1,'同じ引渡の再実行で債権が重複しない（受入18.1）');
+
+// 74. フォームは「誰と契約するか」のみ（§8）：契約者情報の台帳反映
+scriptProps.FORMRUN_FIELD_MAP=JSON.stringify({'氏名':'party_name','契約者区分':'party_type','申込番号':'application_ref','handoff':'handoff_token'});
+const appParty=mkApp(['WRK-BKK00019'],'書籍',Object.assign({partyType:'INDIVIDUAL'},docExtra));
+ok(/^SPLL-/.test(appParty.license_id)&&'form_url' in appParty,'申込応答にSPLL番号・フォームURL');
+G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:appParty.application_ref,submission_id:'FR-RP-1',
+  columns:[{name:'氏名',value:'山田太郎'},{name:'契約者区分',value:'個人'},{name:'handoff',value:appParty.handoff_token}]})}});
+const kaseParty=rows(OPS,'License_Cases').find(k=>k.license_id===appParty.license_id);
+ok(kaseParty.party_display_name==='山田太郎'&&kaseParty.party_type==='INDIVIDUAL'&&kaseParty.case_status==='CONTRACTING',
+  'フォーム回答から契約者名・区分を台帳へ反映（CONTRACTING）');
+delete scriptProps.FORMRUN_FIELD_MAP;
+
+// 75. 契約者区分別フォームURL（§8.3/8.4）
+G.setConfig_('FORM_URL_CORPORATION','https://form.run/corp-v1');
+const appCorp=mkApp(['WRK-BKK00019'],'書籍',Object.assign({partyType:'CORPORATION'},docExtra));
+ok(appCorp.form_url==='https://form.run/corp-v1','法人は法人フォームURLへ切替');
+ok(rows(OPS,'License_Cases').find(k=>k.license_id===appCorp.license_id).party_type==='CORPORATION','契約者区分を台帳へ記録');
+
+// 76. 既存データ移行（§16 Phase1・冪等・二重請求防止）
+G.appendRow_(OPS,'Applications',{application_id:'APP-LEGACY-1',application_ref:'REF-LEGACY-1',usage_category:'書籍',status:'SIGNED',created_at:'2026-01-01'});
+G.appendRow_(OPS,'Application_Works',{application_work_id:'AW-L1',application_id:'APP-LEGACY-1',work_id:'WRK-BKK00019'});
+G.appendRow_(OPS,'Contracts',{contract_id:'CTR-LEGACY-1',cloudsign_document_id:'DOC-LEGACY-1',application_id:'APP-LEGACY-1',application_ref:'REF-LEGACY-1',usage_category:'書籍',terms_snapshot:'{"fee_model":"PER_WORK","amount":16500}',status:'SIGNED',link_status:'LINKED',signed_at:'2026-01-02'});
+const migLC=G.setup_migrateLicenseCases();
+ok(migLC.created>=1,'旧データ（Applications+Contracts）からライセンス台帳を生成');
+const legacyApp=rows(OPS,'Applications').find(a=>a.application_id==='APP-LEGACY-1');
+ok(/^SPLL-/.test(legacyApp.license_id),'旧申込へSPLL番号を付与');
+const legacyKase=rows(OPS,'License_Cases').find(k=>k.license_id===legacyApp.license_id);
+ok(legacyKase.contract_status==='SIGNED'&&legacyKase.finance_handoff_status==='ACCEPTED','旧締結分の引渡はACCEPTED扱い');
+G.financeAcceptHandoffs_();
+ok(!rows(OPS,'Invoices').some(v=>v.contract_id==='CTR-LEGACY-1'),'移行済み旧契約へ新規債権を作らない（二重請求防止）');
+ok(G.setup_migrateLicenseCases().created===0,'移行の再実行はスキップ（冪等）');
+
+// 77. ライセンス一覧・詳細（§18.2：SPLL番号で申込〜認証まで追跡）
+const lcList=G.admin_listLicenseCases();
+ok(lcList.some(k=>k.license_id===appP4.license_id&&k.legacy_contract_id===cP4.contract_id&&k.certification_status==='ACTIVE'),
+  'ライセンス一覧（SPLL番号・状態・旧契約ID併記）');
+const lcDet=G.admin_getLicenseCase(appP4.license_id);
+ok(lcDet.works.length===1&&lcDet.documents.length===1&&lcDet.handoffs.length===1,'ライセンス詳細（原作・契約書履歴・引渡）');
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

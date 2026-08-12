@@ -64,14 +64,65 @@ function snapshotContractTerms_(contractId, app){
 }
 
 /** 締結後の発行処理（認証ACTIVE＋バッジ＋提出/報告トークン＋定額系の請求起票）。冪等。紐付け完了時に呼ぶ。 */
+/**
+ * 契約成立後処理（RP-001 §13.1で分解）：
+ *   License活性化（認証・バッジ・提出）と Finance引渡データ作成のみを行う。
+ *   License側では請求書を生成しない（請求はFinance側が引渡受領時に生成・原則1）。
+ */
 function finishContractLinkage_(contractId){
+  finishLicenseActivation_(contractId);
+  createFinanceHandoff_(contractId);
+}
+/** License活性化：認証・バッジ・提出トークン・案内。 */
+function finishLicenseActivation_(contractId){
   const cert = issueCert_(contractId);   // 平文コードはここでのみ取得可能（バッジQRへ焼き込む）
   if(prop_('BADGE_AUTO') !== 'false'){ enqueueBadgeJob_(contractId, cert && cert.verify_url); }   // 失敗時はBadge_Jobsで再実行（V2-014-8）
   prepareSubmissionToken_(contractId);
-  issueToken_(contractId, 'REPORT', 400, 24);              // 利用報告トークン（約13ヶ月・最大24回）
+  issueToken_(contractId, 'REPORT', 400, 24);              // 利用報告トークン（P1でFinanceへ移管予定・暫定でLicense発行）
   enqueueNotification_(contractId, 'UPLOAD_GUIDE', contractId, { note:'締結完了。提出リンクを利用者へ案内してください（契約管理→提出リンク発行）' });
-  try{ createInvoiceOnSigning_(contractId); }              // FLAT / PER_WORK は締結時に請求起票（FUN-02）
-  catch(e){ logError_('PROCESSING_ERROR','createInvoiceOnSigning', e, { contract_id:contractId }); }
+  const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === contractId; });
+  if(c && c.license_id) updateLicenseCase_(c.license_id, { certification_status:'ACTIVE', review_status:'PENDING' });
+}
+/**
+ * Finance引渡データの作成（RP-001 §10）。LicenseはFinanceの請求処理を直接呼ばず、
+ * Finance_Handoffs（READY）を置くだけ。Finance側バッチが取込んでACCEPTEDにする。
+ * 冪等キー：license_id + handoff_version。
+ */
+function createFinanceHandoff_(contractId){
+  const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === contractId; });
+  if(!c) return null;
+  const licenseId = c.license_id || '';
+  if(!licenseId){ logEvent_('finance_handoff', contractId, 'system', null, { skipped:'license_id無し（旧データ）' }); return null; }
+  const version = readRows_(ssOps_(),'Finance_Handoffs')
+    .filter(function(h){ return h.license_id === licenseId; }).length + 1;
+  const works = readRows_(ssOps_(),'Contract_Works')
+    .filter(function(w){ return w.contract_id === contractId; })
+    .map(function(w){ return { work_id:w.work_id, work_name:w.work_name_snapshot, partner_id:w.partner_id_snapshot,
+      royalty_rate:w.royalty_rate_snapshot, allocation_scheme:w.allocation_scheme_snapshot }; });
+  const kase = readRows_(ssOps_(),'License_Cases').find(function(x){ return x.license_id === licenseId; }) || {};
+  const handoffId = Utilities.getUuid();
+  appendRow_(ssOps_(),'Finance_Handoffs',{
+    handoff_id: handoffId, license_id: licenseId, handoff_version: version,
+    signed_at: c.signed_at || '', party_display_name: kase.party_display_name || '',
+    usage_category: c.usage_category || '', works_snapshot_json: JSON.stringify(works),
+    billing_terms_json: c.terms_snapshot || '{}', contract_status: 'ACTIVE',
+    status: 'READY', created_at: new Date().toISOString(), accepted_at: '',
+  });
+  updateLicenseCase_(licenseId, { finance_handoff_status:'READY' });
+  logEvent_('finance_handoff', handoffId, 'system', null, { license_id:licenseId, version:version, contract_id:contractId });
+  return handoffId;
+}
+/** 締結情報をライセンス台帳へ同期（契約書履歴の追記含む）。webhook／手動紐付けの両方から使用。 */
+function syncLicenseOnSigning_(contractId, licenseId, caseStatus){
+  if(!licenseId) return false;
+  const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === contractId; }) || {};
+  updateLicenseCase_(licenseId, {
+    case_status: caseStatus || 'SIGNED', contract_status: 'SIGNED',
+    cloudsign_document_id: c.cloudsign_document_id || '', signed_at: c.signed_at || '',
+    signed_pdf_file_id: c.contract_file_id || '', signed_pdf_hash: c.contract_file_hash || '' });
+  appendContractDocument_(licenseId, 'ORIGINAL', c.cloudsign_document_id || '', 'SIGNED',
+    c.signed_at || '', c.contract_file_id || '', c.contract_file_hash || '');
+  return true;
 }
 
 /** FLAT/PER_WORK 契約の請求を締結時に起票（無償・RATEは起票しない）。冪等。 */

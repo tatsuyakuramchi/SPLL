@@ -104,6 +104,7 @@
 
 <div class="tabs"><div class="twrap">
   <div class="tab on" data-v="dash">ダッシュボード</div>
+  <div class="tab" data-v="license">ライセンス</div>
   <div class="tab" data-v="review">作品審査管理</div>
   <div class="tab" data-v="contract">契約管理</div>
   <div class="tab" data-v="pay">入金・清算</div>
@@ -133,6 +134,17 @@
       <div class="ph"><h3>📮 要対応の通知（利用者への案内）</h3><span class="hint">Notification_Queue（メール非保持のため人手対応）<span id="err-count" style="margin-left:10px;color:var(--fail);"></span></span></div>
       <table><thead><tr><th>種別</th><th>契約</th><th>対象原作</th><th>内容</th><th>起票日</th><th>操作</th></tr></thead><tbody id="notify-tbody"></tbody></table>
     </div>
+  </section>
+
+  <!-- LICENSE（RP-001：SPLL番号中心の主台帳） -->
+  <section class="view" id="v-license">
+    <h2>ライセンス台帳</h2>
+    <p class="sub">1案件＝1つのSPLL番号。申込から契約・審査・認証までを1行で追跡します（License_Cases）。</p>
+    <div class="panel">
+      <div class="ph"><h3>ライセンス一覧</h3><button class="btn" onclick="loadLicense()">更新</button></div>
+      <table><thead><tr><th>SPLL番号</th><th>契約者</th><th>利用目的</th><th>対象原作</th><th>案件</th><th>契約</th><th>審査</th><th>認証</th><th>Finance引渡</th><th>操作</th></tr></thead><tbody id="license-tbody"></tbody></table>
+    </div>
+    <div class="note">契約書の原本は締結済みPDF（契約書履歴はSPLL番号ごとに1:N保持）。請求・入金・清算はFinance引渡（READY→ACCEPTED）を経てFinance側で処理され、License側からは直接更新しません。</div>
   </section>
 
   <!-- REVIEW -->
@@ -576,6 +588,7 @@ document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{
   else if(v==="contract") loadContract();
   else if(v==="pay") loadPay();
   else if(v==="acc") loadAcc();
+  else if(v==="license") loadLicense();
   window.scrollTo(0,0);
 });
 // 設定内サブタブ（#v-settings 内のみ）
@@ -1060,6 +1073,34 @@ function loadCertRequests(){
         if(!confirm("この申請を却下しますか？")) return;
         call("admin_approveCertChange",[r.request_id,false,""],function(){ toast("却下しました"); loadCertRequests(); });
       }));
+      tr.appendChild(act); tb.appendChild(tr);
+    });
+  });
+}
+
+// ---- ライセンス台帳（RP-001）----
+function loadLicense(){
+  call("admin_listLicenseCases",[],function(rows){
+    var tb=$("license-tbody"); tb.innerHTML=""; rows=rows||[];
+    if(!rows.length){ emptyRow(tb,10,"ライセンス案件がありません"); return; }
+    var caseM={APPLIED:{cls:"wait",label:"申込受付"},CONTRACTING:{cls:"review",label:"契約手続中"},SIGNED:{cls:"pass",label:"締結済"},HOLD:{cls:"fail",label:"要確認"},CLOSED:{cls:"wait",label:"終了"}};
+    var certM={NOT_ISSUED:{cls:"wait",label:"—"},ACTIVE:{cls:"pass",label:"有効"},SUSPENDED:{cls:"review",label:"停止"},REVOKED:{cls:"fail",label:"失効"}};
+    var hoM={NOT_REQUIRED:{cls:"wait",label:"—"},READY:{cls:"review",label:"引渡待ち"},SENT:{cls:"review",label:"送信済"},ACCEPTED:{cls:"pass",label:"受領済"},ERROR:{cls:"fail",label:"エラー"}};
+    rows.forEach(function(k){
+      var tr=document.createElement("tr");
+      tr.appendChild(td('<span class="id"><b>'+esc(k.license_id)+'</b></span>'));
+      tr.appendChild(td(esc(k.party_display_name||"—")+(k.party_type?'<br><span style="font-size:10px;color:var(--soft)">'+esc(k.party_type)+'</span>':"")));
+      tr.appendChild(td(esc(k.usage_category)));
+      tr.appendChild(td(esc(k.works)));
+      tr.appendChild(td(pill(caseM[String(k.case_status)]||{cls:"wait",label:String(k.case_status)})));
+      tr.appendChild(td(pill(k.contract_status==="SIGNED"?{cls:"pass",label:"締結済"}:{cls:"wait",label:k.contract_status==="NOT_STARTED"?"未着手":String(k.contract_status)})));
+      tr.appendChild(td(esc(k.review_status==="NOT_REQUIRED"?"—":k.review_status)));
+      tr.appendChild(td(pill(certM[String(k.certification_status)]||{cls:"wait",label:String(k.certification_status)})));
+      tr.appendChild(td(pill(hoM[String(k.finance_handoff_status)]||{cls:"wait",label:String(k.finance_handoff_status)})));
+      var act=document.createElement("td"); act.className="actions";
+      if(k.legacy_contract_id){
+        act.appendChild(mkBtn("提出リンク","btn",function(){ call("admin_sendUploadLink",[k.legacy_contract_id],function(res){ showUploadLink(k.legacy_contract_id,res); }); }));
+      }
       tr.appendChild(act); tb.appendChild(tr);
     });
   });
@@ -1671,6 +1712,10 @@ MOCK.admin_accountingListExports=function(){ return _mAccExports; };
 MOCK.admin_accountingApproveExport=function(id){ var e=_mAccExports.find(function(x){return x.export_id===id;}); if(e){ e.status="APPROVED"; } return true; };
 MOCK.admin_accountingPostSettlements=function(){ return { settlements:2 }; };
 var _mCsSend=[{application_id:"APP-202607-0071",application_ref:"REF-202607-0071",usage_category:"書籍",form_submitted_at:"2026-07-10 14:22",cloudsign_send_status:"CLOUDSIGN_SEND_FAILED",cloudsign_send_error:"formrun→CloudSign連携エラー",manual_review_reason:""}];
+MOCK.admin_listLicenseCases=function(){ return [
+  {license_id:"SPLL-202608-0001",party_display_name:"山田太郎",party_type:"INDIVIDUAL",usage_category:"書籍",works:"新クトゥルフ神話TRPG ルールブック",case_status:"SIGNED",contract_status:"SIGNED",review_status:"PENDING",certification_status:"ACTIVE",finance_handoff_status:"ACCEPTED",signed_at:"2026-08-10",legacy_contract_id:"CTR-202608-0001"},
+  {license_id:"SPLL-202608-0002",party_display_name:"株式会社サンプル",party_type:"CORPORATION",usage_category:"電子出版物",works:"インセイン",case_status:"CONTRACTING",contract_status:"NOT_STARTED",review_status:"NOT_REQUIRED",certification_status:"NOT_ISSUED",finance_handoff_status:"NOT_REQUIRED",signed_at:"",legacy_contract_id:""}
+]; };
 MOCK.admin_listCloudSignSendFailures=function(){ return _mCsSend; };
 MOCK.admin_markManualCloudSignSent=function(id){ _mCsSend=_mCsSend.filter(function(a){return a.application_id!==id;}); return true; };
 MOCK.admin_cancelApplication=function(id){ _mCsSend=_mCsSend.filter(function(a){return a.application_id!==id;}); return true; };
