@@ -22,7 +22,7 @@ function admin_getContractV4Status(){
   return {
     privacy_published: !!p,
     guideline_published: !!g,
-    form_url_individual: !!getConfig_('FORM_URL_INDIVIDUAL',''),
+    form_url_individual: !!(getConfig_('FORM_URL_INDIVIDUAL','') || prop_('FORMRUN_FORM_URL')),
     form_hidden_map: !!prop_('FORM_HIDDEN_MAP'),
     formrun_field_map: !!prop_('FORMRUN_FIELD_MAP'),
     handoff_secret: !!handoffSecret_(),
