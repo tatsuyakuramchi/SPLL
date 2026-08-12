@@ -204,12 +204,15 @@ CloudSign上の受信者用フリーテキスト・押印欄・署名欄・チ�
 ## 8. コード構成
 
 ```text
+28_contract_form_v4_shared.gs
+  contractFormFieldsV4_
+  contractFormHashV4_
+  formrunCanonV4_
+  decideContractRouteV4_
+
 29_contract_form_v4.gs
   api_getLegalTextsV4
   web_createApplicationV4
-  contractFormFieldsV4_
-  contractFormHashV4_
-  decideContractRouteV4_
 
 33_contract_snapshot_v4.gs
   snapshotContractTerms_
@@ -222,6 +225,10 @@ portal_contract_v4_patch.html
   ポータルUIをガイドライン確認型へ変更
   web_createApplicationV4を利用
   個別条件をFORM URLへ引継ぎ
+
+51_admin_contract_v4.gs / admin_contract_v4_patch.html
+  GUIDELINEの版管理・公開
+  v4必須設定の状態確認
 ```
 
 ---
