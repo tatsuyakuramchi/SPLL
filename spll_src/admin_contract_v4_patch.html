@@ -11,10 +11,28 @@
     if(panels.length>1) pane.insertBefore(panel, panels[1]); else pane.appendChild(panel);
   }
 
+  const legacyTerms=document.getElementById('set-terms');
+  if(legacyTerms){
+    const legacyPanel=legacyTerms.closest('.panel');
+    const guidelinePanel=document.getElementById('set-guideline') && document.getElementById('set-guideline').closest('.panel');
+    const versions=document.getElementById('legal-versions');
+    if(guidelinePanel && versions) guidelinePanel.querySelector('.pbody').appendChild(versions);
+    if(legacyPanel){
+      const h=legacyPanel.querySelector('.ph h3'); if(h) h.textContent='v4法務文書の保存・公開';
+      const body=legacyPanel.querySelector('.pbody'); if(body) body.style.display='none';
+      const buttons=legacyPanel.querySelectorAll('.pfoot button');
+      if(buttons[0]) buttons[0].textContent='個人情報・ガイドラインを下書き保存';
+      if(buttons[1]) buttons[1].textContent='下書きを公開する（法務承認）';
+      if(buttons[2]) buttons[2].style.display='none';
+    }
+  }
+
   const formPane=document.getElementById('p-formrun');
   if(formPane){
     const note=formPane.querySelector('.setnote');
     if(note) note.innerHTML='CloudSign FORM v4では、利用者が入力するのは契約者情報のみです。SPLL番号・対象原作・料金・期間・クレジット等は<b>システムhidden項目</b>として契約書へ引き継ぎ、Webhookで改変検知します。';
+    const notes=formPane.querySelectorAll('.note');
+    if(notes[0]) notes[0].innerHTML='<b>v4設定：</b>「hidden項目ひな形」を挿入し、各canonical keyをFormRunの実フィールドIDへ割り当ててください。逆方向の <span class="mono">FORMRUN_FIELD_MAP</span> も同じ項目で設定します。契約成立はFormRun送信時ではなくCloudSign上の同意完了時です。';
   }
   insertHiddenMapSkeleton=function(){
     const n=parseInt((document.getElementById('fr-max_works')||{}).value||'5',10)||5;
