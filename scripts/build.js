@@ -14,23 +14,22 @@ const SRC = path.join(ROOT, 'spll_src');
 
 const MANIFEST = {
   portal: {
-    gs: ['00_core.gs','10_auth.gs','15_fee.gs','25_portal.gs','29_contract_form_v4.gs'],
+    gs: ['00_core.gs','10_auth.gs','15_fee.gs','25_portal.gs','28_contract_form_v4_shared.gs','29_contract_form_v4.gs'],
     html: ['index.html','portal_contract_v4_patch.html'],
     title: 'SPLL 公開ポータル (GAS①)',
   },
   workflow: {
-    gs: ['00_core.gs','15_fee.gs','20_tokens.gs','29_contract_form_v4.gs','30_cloudsign.gs','32_contract.gs','33_contract_snapshot_v4.gs','35_webhooks.gs','36_formrun_contract_v4.gs','37_ai.gs','40_public_pages.gs','47_batches.gs'],
+    gs: ['00_core.gs','15_fee.gs','20_tokens.gs','28_contract_form_v4_shared.gs','30_cloudsign.gs','32_contract.gs','33_contract_snapshot_v4.gs','35_webhooks.gs','36_formrun_contract_v4.gs','37_ai.gs','40_public_pages.gs','47_batches.gs'],
     html: ['upload.html'],
     title: 'SPLL 契約・提出 (GAS②)',
   },
   admin: {
-    gs: ['00_core.gs','05_schema.gs','10_auth.gs','15_fee.gs','20_tokens.gs','25_portal.gs','29_contract_form_v4.gs','30_cloudsign.gs','32_contract.gs','33_contract_snapshot_v4.gs','37_ai.gs','50_admin.gs','51_admin_contract_v4.gs'],
+    gs: ['00_core.gs','05_schema.gs','10_auth.gs','15_fee.gs','20_tokens.gs','25_portal.gs','28_contract_form_v4_shared.gs','29_contract_form_v4.gs','30_cloudsign.gs','32_contract.gs','33_contract_snapshot_v4.gs','37_ai.gs','50_admin.gs','51_admin_contract_v4.gs'],
     html: ['admin.html','admin_contract_v4_patch.html'],
     title: 'SPLL 管理コンソール (GAS③)',
   },
 };
 
-// GAS組込み・グローバル（未定義参照チェックの除外リスト）
 const GAS_GLOBALS = new Set(['SpreadsheetApp','DriveApp','Utilities','PropertiesService','CacheService','LockService','SlidesApp','ScriptApp','Session','Logger','MailApp','ContentService','HtmlService','UrlFetchApp','JSON','Math','Date','String','Number','Object','Array','RegExp','parseInt','parseFloat','isNaN','encodeURIComponent','decodeURIComponent','Error']);
 
 function definedNames(code){
