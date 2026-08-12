@@ -1,0 +1,46 @@
+<script>
+(function(){
+  const pane=document.getElementById('p-legal');
+  if(pane && !document.getElementById('set-guideline')){
+    const panel=document.createElement('div'); panel.className='panel';
+    panel.innerHTML='<div class="ph"><h3>SPLL二次創作ガイドライン</h3><span class="hint">Legal_Documents: GUIDELINE</span></div>'+
+      '<div class="pbody"><p class="setnote">公開ポータルで確認するガイドラインです。利用許諾契約本文への同意はCloudSign上で取得します。</p>'+
+      '<div class="fld"><textarea id="set-guideline" class="code" style="min-height:280px" placeholder="SPLL二次創作ガイドライン（HTML）"></textarea></div>'+
+      '<p class="setnote" id="v4-status">CloudSign FORM v4設定：確認中…</p></div>';
+    const panels=pane.querySelectorAll('.panel');
+    if(panels.length>1) pane.insertBefore(panel, panels[1]); else pane.appendChild(panel);
+  }
+
+  const legacyLoadLegal=loadLegal;
+  loadLegal=function(){
+    legacyLoadLegal();
+    call('api_getLegalTextsV4',[],function(l){
+      if(l && document.getElementById('set-guideline')) document.getElementById('set-guideline').value=l.guideline||'';
+    });
+    call('admin_getContractV4Status',[],function(s){
+      const el=document.getElementById('v4-status'); if(!el||!s) return;
+      const flags=[['PRIVACY公開',s.privacy_published],['GUIDELINE公開',s.guideline_published],['個人FORM URL',s.form_url_individual],['hidden map',s.form_hidden_map],['Webhook map',s.formrun_field_map],['HMAC鍵',s.handoff_secret]];
+      el.innerHTML='<b>'+esc(s.contract_template_version||'v4')+'</b> ／ '+flags.map(function(x){return (x[1]?'✓ ':'⚠ ')+esc(x[0]);}).join(' ／ ');
+    });
+  };
+
+  saveLegalDrafts=function(){
+    const privacy=document.getElementById('set-privacy').value;
+    const guideline=(document.getElementById('set-guideline')||{}).value||'';
+    if(!guideline.trim()){ toast('ガイドライン本文は必須です',true); return; }
+    call('admin_saveLegalDraft',['PRIVACY',privacy],function(r1){ _draftIds.PRIVACY=r1.legal_document_id;
+      call('admin_saveGuidelineDraft',[guideline],function(r2){ _draftIds.GUIDELINE=r2.legal_document_id;
+        toast('下書きを保存しました（個人情報 v'+r1.version+' / ガイドライン v'+r2.version+'）'); loadLegalVersions();
+      });
+    });
+  };
+
+  publishLegalDrafts=function(){
+    if(!_draftIds.PRIVACY || !_draftIds.GUIDELINE){ toast('先に個人情報・ガイドラインの「下書き保存」を実行してください',true); return; }
+    if(!confirm('個人情報通知とSPLL二次創作ガイドラインを公開します。以後のv4申込はこの版を証跡として記録します。よろしいですか？')) return;
+    call('admin_publishLegalDoc',[_draftIds.PRIVACY],function(){
+      call('admin_publishLegalDoc',[_draftIds.GUIDELINE],function(){ toast('v4法務文書を公開しました'); _draftIds={}; loadLegal(); });
+    });
+  };
+})();
+</script>
