@@ -364,8 +364,8 @@ ok(uopts.some(o=>o.category==='電子出版物'),'api_getUsageOptions returns ca
 const tRate=G.api_previewFeeTerms('電子出版物',2);
 ok(tRate.fee_model==='RATE' && tRate.rate===0.10,'RATE: 率0.10');
 const tPer=G.api_previewFeeTerms('書籍',3);
-ok(tPer.fee_model==='PER_WORK' && tPer.amount===16500*3,'PER_WORK: 16500×3='+tPer.amount);
-ok(/×\s*3件/.test(tPer.fee_amount_or_rate),'PER_WORK 表示に×3件: '+tPer.fee_amount_or_rate);
+ok(tPer.fee_model==='FLAT' && tPer.amount===16500,'書籍は契約単位の定額16,500円（原作数で増えない）: '+tPer.amount);
+ok(/分配/.test(tPer.fee_amount_or_rate),'複数原作は権利者間で分配する旨を表示: '+tPer.fee_amount_or_rate);
 const tFlat=G.api_previewFeeTerms('イベント',2);
 ok(tFlat.fee_model==='FLAT' && tFlat.amount===0,'FLAT: 定額0');
 // 申込に usage_category を保存 → 締結でスナップショット
@@ -1082,7 +1082,7 @@ const kaseP4=()=>rows(OPS,'License_Cases').find(k=>k.license_id===appP4.license_
 ok(kaseP4().contract_status==='SIGNED'&&kaseP4().cloudsign_document_id==='DOC-P4-OK','締結でcase更新（契約状態・CloudSign書類ID）');
 ok(kaseP4().certification_status==='ACTIVE'&&kaseP4().case_status==='SIGNED'&&kaseP4().review_status==='PENDING','活性化で認証ACTIVE・審査PENDING');
 const lwP4=rows(OPS,'License_Works').filter(w=>w.license_id===appP4.license_id);
-ok(lwP4.length===1&&lwP4[0].fee_model_snapshot==='PER_WORK'&&Number(lwP4[0].fee_value_snapshot)===16500,
+ok(lwP4.length===1&&lwP4[0].fee_model_snapshot==='FLAT'&&Number(lwP4[0].fee_value_snapshot)===16500,
   '費用は契約形態（利用目的）×原作構造で自動確定しLicense_Worksへスナップショット');
 ok(rows(OPS,'Contract_Documents').filter(d=>d.license_id===appP4.license_id&&d.document_type==='ORIGINAL'&&d.status==='SIGNED').length===1,'契約書履歴（ORIGINAL・1:N）');
 
@@ -1133,6 +1133,29 @@ ok(lcList.some(k=>k.license_id===appP4.license_id&&k.legacy_contract_id===cP4.co
   'ライセンス一覧（SPLL番号・状態・旧契約ID併記）');
 const lcDet=G.admin_getLicenseCase(appP4.license_id);
 ok(lcDet.works.length===1&&lcDet.documents.length===1&&lcDet.handoffs.length===1,'ライセンス詳細（原作・契約書履歴・引渡）');
+
+// 78. 定額×複数原作＝契約単位定額を権利者間で分配（費用ロジック訂正）
+ok(G.computeFeeTerms_('書籍',2).amount===16500,'2原作でも契約単位の定額16,500円');
+scriptProps.FORMRUN_FIELD_MAP=JSON.stringify({'handoff':'handoff_token'});
+const appFlat=mkApp(['WRK-ARK00012','WRK-BKK00019'],'書籍',docExtra);
+G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:appFlat.application_ref,submission_id:'FR-FLAT-1',
+  columns:[{name:'handoff',value:appFlat.handoff_token}]})}});
+G.doPost({parameter:{},postData:{contents:JSON.stringify({document_id:'DOC-FLAT-1',status:'COMPLETED',application_ref:appFlat.application_ref})}});
+delete scriptProps.FORMRUN_FIELD_MAP;
+const cFlat=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-FLAT-1');
+ok(cFlat&&cFlat.status==='SIGNED','2原作の定額契約が締結');
+G.financeAcceptHandoffs_();
+const invFlat=rows(OPS,'Invoices').find(v=>v.contract_id===cFlat.contract_id&&v.source_type==='CONTRACT');
+ok(invFlat&&Number(invFlat.amount)===16500,'複数原作でも債権は定額16,500円（×原作数にしない）');
+G.admin_recordPayment(cFlat.contract_id,invFlat.invoice_id,Number(invFlat.total_amount),'2026-08-12','BANK-FLAT-1');
+G.generateStatements_(G.currentPeriod_());
+const flatDets=rows(OPS,'Settlement_Details').filter(d=>d.source_type==='CONTRACT_FEE'&&d.source_id===invFlat.invoice_id);
+ok(flatDets.length===2&&flatDets.reduce((s,d)=>s+Number(d.amount),0)===Math.round(16500*0.7),
+  '入金済み定額を対象原作の権利者2者へ均等分配（手数料30%控除後11,550円・合計維持）');
+ok(flatDets.every(d=>d.report_id===''&&d.work_id),'定額分配の明細は原作単位（報告に依存しない）');
+G.generateStatements_(G.currentPeriod_());
+ok(rows(OPS,'Settlement_Details').filter(d=>d.source_type==='CONTRACT_FEE'&&d.source_id===invFlat.invoice_id).length===2,
+  '同一請求の再清算なし（invoice単位で冪等）');
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

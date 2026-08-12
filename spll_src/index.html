@@ -327,9 +327,9 @@ let TERMS = null;         // 計算済みの別紙2条件
 
 // スタンドアロン時の料金表ミラー（本番は api_getUsageOptions / api_previewFeeTerms を使用）
 const SAMPLE_FEE = [
-  {usage_category:"書籍",fee_model:"PER_WORK",fee_value:16500,fee_label:"16,500円／原作",licensed_uses:"複製・頒布",payment_due:"契約締結後の請求書発行日から30日以内",reporting_requirement:"定額のため利用報告は原則不要",report_due:"－",threshold_or_cap:"－",reprint_rule:"増刷時も追加料金なし（要お申し出）",special_terms:""},
+  {usage_category:"書籍",fee_model:"FLAT",fee_value:16500,fee_label:"16,500円／契約（複数原作は権利者へ均等分配）",licensed_uses:"複製・頒布",payment_due:"契約締結後の請求書発行日から30日以内",reporting_requirement:"定額のため利用報告は原則不要",report_due:"－",threshold_or_cap:"－",reprint_rule:"増刷時も追加料金なし（要お申し出）",special_terms:""},
   {usage_category:"電子出版物",fee_model:"RATE",fee_value:0.10,fee_label:"売上の10％",licensed_uses:"複製・公衆送信",payment_due:"半期ごとの計算書発効後",reporting_requirement:"半期ごとに販売実績を報告",report_due:"各半期終了後1ヶ月以内",threshold_or_cap:"－",reprint_rule:"－",special_terms:""},
-  {usage_category:"商品販売",fee_model:"PER_WORK",fee_value:16500,fee_label:"16,500円／原作",licensed_uses:"複製・頒布・販売",payment_due:"契約締結後の請求書発行日から30日以内",reporting_requirement:"定額のため利用報告は原則不要",report_due:"－",threshold_or_cap:"頒布数の上限は設けない",reprint_rule:"追加製造も追加料金なし（要お申し出）",special_terms:""},
+  {usage_category:"商品販売",fee_model:"FLAT",fee_value:16500,fee_label:"16,500円／契約（複数原作は権利者へ均等分配）",licensed_uses:"複製・頒布・販売",payment_due:"契約締結後の請求書発行日から30日以内",reporting_requirement:"定額のため利用報告は原則不要",report_due:"－",threshold_or_cap:"頒布数の上限は設けない",reprint_rule:"追加製造も追加料金なし（要お申し出）",special_terms:""},
   {usage_category:"サブスクリプション",fee_model:"RATE",fee_value:0.10,fee_label:"売上の10％",licensed_uses:"公衆送信（継続的提供）",payment_due:"半期ごとの計算書発効後",reporting_requirement:"半期ごとに売上を報告",report_due:"各半期終了後1ヶ月以内",threshold_or_cap:"－",reprint_rule:"－",special_terms:""},
   {usage_category:"イベント",fee_model:"FLAT",fee_value:0,fee_label:"無償（イベント頒布・要事前申告）",licensed_uses:"頒布・上演",payment_due:"－",reporting_requirement:"頒布実績を事後報告",report_due:"イベント終了後1ヶ月以内",threshold_or_cap:"－",reprint_rule:"－",special_terms:"営利目的の恒常販売には別区分が適用されます"},
   {usage_category:"その他",fee_model:"RATE",fee_value:0.10,fee_label:"売上の10％（個別協議）",licensed_uses:"別途協議",payment_due:"個別協議",reporting_requirement:"個別協議",report_due:"個別協議",threshold_or_cap:"個別協議",reprint_rule:"個別協議",special_terms:"内容により事務局と個別に条件を定めます"}
@@ -340,7 +340,7 @@ function computeFeeLocal(cat,n){
   n=Math.max(1,n||1); const m=r.fee_model; const v=r.fee_value; let rate=null,amount=null,text=r.fee_label||"";
   if(m==="RATE"){ rate=v; if(!text) text="売上の"+(v*100)+"％"; }
   else if(m==="PER_WORK"){ amount=Math.round(v)*n; text=(r.fee_label||yen(v)+"／原作")+" × "+n+"件 ＝ "+yen(amount); }
-  else { amount=Math.round(v); if(!text) text=yen(amount); }
+  else { amount=Math.round(v); if(!text) text=yen(amount)+"／契約"; if(n>1) text+="（"+n+"原作合計・許諾料は権利者間で分配）"; }
   return {found:true,usage_category:cat,fee_model:m,rate:rate,amount:amount,fee_amount_or_rate:text,
     licensed_uses:r.licensed_uses,payment_due:r.payment_due,reporting_requirement:r.reporting_requirement,
     report_due:r.report_due,threshold_or_cap:r.threshold_or_cap,reprint_rule:r.reprint_rule,special_terms:r.special_terms};

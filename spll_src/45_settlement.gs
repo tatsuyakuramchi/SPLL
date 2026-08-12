@@ -18,7 +18,14 @@ function generateStatements_(period){
   const settled = {}; readRows_(ssOps_(),'Settlement_Details').forEach(function(d){ if(d.report_id) settled[d.report_id] = true; });
   const reports = readRows_(ssOps_(),'Usage_Reports')
     .filter(r => String(r.period)===String(period) && (r.status==='APPROVED' || r.status==='LOCKED') && !settled[r.report_id]);
-  if(!reports.length) return { period:period, reports:0, generated:0, statements:[], skipped:'新規の清算対象報告なし' };
+  // 定額許諾料の分配対象（ユーザー要件：定額は契約単位・複数原作は権利者間で分配）
+  //   入金済み（PAID）のCONTRACT請求を、invoice単位の冪等キー（source_id）で1回だけ清算に載せる
+  const settledInv = {}; readRows_(ssOps_(),'Settlement_Details').forEach(function(d){
+    if(d.source_type === 'CONTRACT_FEE' && d.source_id) settledInv[d.source_id] = true; });
+  const paidInvoices = readRows_(ssOps_(),'Invoices')
+    .filter(function(v){ return v.source_type === 'CONTRACT' && String(v.status) === 'PAID' && !settledInv[v.invoice_id]; });
+  if(!reports.length && !paidInvoices.length)
+    return { period:period, reports:0, contract_fees:0, generated:0, statements:[], skipped:'新規の清算対象なし' };
   // 契約→対象原作スナップショット（V2-011：Works_Master再解決を原則禁止。旧データのみフォールバック）
   const ctrWorks = {}; readRows_(ssOps_(),'Contract_Works').forEach(x => { (ctrWorks[x.contract_id] = ctrWorks[x.contract_id] || []).push(x); });
   const workById = {}; readRows_(ssMaster_(),'Works_Master').forEach(w => { workById[w.work_id] = w; });
@@ -89,6 +96,43 @@ function generateStatements_(period){
     });
   });
 
+  // 定額（FLAT等）許諾料の権利者分配：契約単位の定額を対象原作スナップショットで配分（既定＝原作数均等）
+  paidInvoices.forEach(function(v){
+    const licenseFee = num_(v.amount);   // 税抜本体を分配原資とする
+    if(!(licenseFee > 0)) return;
+    const partnerShare = Math.round(licenseFee * (1 - handlingRate));
+    const cwList = ctrWorks[v.contract_id] || [];
+    const ctrScheme = (cwList[0] && String(cwList[0].allocation_scheme_snapshot||'').toUpperCase()) || scheme;
+    let units = [];
+    if(ctrScheme === 'BY_PARTNER_EQUAL'){
+      const pmap = {};
+      cwList.forEach(function(cw){ const p = partnerOf_(cw); pmap[p.partner_id] = p; });
+      const plist = Object.keys(pmap).map(function(k){ return pmap[k]; });
+      units = (plist.length ? plist : [{ partner_id:'UNKNOWN', name:'(未割当)', invoice_reg_number:'' }])
+        .map(function(p){ return { work_id:'', partner:p, ratio: 1 / Math.max(1, plist.length || 1) }; });
+    } else {  // BY_WORK_EQUAL（既定）
+      const list = cwList.length ? cwList : [null];
+      units = list.map(function(cw){
+        return { work_id:(cw ? cw.work_id : ''), partner:(cw ? partnerOf_(cw) : { partner_id:'UNKNOWN', name:'(未割当)', invoice_reg_number:'' }), ratio: 1 / list.length };
+      });
+    }
+    let allocated = 0;
+    units.forEach(function(u, idx){
+      const amt = (idx === units.length - 1) ? (partnerShare - allocated) : Math.floor(partnerShare * u.ratio);
+      allocated += amt;
+      const key = u.partner.partner_id;
+      if(!byPartner[key]) byPartner[key] = { partner:u.partner, details:[], total:0 };
+      byPartner[key].details.push({
+        contract_id: v.contract_id, report_id: '', work_id: u.work_id, partner_id: u.partner.partner_id,
+        allocation_scheme: ctrScheme, allocation_ratio: Math.round(u.ratio * 10000) / 10000,
+        rate_snapshot: JSON.stringify({ license_fee:licenseFee, handling_fee_rate:handlingRate,
+          invoice_id:v.invoice_id, scheme:ctrScheme, ratio:u.ratio, source:'CONTRACT_FEE' }),
+        amount: amt, source_type: 'CONTRACT_FEE', source_id: v.invoice_id
+      });
+      byPartner[key].total += amt;
+    });
+  });
+
   const out = [];
   Object.keys(byPartner).forEach(pid => {
     const grp = byPartner[pid];
@@ -99,7 +143,8 @@ function generateStatements_(period){
       settlement_detail_id:newId_('STD'), settlement_id:settlementId,
       contract_id:d.contract_id, report_id:d.report_id||'', work_id:d.work_id||'', partner_id:d.partner_id||'',
       allocation_scheme:d.allocation_scheme||'', allocation_ratio:d.allocation_ratio||'',
-      rate_snapshot:d.rate_snapshot, amount:d.amount }));
+      rate_snapshot:d.rate_snapshot, amount:d.amount,
+      source_type:d.source_type||'', source_id:d.source_id||'' }));
     const statementId = newId_('STM');
     appendRow_(ssOps_(),'Settlement_Statements',{ statement_id:statementId,
       settlement_id:settlementId, partner_id:pid, period:period, type:'PARTNER',
@@ -110,7 +155,7 @@ function generateStatements_(period){
       {status:'DRAFT', period:period, partner_id:pid, amount:grp.total, details:grp.details.length});
     out.push({ statement_id:statementId, partner:grp.partner.name, amount:grp.total, details:grp.details.length });
   });
-  return { period:period, reports:reports.length, generated:out.length, statements:out };
+  return { period:period, reports:reports.length, contract_fees:paidInvoices.length, generated:out.length, statements:out };
 }
 
 /** 作品→パートナーの解決（partner_id列 → 出版社名突合 → 疑似パートナー） */

@@ -106,7 +106,7 @@ const SAMPLE_PARTNERS_SEED = [
 ];
 // 利用料条件（別紙2）の一律ルール初期値。金額・率・文言は事務局が設定画面で編集可能なプレースホルダ。
 const SAMPLE_FEE_SCHEDULE_SEED = [
-  {usage_category:'書籍', fee_model:'PER_WORK', fee_value:'16500', fee_label:'16,500円／原作',
+  {usage_category:'書籍', fee_model:'FLAT', fee_value:'16500', fee_label:'16,500円／契約（複数原作は権利者へ均等分配）',
    licensed_uses:'複製・頒布', payment_due:'契約締結後の請求書発行日から30日以内', reporting_requirement:'定額のため利用報告は原則不要',
    report_due:'－', threshold_or_cap:'－', reprint_rule:'増刷時も追加料金なし（要お申し出）', special_terms:'', active:'true',
    requires_usage_report:'false', report_frequency:'', report_due_days:'', report_due_base:''},
@@ -114,7 +114,7 @@ const SAMPLE_FEE_SCHEDULE_SEED = [
    licensed_uses:'複製・公衆送信', payment_due:'半期ごとの計算書発効後', reporting_requirement:'半期ごとに販売実績を報告',
    report_due:'各半期終了後1ヶ月以内', threshold_or_cap:'－', reprint_rule:'－', special_terms:'', active:'true',
    requires_usage_report:'true', report_frequency:'HALF_YEARLY', report_due_days:'30', report_due_base:'PERIOD_END'},
-  {usage_category:'商品販売', fee_model:'PER_WORK', fee_value:'16500', fee_label:'16,500円／原作',
+  {usage_category:'商品販売', fee_model:'FLAT', fee_value:'16500', fee_label:'16,500円／契約（複数原作は権利者へ均等分配）',
    licensed_uses:'複製・頒布・販売', payment_due:'契約締結後の請求書発行日から30日以内', reporting_requirement:'定額のため利用報告は原則不要',
    report_due:'－', threshold_or_cap:'頒布数の上限は設けない', reprint_rule:'追加製造も追加料金なし（要お申し出）', special_terms:'', active:'true'},
   {usage_category:'サブスクリプション', fee_model:'RATE', fee_value:'0.10', fee_label:'売上の10％',

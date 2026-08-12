@@ -36,9 +36,10 @@ function computeFeeTerms_(usageCategory, workCount){
   }else if(model === 'PER_WORK'){
     amount = Math.round(val) * n;
     feeText = (r.fee_label || (yen_(val) + '／原作')) + ' × ' + n + '件 ＝ ' + yen_(amount);
-  }else{ // FLAT
+  }else{ // FLAT：契約単位の定額。複数原作でも金額は変わらず、権利者間で分配する
     amount = Math.round(val);
-    if(!feeText) feeText = yen_(amount);
+    if(!feeText) feeText = yen_(amount) + '／契約';
+    if(n > 1) feeText += '（' + n + '原作合計・許諾料は権利者間で分配）';
   }
   return {
     usage_category: r.usage_category, fee_model: model, rate: rate, amount: amount,
