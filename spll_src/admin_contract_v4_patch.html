@@ -11,6 +11,22 @@
     if(panels.length>1) pane.insertBefore(panel, panels[1]); else pane.appendChild(panel);
   }
 
+  const formPane=document.getElementById('p-formrun');
+  if(formPane){
+    const note=formPane.querySelector('.setnote');
+    if(note) note.innerHTML='CloudSign FORM v4では、利用者が入力するのは契約者情報のみです。SPLL番号・対象原作・料金・期間・クレジット等は<b>システムhidden項目</b>として契約書へ引き継ぎ、Webhookで改変検知します。';
+  }
+  insertHiddenMapSkeleton=function(){
+    const n=parseInt((document.getElementById('fr-max_works')||{}).value||'5',10)||5;
+    const o={license_id:'',application_ref:'',handoff_token:'',terms_snapshot_hash:'',contract_template_version:'',usage_category:'',work_count:'',work_names:''};
+    for(let i=1;i<=n;i++){ o['work_id_'+i]=''; o['work_title_'+i]=''; }
+    ['licensor_name','license_term','territory','fee_model','fee_value','fee_amount_or_rate','licensed_uses','payment_terms','reporting_terms','credit_text','special_terms','template_route'].forEach(function(k){o[k]='';});
+    const cur=(document.getElementById('fr-hidden_map')||{}).value||'';
+    if(cur.trim() && !confirm('現在のマッピング内容を置き換えますか？')) return;
+    document.getElementById('fr-hidden_map').value=JSON.stringify(o,null,2);
+    toast('CloudSign FORM v4のhidden項目ひな形を挿入しました');
+  };
+
   const legacyLoadLegal=loadLegal;
   loadLegal=function(){
     legacyLoadLegal();
