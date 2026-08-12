@@ -1,0 +1,93 @@
+<script>
+(function(){
+  // CloudSign FORM v4：ポータルでは契約同意を取らず、ガイドライン確認＋申込内容確定までとする。
+  const step2 = document.getElementById('ws2');
+  if(step2){
+    const h = step2.querySelector('.wtitle'); if(h) h.innerHTML='SPLL二次創作ガイドラインの確認';
+    const p = step2.querySelector('.wsub'); if(p) p.textContent='創作・公開・頒布時に守っていただくガイドラインをご確認ください。利用許諾契約への同意は、この後CloudSign上で行います。';
+    const c = step2.querySelector('.check .ct'); if(c) c.innerHTML='SPLL二次創作ガイドラインを確認しました<span class="must">必須</span>';
+  }
+  const party = document.getElementById('partySel');
+  if(party){
+    const ind = party.querySelector('option[value="INDIVIDUAL"]'); if(ind) ind.textContent='個人（個人事業主を含む）';
+    const corp = party.querySelector('option[value="CORPORATION"]'); if(corp) corp.textContent='法人（個別確認）';
+  }
+  const ws3 = document.getElementById('ws3');
+  if(ws3){
+    const labels = ws3.querySelectorAll('label.check.oath');
+    if(labels[0]) labels[0].querySelector('.ct').innerHTML='私は成年者です。未成年の場合は、事務局の案内する法定代理人同意手続を行います。<span class="must">必須</span>';
+    if(labels[1]) labels[1].querySelector('.ct').innerHTML='選択した原作、利用区分その他の申込内容に相違ありません。<span class="must">必須</span>';
+    if(labels[2]) labels[2].remove();
+    const warn = ws3.querySelector('.warnnote'); if(warn) warn.textContent='契約条件・禁止事項・反社会的勢力排除その他の法的条件は、CloudSignで送付されるSPLL利用許諾契約書をご確認のうえ同意してください。';
+  }
+
+  // v4法務文書を別APIで取得。legacy APIの非同期応答より優先するため guideline を別プロパティに保持。
+  if(typeof hasGas !== 'undefined' && hasGas){
+    google.script.run.withSuccessHandler(function(l){
+      if(!l) return;
+      if(l.privacy) LEGAL.privacy = l.privacy;
+      if(l.guideline){ LEGAL.guideline = l.guideline; }
+      LEGAL_META.guideline_doc_id = l.guideline_doc_id || '';
+      LEGAL_META.guideline_version = l.guideline_version || '';
+      if(l.privacy_doc_id) LEGAL_META.privacy_doc_id = l.privacy_doc_id;
+      if(l.privacy_version) LEGAL_META.privacy_version = l.privacy_version;
+    }).api_getLegalTextsV4();
+  }
+
+  displayHash = function(){
+    return 'fnv1a:' + fnv1a(String(LEGAL.privacy || '')) + '-' + fnv1a(String(LEGAL.guideline || ''));
+  };
+  termsHTML = function(){ return String(LEGAL.guideline || '<p>ガイドラインを読み込み中です。内容が表示されない場合はページを再読み込みしてください。</p>'); };
+
+  buildFormUrl = function(res){
+    const base=(res&&res.form_url)||APPLY.formUrl; if(!base) return '';
+    const map=APPLY.hiddenMap||{}; const params=[];
+    const add=(canonical,value)=>{
+      const actual=map[canonical]||canonical;
+      if(actual) params.push(encodeURIComponent(actual)+'='+encodeURIComponent(value==null?'':String(value)));
+    };
+    add('license_id',res&&res.license_id||'');
+    add('application_ref',res&&res.application_ref||'');
+    add('handoff_token',res&&res.handoff_token||'');
+    add('terms_snapshot_hash',res&&res.terms_snapshot_hash||'');
+    const ff=(res&&res.form_fields)||{};
+    Object.keys(ff).forEach(k=>add(k,ff[k]));
+    add('template_route',res&&res.template_route||'');
+    return base+(base.indexOf('?')>=0?'&':'?')+params.join('&');
+  };
+
+  onCreated = function(res){
+    const ref=(res&&res.license_id)||(res&&res.application_ref)||'—';
+    document.getElementById('refBox').textContent=ref;
+    const done=document.getElementById('doneMsg'); const toForm=document.getElementById('toForm');
+    if(res && res.template_route === 'MANUAL_REVIEW'){
+      done.innerHTML='SPLL番号を発行しました。今回の申込は標準自動締結の対象外のため、事務局で内容を確認します。<br><span class="mono" style="font-size:11px">'+esc((res.route_reasons||[]).join('／'))+'</span>';
+      if(res.form_url){ toForm.textContent='個別確認フォームへ進む →'; toForm.onclick=()=>window.open(buildFormUrl(res),'_blank'); toForm.style.display=''; }
+      else toForm.style.display='none';
+    }else{
+      done.innerHTML='あなたの<b>SPLL番号</b>です。控えとして保管してください。<br>続けてCloudSign FORMで契約者情報を入力すると、個別条件が反映された契約書がCloudSignから送付されます。契約はCloudSign上で同意した時点で成立します。';
+      const url=buildFormUrl(res);
+      if(url){ toForm.textContent='契約者情報を入力する →'; toForm.onclick=()=>window.open(url,'_blank'); toForm.style.display=''; }
+      else { toForm.style.display='none'; done.innerHTML+='<br><span class="mono" style="font-size:11px">（CloudSign FORM URLが未設定です。事務局へお問い合わせください）</span>'; }
+    }
+    showWStep('Done');
+  };
+
+  submitApplication = function(){
+    const btn=document.getElementById('submit'); btn.disabled=true; btn.textContent='申込を作成中…';
+    const params={ workIds:cart.slice(), usageCategory:selectedUsage,
+      partyType:(document.getElementById('partySel')||{}).value||'INDIVIDUAL',
+      privacyConsent:true, guidelineConsent:true,
+      privacyDocumentId:LEGAL_META.privacy_doc_id||'', guidelineDocumentId:LEGAL_META.guideline_doc_id||'',
+      consentSessionId:CONSENT_SESSION_ID, displayHash:displayHash() };
+    if(hasGas){
+      google.script.run.withSuccessHandler(res=>onCreated(res))
+        .withFailureHandler(err=>{ btn.disabled=false; btn.textContent='申込を作成してCloudSignへ進む →'; alert('申込の作成に失敗しました：\n'+(err&&err.message||err)); })
+        .web_createApplicationV4(params);
+    }else{
+      onCreated({application_id:'APP-mock',application_ref:'REF-mock',license_id:'SPLL-mock',template_route:'STANDARD_FIXED',form_url:'',form_fields:{}});
+    }
+  };
+  const submit=document.getElementById('submit'); if(submit) submit.onclick=submitApplication;
+})();
+</script>
