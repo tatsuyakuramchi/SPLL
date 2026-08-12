@@ -1,4 +1,9 @@
 /** GAS③ 管理コンソール エントリ（SEC-01：組織内限定で公開すること） */
 function doGet(e){
-  return serveAdmin_(e);
+  const out = serveAdmin_(e);
+  const base = out.getContent();
+  if(base.indexOf('SPLL 事務局 管理コンソール') < 0) return out;
+  const patch = HtmlService.createHtmlOutputFromFile('admin_contract_v4_patch').getContent();
+  const html = base.indexOf('</body>') >= 0 ? base.replace('</body>', patch + '\n</body>') : (base + patch);
+  return HtmlService.createHtmlOutput(html).setTitle('SPLL 管理コンソール');
 }
