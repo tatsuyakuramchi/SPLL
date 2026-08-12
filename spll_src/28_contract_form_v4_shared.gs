@@ -1,6 +1,6 @@
 /** SPLL 28_contract_form_v4_shared ― CloudSign FORM v4 共通：個別条件・ハッシュ・改変検知 */
 
-const CONTRACT_FORM_V4_VERSION = 'v4.0';
+const CONTRACT_FORM_V4_VERSION = 'v4.1';
 const CONTRACT_FORM_V4_HASH_KEYS = [
   'contract_template_version','license_id','application_ref','usage_category','work_count','work_names',
   'work_id_1','work_title_1','work_id_2','work_title_2','work_id_3','work_title_3',
