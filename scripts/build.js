@@ -24,7 +24,7 @@ const MANIFEST = {
     title: 'SPLL 公開ポータル (GAS①)',
   },
   workflow: {
-    gs: ['00_core.gs','15_fee.gs','20_tokens.gs','28_contract_form_v4_shared.gs','30_cloudsign.gs','32_contract.gs','35_webhooks.gs','37_ai.gs','40_public_pages.gs','47_batches.gs'],
+    gs: ['00_core.gs','15_fee.gs','20_tokens.gs','28_contract_form_v4_shared.gs','30_cloudsign.gs','32_contract.gs','35_webhooks.gs','37_ai.gs','40_public_pages.gs','42_large_submission.gs','47_batches.gs'],
     overlays: {
       '32_contract.gs': ['33_contract_snapshot_v4.gs'],
       '35_webhooks.gs': ['36_formrun_contract_v4.gs'],

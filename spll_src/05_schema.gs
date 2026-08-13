@@ -41,8 +41,10 @@ const SCHEMA_OPS = {
   Contract_Works:       ['contract_work_id','contract_id','work_id','work_name_snapshot','publisher_snapshot','credit_snapshot','partner_id_snapshot','partner_name_snapshot','invoice_reg_number_snapshot','allocation_scheme_snapshot','royalty_rate_snapshot','handling_fee_rate_snapshot'],
   // 用途別アクセストークン（SEC-06/§9.1）：SUBMISSION / BADGE_DOWNLOAD
   Access_Tokens:        ['token_id','contract_id','purpose','token_hash','status','expires_at','max_uses','used_count','last_used_at','issued_at','revoked_at'],
-  Submissions:          ['submission_id','contract_id','title','status','submitted_at'],
-  Submission_Versions:  ['version_id','submission_id','version_no','status','submitted_at'],
+  // submission_method: UPLOAD（20MBまでの直接アップロード）/ DRIVE_FOLDER（大容量・専用Driveフォルダ受渡）
+  Submissions:          ['submission_id','contract_id','title','status','submitted_at','submission_method'],
+  // DRIVE_FOLDER の版は、フォルダ払出し（OPEN）→利用者が投入→提出完了（確定）で成立する
+  Submission_Versions:  ['version_id','submission_id','version_no','status','submitted_at','submission_method','drive_folder_id','folder_status','folder_opened_at','folder_closed_at','file_count','total_bytes'],
   Submission_Files:     ['submission_file_id','version_id','drive_file_id','mime_type','size','sha256','original_filename','magic_valid'],
   AI_Review_Jobs:       ['ai_review_id','submission_id','version_id','model','prompt_version','status','retry_count','overall_result','risk_score','human_review_required','response_file_id','started_at','completed_at','last_error'],
   AI_Findings:          ['finding_id','ai_review_id','work_id','rule_id','severity','result','page','evidence','recommended_action','confidence'],
@@ -188,6 +190,10 @@ function setup_bootstrap(opts){
   if(!getConfig_('DEFAULT_ALLOCATION_SCHEME','')) setConfig_('DEFAULT_ALLOCATION_SCHEME','BY_WORK_EQUAL');  // 配分方式（FLOW-04）
   if(!getConfig_('APPLICATION_RETENTION_DAYS','')) setConfig_('APPLICATION_RETENTION_DAYS','365');           // 未成立申込の保有期間
   if(!getConfig_('REVIEW_SLA_DAYS',''))           setConfig_('REVIEW_SLA_DAYS','5');                         // 人手審査SLA（営業日相当・暦日）
+  // 大容量提出（専用Driveフォルダ受渡）の上限・開放期間
+  if(!getConfig_('SUBMIT_FOLDER_MAX_FILES',''))   setConfig_('SUBMIT_FOLDER_MAX_FILES','50');                // 1版あたりの最大ファイル数
+  if(!getConfig_('SUBMIT_FOLDER_MAX_GB',''))      setConfig_('SUBMIT_FOLDER_MAX_GB','5');                    // 1版あたりの合計サイズ上限（GB）
+  if(!getConfig_('SUBMIT_FOLDER_OPEN_DAYS',''))   setConfig_('SUBMIT_FOLDER_OPEN_DAYS','14');                // 投入用リンクの開放日数（超過で共有解除）
   // 法人の退避先（窓口は個人専用）。ダミー値を置き、実運用の受け口が決まり次第
   // 管理コンソール「設定→申込導線」で差し替える（Googleフォーム／formrun／メールいずれも可）
   if(!getConfig_('CORPORATE_INQUIRY_EMAIL','')) setConfig_('CORPORATE_INQUIRY_EMAIL','spll-corporate@example.com');
@@ -227,7 +233,7 @@ function setup_seedSamples_(){
 }
 
 // ---- スキーマ移行（修正設計書v2 V2-003）----
-const SCHEMA_VERSION = 6;   // v6: Finance領域を管理対象から除外（契約管理・認証専用化）。v5: SPLLライセンス台帳＋license_id列
+const SCHEMA_VERSION = 7;   // v7: 大容量提出（DRIVE_FOLDER方式）の列追加。v6: Finance領域を管理対象外。v5: SPLLライセンス台帳
 
 /**
  * 既存スプレッドシートへ不足シート・不足列を追加する（既存列の削除・並び替えはしない）。

@@ -22,7 +22,10 @@ function web_getSubmitContext(token){
   const subs = readRows_(ssOps_(),'Submissions').filter(s => s.contract_id===contractId).map(function(s){
     const vs = versions.filter(v => v.submission_id===s.submission_id)
       .sort(function(a,b){ return num_(a.version_no)-num_(b.version_no); })
-      .map(function(v){ return { version_no:v.version_no, status:v.status, submitted_at:String(v.submitted_at||'') }; });
+      .map(function(v){ return { version_no:v.version_no, status:v.status, submitted_at:String(v.submitted_at||''),
+        method:v.submission_method || 'UPLOAD', folder_status:v.folder_status || '',
+        version_id:(v.folder_status === 'OPEN' ? v.version_id : ''),   // 未確定の版だけ操作対象として返す
+        folder_url:(v.folder_status === 'OPEN' ? ('https://drive.google.com/drive/folders/' + v.drive_folder_id) : '') }; });
     // 是正要求の内容を利用者へ提示（修正設計書 §17.2）。最新の人手審査が是正/上申の場合のみ。
     const latestReview = reviews.filter(function(h){ return h.submission_id === s.submission_id; })
       .sort(function(a,b){ return String(b.reviewed_at||'').localeCompare(String(a.reviewed_at||'')); })[0];
@@ -31,7 +34,8 @@ function web_getSubmitContext(token){
        (latestReview.result === 'CORRECTION_REQUIRED' || latestReview.result === 'ESCALATED')){
       correction = { comment:String(latestReview.comments||''), requested_at:String(latestReview.reviewed_at||'').slice(0,10) };
     }
-    return { submission_id:s.submission_id, title:s.title, status:s.status, versions:vs, correction:correction };
+    return { submission_id:s.submission_id, title:s.title, status:s.status, versions:vs, correction:correction,
+      method:s.submission_method || 'UPLOAD' };
   });
   // バッジ取得導線（V2-014-7）：提出トークンのままバッジページを開ける（表示毎の再発行はしない）
   let badgeUrl = '';
@@ -42,9 +46,14 @@ function web_getSubmitContext(token){
   }
   const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.contract_id === contractId; });
   const remaining = Math.max(0, num_(tok.max_uses) - num_(tok.used_count));
+  const lim = submitFolderLimits_();
   return { contract_id:contractId, works:contractWorkNames_(contractId), submissions:subs,
     badge_url:badgeUrl, cert_status:(cert ? cert.status : 'NONE'),
-    expires_at:String(tok.expires_at||'').slice(0,10), remaining_uploads:remaining };
+    expires_at:String(tok.expires_at||'').slice(0,10), remaining_uploads:remaining,
+    // 大容量提出（専用Driveフォルダ）の案内値
+    upload_max_mb: Math.round(UPLOAD_MAX_BYTES/1024/1024),
+    folder_max_files: lim.maxFiles, folder_max_gb: Math.round(lim.maxBytes/(1024*1024*1024)),
+    folder_open_days: lim.openDays };
 }
 
 /** アップロードのサーバー側検証（修正設計書 SEC-05/§6.3）：サイズ・拡張子・MIME・マジックバイト */

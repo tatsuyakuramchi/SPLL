@@ -116,12 +116,25 @@ function runAiReview_(aiReviewId){
   }
 }
 
-/** ジョブの提出ファイル（版の先頭）をBlobで取得。作品ファイルのみで個人情報は含めない。 */
+/**
+ * ジョブの提出ファイルをBlobで取得。作品ファイルのみで個人情報は含めない。
+ * 大容量提出（DRIVE_FOLDER）では動画・立体データ等が混在するため、先頭ではなく
+ * AIが読める形式・サイズ（PDF/PNG/JPEG かつ UPLOAD_MAX_BYTES 以内）の最小ファイルを選ぶ。
+ * 巨大ファイルへ getBlob() するとメモリ超過で審査ごと落ちるため、必ず候補を絞ってから取得する。
+ */
 function resolveSubmissionBlob_(job){
   const vid = job.version_id;
   if(!vid) return null;
-  const f = readRows_(ssOps_(),'Submission_Files').find(x => String(x.version_id)===String(vid));
-  if(!f || !f.drive_file_id) return null;
+  const files = readRows_(ssOps_(),'Submission_Files').filter(function(x){ return String(x.version_id) === String(vid); });
+  if(!files.length) return null;
+  const screenable = files.filter(function(f){
+    const okType = /^(application\/pdf|image\/png|image\/jpeg)$/.test(String(f.mime_type||'')) ||
+      /\.(pdf|png|jpe?g)$/i.test(String(f.original_filename||''));
+    const size = num_(f.size);
+    return f.drive_file_id && okType && (!size || size <= UPLOAD_MAX_BYTES);
+  }).sort(function(a,b){ return num_(a.size) - num_(b.size); });
+  const f = screenable[0];
+  if(!f) return null;                                   // 読める形式が無ければAI審査対象外（人手審査へ）
   return DriveApp.getFileById(f.drive_file_id).getBlob();
 }
 

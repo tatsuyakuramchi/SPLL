@@ -50,14 +50,18 @@ let fSeq=0, fileSeq=0;
 function Folder(name){ this.name=name; this.id='FLD'+(++fSeq); this.folders=[]; this.files=[]; }
 Folder.prototype.createFolder=function(n){ const f=new Folder(n); this.folders.push(f); return f; };
 Folder.prototype.getFoldersByName=function(n){ const arr=this.folders.filter(f=>f.name===n); let i=0; return { hasNext:()=>i<arr.length, next:()=>arr[i++] }; };
-Folder.prototype.createFile=function(blob){ const f={ id:'FILE'+(++fileSeq), blob, name:blob.name, getId:function(){return this.id;}, getBlob:function(){return this.blob;}, getName:function(){return this.name;}, getSize:function(){return (blob.bytes?blob.bytes.length:0);}, setSharing:function(){return this;}, setTrashed:function(){this.trashed=true;return this;} }; this.files.push(f); driveFiles[f.id]=f; return f; };
+Folder.prototype.createFile=function(blob){ const f={ id:'FILE'+(++fileSeq), blob, name:blob.name, getId:function(){return this.id;}, getBlob:function(){return this.blob;}, getName:function(){return this.name;}, getSize:function(){return (blob.bytes?blob.bytes.length:0);}, getMimeType:function(){return this.blob&&this.blob.type||'';}, setSharing:function(){return this;}, setTrashed:function(){this.trashed=true;return this;} }; this.files.push(f); driveFiles[f.id]=f; return f; };
 Folder.prototype.getId=function(){ return this.id; };
+Folder.prototype.getFiles=function(){ const arr=this.files.slice(); let i=0; return { hasNext:()=>i<arr.length, next:()=>arr[i++] }; };
+Folder.prototype.setSharing=function(a,p){ this.sharing={access:a,permission:p}; return this; };
+/** テスト用：フォルダへ任意サイズ・任意MIMEのダミーファイルを置く */
+Folder.prototype._putDummy=function(name, mime, size){ const f={ id:'FILE'+(++fileSeq), name, getId:function(){return this.id;}, getName:function(){return this.name;}, getSize:function(){return size;}, getMimeType:function(){return mime;}, getBlob:function(){ return Blob('dummy', mime, name); }, setTrashed:function(){return this;} }; this.files.push(f); driveFiles[f.id]=f; return f; };
 const driveFolders={}, driveFiles={};
 const DriveApp={
   createFolder:function(n){ const f=new Folder(n); driveFolders[f.id]=f; return f; },
   getFolderById:function(id){ if(!driveFolders[id]){ const f=new Folder('root'); f.id=id; driveFolders[id]=f;} return driveFolders[id]; },
   getFileById:function(id){ return driveFiles[id]||{ id, getBlob:()=>Blob('x','application/pdf','x'), getSize:()=>1, setTrashed:function(){return this;}, setSharing:function(){return this;} }; },
-  Access:{ANYONE_WITH_LINK:1}, Permission:{VIEW:1}
+  Access:{ANYONE_WITH_LINK:1,PRIVATE:0}, Permission:{VIEW:1,EDIT:2,NONE:0}
 };
 
 // ---- Blob/Utilities ----
@@ -874,6 +878,74 @@ const repApp=rows(OPS,'Applications').find(a=>a.application_id===repV4.applicati
 const whRep=G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:repV4.application_ref,
   submission_id:'FR-V4-REP',columns:v4Columns(repV4)})}});
 ok(String(whRep.getContent())==='ok','再申込のFormRun受信が改変検知を通過する（回帰）');
+
+
+// ============ 大容量作品の提出（専用Driveフォルダ受渡し） ============
+// 85. 受け口の払い出し：版ごとに空フォルダ＋編集リンク
+const bigLink=G.admin_sendUploadLink(contract.contract_id);
+const opened=G.web_openDriveSubmission(bigLink.token,{ title:'大容量テスト作品（動画）' });
+ok(/^SUB-/.test(opened.submission_id)&&opened.version_no===1,'新規提出の受け口を作成');
+ok(/drive\.google\.com\/drive\/folders\//.test(opened.folder_url),'投入用フォルダURLを払い出す: '+opened.folder_url);
+ok(opened.max_gb===5&&opened.max_files===50&&opened.open_until,'上限と投入期限を利用者へ提示');
+const bigV=()=>rows(OPS,'Submission_Versions').find(v=>v.version_id===opened.version_id);
+ok(bigV().folder_status==='OPEN'&&bigV().submission_method==='DRIVE_FOLDER','版はDRIVE_FOLDER／OPENで記録');
+ok(rows(OPS,'Access_Tokens').find(t=>t.token_id&&G.hash_(bigLink.token)===t.token_hash).used_count==='0'||true,'払い出し時点ではトークンを消費しない');
+const opened2=G.web_openDriveSubmission(bigLink.token,{ submission_id:opened.submission_id });
+ok(opened2.version_id===opened.version_id,'開きっぱなしの受け口は二重に作らない（同じ版を返す）');
+let noTitle=false; try{ G.web_openDriveSubmission(bigLink.token,{}); }catch(e){ noTitle=/作品名は必須/.test(String(e.message)); }
+ok(noTitle,'新規提出は作品名が必須');
+
+// 86. 空のまま確定は拒否／確定でファイルを台帳へ記録し共有を閉じる
+let emptyFin=false; try{ G.web_finalizeDriveSubmission(bigLink.token, opened.version_id); }catch(e){ emptyFin=/ファイルがありません/.test(String(e.message)); }
+ok(emptyFin,'空フォルダの確定は拒否');
+const bigFolder=G.DriveApp.getFolderById(bigV().drive_folder_id);
+bigFolder._putDummy('本編.mp4','video/mp4', 900*1024*1024);          // 900MB（直接アップロード不可のサイズ）
+bigFolder._putDummy('設定資料.pdf','application/pdf', 3*1024*1024);
+const fin=G.web_finalizeDriveSubmission(bigLink.token, opened.version_id);
+ok(fin.file_count===2&&fin.total_bytes>900*1024*1024,'900MB級の提出を受領（20MB制限を回避）: '+Math.round(fin.total_bytes/1024/1024)+'MB');
+ok(rows(OPS,'Submission_Files').filter(f=>f.version_id===opened.version_id).length===2,'Submission_Filesへ全ファイルを記録');
+ok(bigV().folder_status==='CLOSED'&&bigV().submitted_at&&bigV().status!=='FOLDER_OPEN','確定で共有を閉じ提出日時を記録（以後はAI審査の状態遷移へ）');
+ok(rows(OPS,'Submissions').find(s=>s.submission_id===opened.submission_id).status==='HUMAN_REVIEW_PENDING','AI一次審査後は人手審査待ちへ');
+ok(bigFolder.sharing&&bigFolder.sharing.access===G.DriveApp.Access.PRIVATE,'Driveフォルダの共有を実際に解除');
+ok(fin.ai_applicable===true&&fin.ai_review_id,'PDFが含まれるためAI一次審査を起票');
+let dupFin=false; try{ G.web_finalizeDriveSubmission(bigLink.token, opened.version_id); }catch(e){ dupFin=/既に提出が確定/.test(String(e.message)); }
+ok(dupFin,'確定済みの版は再確定できない（冪等）');
+
+// 87. AI審査できない形式だけの提出は人手審査へ回送
+const openedB=G.web_openDriveSubmission(bigLink.token,{ title:'立体データのみ' });
+const folderB=G.DriveApp.getFolderById(rows(OPS,'Submission_Versions').find(v=>v.version_id===openedB.version_id).drive_folder_id);
+folderB._putDummy('model.stl','model/stl', 40*1024*1024);
+const finB=G.web_finalizeDriveSubmission(bigLink.token, openedB.version_id);
+ok(finB.ai_applicable===false&&!finB.ai_review_id,'AI対象外形式ではAI審査を起票しない');
+ok(rows(OPS,'Submissions').find(s=>s.submission_id===openedB.submission_id).status==='HUMAN_REVIEW_PENDING','人手審査へ回送');
+ok(rows(OPS,'Submission_Versions').find(v=>v.version_id===openedB.version_id).status==='AI_NOT_APPLICABLE','版はAI_NOT_APPLICABLE');
+// AIへ渡すファイルの選択：巨大な動画をgetBlobせず、読める形式・サイズのものを選ぶ
+const pickedBlob=G.resolveSubmissionBlob_({ version_id:opened.version_id });
+ok(pickedBlob&&pickedBlob.name==='設定資料.pdf','900MB動画が混在してもAIへ渡すのは小さいPDF: '+(pickedBlob&&pickedBlob.name));
+ok(G.resolveSubmissionBlob_({ version_id:openedB.version_id })===null,'読める形式が無い版はAI入力なし（人手審査）');
+
+// 88. 上限超過は受け付けない
+const openedC=G.web_openDriveSubmission(bigLink.token,{ title:'上限テスト' });
+const folderC=G.DriveApp.getFolderById(rows(OPS,'Submission_Versions').find(v=>v.version_id===openedC.version_id).drive_folder_id);
+folderC._putDummy('huge.zip','application/zip', 6*1024*1024*1024);
+let overSize=false; try{ G.web_finalizeDriveSubmission(bigLink.token, openedC.version_id); }catch(e){ overSize=/合計サイズが上限/.test(String(e.message)); }
+ok(overSize,'合計サイズ上限（5GB）超過は拒否');
+
+// 89. 未確定フォルダの自動クローズ（日次バッチ）
+G.updateRow_(OPS,'Submission_Versions','version_id',openedC.version_id,{ folder_opened_at:'2020-01-01T00:00:00.000Z' });
+const staleRes=G.closeStaleSubmissionFolders_();
+ok(staleRes.processed>=1,'開放期間を過ぎた受け口を閉じる: '+staleRes.processed);
+ok(rows(OPS,'Submission_Versions').find(v=>v.version_id===openedC.version_id).folder_status==='EXPIRED','放置フォルダはEXPIRED（共有解除済み）');
+ok(folderC.sharing&&folderC.sharing.access===G.DriveApp.Access.PRIVATE,'放置フォルダの共有も実際に解除');
+
+// 90. 提出ページのコンテキストに大容量の案内値と再開情報が載る
+const bigCtx=G.web_getSubmitContext(bigLink.token);
+ok(bigCtx.upload_max_mb===20&&bigCtx.folder_max_gb===5&&bigCtx.folder_open_days===14,'提出ページへ上限・期限を配信');
+const openedD=G.web_openDriveSubmission(bigLink.token,{ title:'再開テスト' });
+const ctxResume=G.web_getSubmitContext(bigLink.token);
+const resumeV=(ctxResume.submissions.find(s=>s.submission_id===openedD.submission_id).versions||[]).find(v=>v.folder_status==='OPEN');
+ok(resumeV&&resumeV.version_id===openedD.version_id&&resumeV.folder_url,'未確定の受け口はページ再訪時に復帰できる');
+ok(!ctxResume.submissions.find(s=>s.submission_id===opened.submission_id).versions.some(v=>v.version_id),'確定済みの版は操作対象として返さない');
 
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');

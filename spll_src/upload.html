@@ -47,6 +47,16 @@
   .notice.err{background:var(--warn-bg);color:var(--warn);}
   .notice.ok{background:var(--ok-bg);color:var(--ok);}
   .done{text-align:center;padding:30px 10px;}
+  .methods{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:5px;}
+  .mcard{border:1px solid var(--line);border-radius:10px;padding:11px 13px;cursor:pointer;background:var(--surface);display:block;font-size:12.5px;}
+  .mcard.on{border-color:var(--brand2);background:#F3F0FA;}
+  .mcard input{margin-right:7px;accent-color:var(--brand);}
+  .mcard b{font-family:"Zen Kaku Gothic New";font-size:13px;display:inline;}
+  .mcard span{display:block;color:var(--soft);font-size:11.5px;margin-top:3px;}
+  .folderbtn{display:inline-block;background:var(--brand);color:#fff;border-radius:9px;padding:12px 20px;font-weight:700;text-decoration:none;font-family:"Zen Kaku Gothic New";}
+  .steps{font-size:12.5px;color:var(--ink);padding-left:20px;margin:12px 0 4px;}
+  .steps li{margin:5px 0;}
+  @media(max-width:520px){.methods{grid-template-columns:1fr;}}
   .done .big{font-family:"Zen Kaku Gothic New";font-weight:900;font-size:20px;color:var(--ok);margin-bottom:8px;}
 </style>
 </head>
@@ -87,9 +97,32 @@
       <label class="f">二次創作作品名 <span class="must">必須</span></label>
       <input type="text" id="title" placeholder="例）狂気山脈の夜想曲">
 
-      <label class="f">作品ファイル（PDF・PNG・JPEG／20MBまで） <span class="must">必須</span></label>
-      <div class="drop" id="drop"><div class="ic">⤴</div>クリックまたはドラッグしてファイルを選択<div class="file" id="fileName"></div></div>
-      <input type="file" id="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" style="display:none;">
+      <label class="f">提出方法 <span class="must">必須</span></label>
+      <div class="methods">
+        <label class="mcard on" id="m-upload"><input type="radio" name="method" value="UPLOAD" checked>
+          <b>このページからアップロード</b><span id="mUploadHint">PDF・PNG・JPEG／20MBまで</span></label>
+        <label class="mcard" id="m-folder"><input type="radio" name="method" value="DRIVE_FOLDER">
+          <b>大容量ファイルを提出</b><span id="mFolderHint">専用フォルダへ直接アップロード（形式自由）</span></label>
+      </div>
+
+      <div id="paneUpload">
+        <label class="f">作品ファイル <span class="must">必須</span></label>
+        <div class="drop" id="drop"><div class="ic">⤴</div>クリックまたはドラッグしてファイルを選択<div class="file" id="fileName"></div></div>
+        <input type="file" id="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" style="display:none;">
+      </div>
+
+      <div id="paneFolder" style="display:none;">
+        <div class="notice ok" id="folderIntro"></div>
+        <div id="folderOpened" style="display:none;">
+          <a id="folderLink" href="#" target="_blank" class="folderbtn">📂 提出用フォルダを開く →</a>
+          <ol class="steps">
+            <li>上のボタンでGoogleドライブのフォルダが開きます（Googleアカウントでのログインが必要です）。</li>
+            <li>作品ファイルをドラッグ＆ドロップで入れてください。<b>形式・容量の制限はページ側にはありません</b>（上限は下記）。</li>
+            <li>すべて入れ終わったら、このページに戻って「<b>提出を確定する</b>」を押してください。確定するまで審査は始まりません。</li>
+          </ol>
+          <p class="sub" id="folderMeta" style="font-size:11.5px;"></p>
+        </div>
+      </div>
 
       <label class="f">補足説明（任意）</label>
       <textarea id="note" placeholder="利用した原作要素、クレジット表記の掲載箇所など"></textarea>
@@ -97,6 +130,8 @@
       <label class="check"><input type="checkbox" id="agree"><span>提出作品がAI（Vertex AI Gemini）による一次審査に付されることに同意します<span class="must">必須</span></span></label>
 
       <button type="submit" class="btn" id="submit" disabled>作品を提出する →</button>
+      <button type="button" class="btn" id="openFolder" style="display:none;" disabled>提出用フォルダを作成する →</button>
+      <button type="button" class="btn" id="finalize" style="display:none;">提出を確定する →</button>
     </form>
   </div>
 
@@ -163,6 +198,27 @@ function renderCtx(ctx){
     var s=(CTX.submissions||[]).find(function(x){return x.submission_id===sel.value;});
     if(s) document.getElementById("title").value=s.title||"";
   });
+
+  // 提出方法の案内文と上限をサーバー値で表示
+  document.getElementById("mUploadHint").textContent="PDF・PNG・JPEG／"+(ctx.upload_max_mb||20)+"MBまで";
+  document.getElementById("mFolderHint").textContent="専用フォルダへ直接アップロード（形式自由・最大"+(ctx.folder_max_gb||5)+"GB）";
+  document.getElementById("folderIntro").innerHTML=
+    "動画・音楽・印刷入稿データ・立体データ・ソフトウェア等、"+(ctx.upload_max_mb||20)+"MBを超える作品はこちらから提出してください。"+
+    "この提出専用のフォルダをお渡しします（最大"+(ctx.folder_max_files||50)+"ファイル・合計"+(ctx.folder_max_gb||5)+"GB・"+(ctx.folder_open_days||14)+"日間有効）。";
+
+  // 未確定の受け口が残っていれば復帰させる（ページを閉じても続きから確定できる）
+  var openV=null, openS=null;
+  subs.forEach(function(s){ (s.versions||[]).forEach(function(v){ if(v.folder_status==="OPEN"&&v.version_id){ openV=v; openS=s; } }); });
+  if(openV){
+    document.getElementById("title").value=openS.title||"";
+    sel.value=openS.submission_id;
+    document.querySelector('input[name=method][value="DRIVE_FOLDER"]').checked=true;
+    setMethod("DRIVE_FOLDER");
+    showFolder({ submission_id:openS.submission_id, version_id:openV.version_id, version_no:openV.version_no,
+      folder_url:openV.folder_url, max_files:ctx.folder_max_files, max_gb:ctx.folder_max_gb,
+      open_until:"", note:"投入用フォルダが開いたままです。投入が済んだら「提出を確定する」を押してください。" });
+    document.getElementById("folderMeta").innerHTML="受け口：v"+esc(openV.version_no)+"（作成済み）";
+  }
 }
 
 // file handling
@@ -174,22 +230,89 @@ drop.addEventListener("drop",function(e){ if(e.dataTransfer.files.length) handle
 fileInput.onchange=function(){ if(fileInput.files.length) handleFile(fileInput.files[0]); };
 
 function handleFile(f){
-  if(f.size>20*1024*1024){ notice("err","ファイルが20MBを超えています。"); return; }
+  var maxMb=(CTX&&CTX.upload_max_mb)||20;
+  if(f.size>maxMb*1024*1024){ notice("err","ファイルが"+maxMb+"MBを超えています。「大容量ファイルを提出」をお選びください。"); return; }
   notice("");
   var r=new FileReader();
   r.onload=function(){ var b64=String(r.result).split(",")[1]||""; fileData={b64:b64,name:f.name,type:f.type||"application/octet-stream"}; document.getElementById("fileName").textContent="選択済み："+f.name+"（"+Math.round(f.size/1024)+" KB）"; gate(); };
   r.readAsDataURL(f);
 }
 
+// ===== 提出方法の切替（UPLOAD ／ DRIVE_FOLDER） =====
+var METHOD="UPLOAD";
+var OPENED=null;      // 払い出し済みの受け口 {version_id, folder_url, ...}
+function method(){ return METHOD; }
+function setMethod(m){
+  METHOD=m;
+  document.getElementById("m-upload").classList.toggle("on", m==="UPLOAD");
+  document.getElementById("m-folder").classList.toggle("on", m==="DRIVE_FOLDER");
+  document.getElementById("paneUpload").style.display = m==="UPLOAD" ? "" : "none";
+  document.getElementById("paneFolder").style.display = m==="DRIVE_FOLDER" ? "" : "none";
+  document.getElementById("submit").style.display   = m==="UPLOAD" ? "" : "none";
+  document.getElementById("openFolder").style.display = (m==="DRIVE_FOLDER" && !OPENED) ? "" : "none";
+  document.getElementById("finalize").style.display   = (m==="DRIVE_FOLDER" && OPENED) ? "" : "none";
+  notice("");
+  gate();
+}
+Array.prototype.forEach.call(document.querySelectorAll('input[name=method]'), function(r){
+  r.addEventListener("change", function(){ setMethod(r.value); });
+});
+
 function gate(){
-  var ok=document.getElementById("title").value.trim() && fileData && document.getElementById("agree").checked;
-  document.getElementById("submit").disabled=!ok;
+  var titled=document.getElementById("title").value.trim();
+  var agreed=document.getElementById("agree").checked;
+  if(METHOD==="UPLOAD"){
+    document.getElementById("submit").disabled=!(titled && fileData && agreed);
+  }else{
+    document.getElementById("openFolder").disabled=!(titled && agreed);
+  }
 }
 document.getElementById("title").addEventListener("input",gate);
 document.getElementById("agree").addEventListener("change",gate);
 
+// ---- 大容量：受け口の払い出し ----
+document.getElementById("openFolder").addEventListener("click",function(){
+  var btn=this; btn.disabled=true; btn.textContent="フォルダを作成中…";
+  google.script.run
+    .withSuccessHandler(function(res){ showFolder(res); })
+    .withFailureHandler(function(err){ btn.disabled=false; btn.textContent="提出用フォルダを作成する →";
+      notice("err","フォルダの作成に失敗しました："+esc(err&&err.message||err)); })
+    .web_openDriveSubmission(TOKEN, { submission_id:document.getElementById("reSubmit").value||"",
+      title:document.getElementById("title").value.trim() });
+});
+function showFolder(res){
+  OPENED=res;
+  document.getElementById("folderOpened").style.display="";
+  document.getElementById("folderLink").href=res.folder_url;
+  document.getElementById("folderMeta").innerHTML=
+    "受け口：v"+esc(res.version_no)+" ／ 上限 "+esc(res.max_files)+" ファイル・合計 "+esc(res.max_gb)+"GB ／ 投入期限 "+esc(res.open_until)+
+    "（期限を過ぎるとフォルダは自動的に閉じられます）";
+  if(res.note) notice("ok",esc(res.note));
+  setMethod("DRIVE_FOLDER");
+}
+// ---- 大容量：投入完了の確定 ----
+document.getElementById("finalize").addEventListener("click",function(){
+  if(!OPENED) return;
+  if(!confirm("フォルダへの投入が完了していることを確認してください。確定するとフォルダは閉じられ、審査が始まります。")) return;
+  var btn=this; btn.disabled=true; btn.textContent="確定中…";
+  google.script.run
+    .withSuccessHandler(function(res){
+      document.getElementById("app").style.display="none";
+      document.getElementById("done").style.display="";
+      var mb=Math.round((res.total_bytes||0)/1024/1024);
+      document.getElementById("doneMsg").innerHTML="提出ID："+esc(res.submission_id)+" ／ 版：v"+esc(res.version_no)+
+        "<br>受領ファイル："+esc(res.file_count)+"件（約"+esc(mb)+"MB）<br>"+
+        (res.ai_applicable ? "AI一次審査を開始しました。人手審査を経て結果をご連絡します。"
+                           : "AI審査の対象外の形式のため、事務局の人手審査で確認します。");
+    })
+    .withFailureHandler(function(err){ btn.disabled=false; btn.textContent="提出を確定する →";
+      notice("err","確定に失敗しました："+esc(err&&err.message||err)); })
+    .web_finalizeDriveSubmission(TOKEN, OPENED.version_id);
+});
+
 document.getElementById("form").addEventListener("submit",function(e){
   e.preventDefault();
+  if(METHOD!=="UPLOAD") return;
   var btn=document.getElementById("submit"); btn.disabled=true; btn.textContent="送信中…";
   var data={ submission_id:document.getElementById("reSubmit").value||"", title:document.getElementById("title").value.trim(),
     filename:fileData.name, mimeType:fileData.type, dataBase64:fileData.b64, note:document.getElementById("note").value };

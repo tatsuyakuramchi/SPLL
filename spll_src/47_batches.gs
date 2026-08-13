@@ -29,6 +29,7 @@ function trigger_every5min(){                     // Webhook再処理＋AI審査
 function trigger_daily(){                         // 期限処理・SLA・データ削除
   batchRun_('expireAccessTokens', expireAccessTokens_);
   batchRun_('notifyReviewSla', notifyReviewSla_);
+  batchRun_('closeStaleSubmissionFolders', closeStaleSubmissionFolders_);   // 未確定の投入フォルダを共有解除
   batchRun_('notifyCloudSignSendStale', notifyCloudSignSendStale_);   // 送信停滞の検知（§10.4）
   batchRun_('purgeExpiredData', purgeExpiredData_);
 }
