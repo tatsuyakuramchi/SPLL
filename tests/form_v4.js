@@ -10,6 +10,7 @@ const f33=read('spll_src/33_contract_snapshot_v4.gs');
 const f36=read('spll_src/36_formrun_contract_v4.gs');
 const patch=read('spll_src/portal_contract_v4_patch.html');
 const build=read('scripts/build.js');
+const adminHtml=read('spll_src/admin.html');
 const entry=read('apps/portal/entry.gs');
 
 ok(/function web_createApplicationV4\(/.test(f29),'v4申込APIが存在');
@@ -27,5 +28,7 @@ ok(/ガイドライン/.test(patch) && /CloudSign上で/.test(patch),'ポータ�
 ok(/28_contract_form_v4_shared\.gs/.test(build) && /29_contract_form_v4\.gs/.test(build) && /36_formrun_contract_v4\.gs/.test(build),'ビルドにv4モジュールを含む');
 ok(/portal_contract_v4_patch/.test(entry),'portal entryがv4 UI patchを注入');
 
+ok(/id="set-privacy"/.test(adminHtml)&&/id="set-guideline"/.test(adminHtml)&&/id="set-terms"/.test(adminHtml),'管理画面 同意文・規約に3文書の枠がある');
+ok(/loadLegalFile/.test(adminHtml)&&/previewLegal/.test(adminHtml),'HTMLファイル読込とプレビューを備える');
 console.log('\nFORM V4 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

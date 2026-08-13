@@ -150,13 +150,19 @@ function sanitizeCell_(v){
 function api_getLegalTexts(){
   const p = publishedLegalDoc_('PRIVACY');
   const t = publishedLegalDoc_('TERMS');
+  const g = publishedLegalDoc_('GUIDELINE');
   return {
     privacy:         p ? p.content_html : getConfig_('LEGAL_PRIVACY_TEXT', DEFAULT_PRIVACY),
     termsTemplate:   t ? t.content_html : getConfig_('LEGAL_TERMS_TEMPLATE', DEFAULT_TERMS_TEMPLATE),
+    guideline:       g ? g.content_html : getConfig_('LEGAL_GUIDELINE_TEXT', DEFAULT_GUIDELINE),
     privacy_version: p ? p.version : '', privacy_doc_id: p ? p.legal_document_id : '',
-    terms_version:   t ? t.version : '', terms_doc_id:   t ? t.legal_document_id : ''
+    terms_version:   t ? t.version : '', terms_doc_id:   t ? t.legal_document_id : '',
+    guideline_version: g ? g.version : '', guideline_doc_id: g ? g.legal_document_id : ''
   };
 }
+/** 管理対象の法務文書（管理コンソール「同意文・規約」の3枠） */
+const LEGAL_DOC_TYPES = ['PRIVACY','GUIDELINE','TERMS'];
+const LEGAL_DOC_LABELS = { PRIVACY:'個人情報の取得同意', GUIDELINE:'SPLL二次創作ガイドライン', TERMS:'利用規約' };
 /** 指定種別の PUBLISHED 最新版（version降順） */
 function publishedLegalDoc_(type){
   return readRows_(ssOps_(),'Legal_Documents')
@@ -322,6 +328,14 @@ const DEFAULT_PRIVACY =
 '<h4>3. 委託・第三者提供</h4><ol><li>契約締結のため電子契約サービス（CloudSign）に取扱いを委託します。</li><li>データの保管・処理のためGoogle Workspace／Google Cloud（Vertex AI Geminiによる作品審査を含む）に取扱いを委託します。</li><li>法令に基づく場合を除き、ご本人の同意なく第三者へ提供しません。</li></ol>'+
 '<h4>4. 保有期間</h4><ol><li>契約に至らなかった申込情報・提出作品データは、取得から1年で削除します。</li><li>契約に至った場合は、契約期間および関係法令の定める期間、保有します。</li></ol>'+
 '<h4>5. 開示等の請求</h4><ol><li>保有個人データの開示・訂正・利用停止等のご請求は、下記窓口で受け付けます。［窓口記載・法務確定前］</li></ol>';
+
+// 二次創作ガイドライン（SPLL-GDL-001）の既定文。正本は docs/SPLL_二次創作ガイドライン_v4.1.md で、
+// 公開用HTMLは docs/legal/spll_guideline.body.html（node docs/build_legal_html.js で生成）。
+// 実運用では管理コンソール「設定→同意文・規約」からHTML全文を登録・公開する。
+const DEFAULT_GUIDELINE =
+'<h4>SPLL二次創作ガイドライン（未登録）</h4>' +
+'<p>ガイドライン本文が登録されていません。管理コンソール「設定 → 同意文・規約 → SPLL二次創作ガイドライン」に ' +
+'<code>docs/legal/spll_guideline.body.html</code> の内容を貼り付け、公開してください。</p>';
 
 // 規約はテンプレート。{{name}}{{pub}}{{ok}}{{no}}{{media}}{{fee}}{{credit}} を作品ごとに差込む。
 const DEFAULT_TERMS_TEMPLATE =

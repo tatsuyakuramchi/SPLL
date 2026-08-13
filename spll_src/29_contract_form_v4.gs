@@ -6,7 +6,7 @@ function api_getLegalTextsV4(){
   const g = publishedLegalDoc_('GUIDELINE');
   return {
     privacy: p ? p.content_html : getConfig_('LEGAL_PRIVACY_TEXT', DEFAULT_PRIVACY),
-    guideline: g ? g.content_html : getConfig_('LEGAL_GUIDELINE_TEXT', ''),
+    guideline: g ? g.content_html : getConfig_('LEGAL_GUIDELINE_TEXT', DEFAULT_GUIDELINE),
     privacy_version: p ? p.version : '', privacy_doc_id: p ? p.legal_document_id : '',
     guideline_version: g ? g.version : '', guideline_doc_id: g ? g.legal_document_id : ''
   };

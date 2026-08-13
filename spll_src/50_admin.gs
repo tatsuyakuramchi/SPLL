@@ -664,7 +664,10 @@ function admin_listLegalDocs(){ requireRole_([]);
 /** 下書き保存（新しい版のDRAFTを作成）。公開は admin_publishLegalDoc で明示的に行う。 */
 function admin_saveLegalDraft(documentType, contentHtml){
   const actor = requireRole_(['LEGAL_ADMIN']);
-  if(['PRIVACY','TERMS'].indexOf(documentType) < 0) throw new Error('VALIDATION_ERROR: 文書種別は PRIVACY / TERMS');
+  if(LEGAL_DOC_TYPES.indexOf(documentType) < 0)
+    throw new Error('VALIDATION_ERROR: 文書種別は ' + LEGAL_DOC_TYPES.join(' / '));
+  if(!String(contentHtml || '').trim())
+    throw new Error('VALIDATION_ERROR: ' + (LEGAL_DOC_LABELS[documentType] || documentType) + ' の本文が空です');
   const rows = readRows_(ssOps_(),'Legal_Documents').filter(function(d){ return d.document_type === documentType; });
   const nextVer = rows.reduce(function(m,d){ return Math.max(m, num_(d.version)); }, 0) + 1;
   const id = Utilities.getUuid();

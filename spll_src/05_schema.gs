@@ -181,6 +181,7 @@ function setup_bootstrap(opts){
   // 4) 既定設定（未設定のみ）
   if(!getConfig_('LEGAL_PRIVACY_TEXT',''))   setConfig_('LEGAL_PRIVACY_TEXT',   DEFAULT_PRIVACY);
   if(!getConfig_('LEGAL_TERMS_TEMPLATE','')) setConfig_('LEGAL_TERMS_TEMPLATE', DEFAULT_TERMS_TEMPLATE);
+  if(!getConfig_('LEGAL_GUIDELINE_TEXT','')) setConfig_('LEGAL_GUIDELINE_TEXT', DEFAULT_GUIDELINE);
   if(!getConfig_('DEFAULT_ROYALTY_RATE','')) setConfig_('DEFAULT_ROYALTY_RATE','0.10');
   if(!getConfig_('HANDLING_FEE_RATE',''))    setConfig_('HANDLING_FEE_RATE',   '0.30');
   if(!prop_('FORM_MAX_WORKS'))               sp.setProperty('FORM_MAX_WORKS', '5');   // 契約書テンプレートの原作枠（当面5）

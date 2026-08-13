@@ -212,26 +212,63 @@
 
     <!-- LEGAL -->
     <div class="setpane on" id="p-legal">
+      <p class="setnote" style="margin:0 0 12px">公開ポータルで表示する法務3文書です。正本のMarkdownは <span class="mono">docs/</span>、公開用HTMLは <span class="mono">docs/legal/</span>（<span class="mono">node docs/build_legal_html.js</span> で生成）にあります。<b><span class="mono">*.body.html</span> の中身をそのまま貼り付けて</b>「下書き保存」→「公開」してください。文書ごとに版が採番され、申込時の同意証跡に版番号が記録されます。</p>
+
       <div class="panel">
-        <div class="ph"><h3>個人情報の取得同意文</h3><span class="hint">Config: LEGAL_PRIVACY_TEXT</span></div>
+        <div class="ph"><h3>個人情報の取得同意</h3><span class="hint">Legal_Documents: PRIVACY ／ docs/legal/spll_privacy.body.html</span></div>
         <div class="pbody">
-          <p class="setnote">申込ウィザードのステップ1で表示されます。HTML可（&lt;h4&gt; / &lt;ol&gt; / &lt;li&gt; 等）。</p>
-          <div class="fld"><textarea id="set-privacy" class="code" placeholder="個人情報の取得同意文（HTML）"></textarea></div>
-        </div>
-      </div>
-      <div class="panel">
-        <div class="ph"><h3>利用規約テンプレート</h3><span class="hint">Config: LEGAL_TERMS_TEMPLATE</span></div>
-        <div class="pbody">
-          <p class="setnote">差込トークン： <span class="mono">{{name}}</span> 作品名 ／ <span class="mono">{{pub}}</span> 出版社 ／ <span class="mono">{{ok}}</span> 許諾要素 ／ <span class="mono">{{no}}</span> 禁止要素 ／ <span class="mono">{{media}}</span> 媒体 ／ <span class="mono">{{fee}}</span> 許諾料 ／ <span class="mono">{{credit}}</span> クレジット。作品ごとに自動で差し込まれます。</p>
-          <div class="fld"><textarea id="set-terms" class="code" placeholder="利用規約テンプレート（HTML・差込トークン可）"></textarea></div>
-          <p class="setnote" id="legal-versions">公開中の版：—</p>
+          <p class="setnote">申込ウィザードのステップ1で表示し、同意を取得します。HTML可。</p>
+          <div class="fld"><textarea id="set-privacy" class="code" style="min-height:220px" placeholder="個人情報の取得同意（HTML）"></textarea></div>
+          <p class="setnote" id="ver-PRIVACY">公開中の版：—</p>
         </div>
         <div class="pfoot">
-          <button class="btn" onclick="saveLegalDrafts()">下書き保存（新しい版）</button>
-          <button class="save" onclick="publishLegalDrafts()">下書きを公開する（法務承認）</button>
-          <button class="btn" onclick="saveLegal()" title="版管理を使わない簡易保存（後方互換）">簡易保存</button>
+          <input type="file" id="file-PRIVACY" accept=".html,.htm,text/html" style="display:none" onchange="loadLegalFile('PRIVACY',this)">
+          <button class="btn" onclick="document.getElementById('file-PRIVACY').click()">HTMLファイルから読み込む</button>
+          <button class="btn" onclick="previewLegal('PRIVACY')">プレビュー</button>
+          <button class="btn" onclick="saveLegalDraft('PRIVACY')">下書き保存（新しい版）</button>
+          <button class="save" onclick="publishLegalDraft('PRIVACY')">この文書を公開する</button>
         </div>
       </div>
+
+      <div class="panel">
+        <div class="ph"><h3>SPLL二次創作ガイドライン</h3><span class="hint">Legal_Documents: GUIDELINE ／ docs/legal/spll_guideline.body.html</span></div>
+        <div class="pbody">
+          <p class="setnote">申込ウィザードのステップ2で表示し、確認を取得します。利用許諾契約の本文はCloudSign上で同意するため、ポータルではガイドラインの確認までを行います。</p>
+          <div class="fld"><textarea id="set-guideline" class="code" style="min-height:220px" placeholder="SPLL二次創作ガイドライン（HTML）"></textarea></div>
+          <p class="setnote" id="ver-GUIDELINE">公開中の版：—</p>
+        </div>
+        <div class="pfoot">
+          <input type="file" id="file-GUIDELINE" accept=".html,.htm,text/html" style="display:none" onchange="loadLegalFile('GUIDELINE',this)">
+          <button class="btn" onclick="document.getElementById('file-GUIDELINE').click()">HTMLファイルから読み込む</button>
+          <button class="btn" onclick="previewLegal('GUIDELINE')">プレビュー</button>
+          <button class="btn" onclick="saveLegalDraft('GUIDELINE')">下書き保存（新しい版）</button>
+          <button class="save" onclick="publishLegalDraft('GUIDELINE')">この文書を公開する</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="ph"><h3>利用規約</h3><span class="hint">Legal_Documents: TERMS ／ docs/legal/spll_terms.body.html</span></div>
+        <div class="pbody">
+          <p class="setnote">申込窓口・提出ページ等の利用条件です。作品ごとの差込トークン（<span class="mono">{{name}}</span>／<span class="mono">{{ok}}</span>／<span class="mono">{{fee}}</span> 等）を含む旧テンプレートも、そのまま登録できます。</p>
+          <div class="fld"><textarea id="set-terms" class="code" style="min-height:220px" placeholder="利用規約（HTML）"></textarea></div>
+          <p class="setnote" id="ver-TERMS">公開中の版：—</p>
+        </div>
+        <div class="pfoot">
+          <input type="file" id="file-TERMS" accept=".html,.htm,text/html" style="display:none" onchange="loadLegalFile('TERMS',this)">
+          <button class="btn" onclick="document.getElementById('file-TERMS').click()">HTMLファイルから読み込む</button>
+          <button class="btn" onclick="previewLegal('TERMS')">プレビュー</button>
+          <button class="btn" onclick="saveLegalDraft('TERMS')">下書き保存（新しい版）</button>
+          <button class="save" onclick="publishLegalDraft('TERMS')">この文書を公開する</button>
+        </div>
+      </div>
+
+      <div class="panel" id="legal-preview-panel" style="display:none">
+        <div class="ph"><h3 id="legal-preview-title">プレビュー</h3><button class="btn" onclick="document.getElementById('legal-preview-panel').style.display='none'">閉じる</button></div>
+        <div class="pbody"><iframe id="legal-preview" style="width:100%;height:420px;border:1px solid var(--line);border-radius:8px;background:#fff"></iframe></div>
+      </div>
+
+      <div class="note">公開（PUBLISHED）した瞬間から、以後の申込はその版に同意した記録になります。旧版は自動的にRETIREDとなり、既存の同意証跡は当時の版番号・ハッシュのまま保持されます。
+        <div class="setnote" id="v4-status" style="margin-top:8px"></div></div>
     </div>
 
     <!-- WORKS -->
@@ -493,8 +530,9 @@ function toast(msg, err){ var t=$("toast"); t.textContent=msg; t.className="toas
 
 // ===== スタンドアロン用モック =====
 var _mLegal = {
-  privacy:"（既定の個人情報取得同意文。ここを編集すると公開窓口の申込ウィザードに反映されます）",
-  termsTemplate:"<h4>第1条（許諾の範囲）</h4><ol><li>許諾要素（{{ok}}）について、媒体（{{media}}）での頒布を許諾します。禁止要素（{{no}}）は利用できません。</li></ol><h4>第2条（許諾料）</h4><ol><li>利用許諾料は {{fee}} とします。</li></ol>"
+  privacy:"<h2>1. 取得する情報</h2><ol><li>氏名、連絡先（メールアドレス）</li><li>申込作品・利用態様、提出作品データ</li></ol><h2>2. 利用目的</h2><ol><li>SPLL利用許諾の審査・契約の締結および管理</li><li>提出作品の適合性審査（AIによる一次審査を含む）</li></ol>",
+  guideline:"<h2>1. はじめに</h2><p>本ガイドラインは、SPLL制度の対象となる二次創作活動について、創作・公開・頒布の際に守っていただきたい事項を案内するものです。</p><h2>2. 二次創作活動</h2><p>シナリオ、リプレイ、小説、漫画、イラスト等が対象となります。</p>",
+  termsTemplate:"<h2>第1条（本規約の適用範囲）</h2><ol><li>本規約は、SPLL公開申込窓口、作品提出ページ、ライセンス検証ページの利用条件を定めます。</li></ol><h2>第2条（申込と契約の成立時点）</h2><ol><li>利用許諾契約は、CloudSign上で同意した時点で成立します。</li></ol>"
 };
 var _mWorks = [
   {work_id:"WRK-ARK00045",work_name:"光砕のリヴァルチャー",publisher:"どらこにあん／アークライト",category:"TRPG / ルールブック",review_policy:"PATROL_ONLY",fee_label:"書籍：16,500円／作品",publish_status:"PUBLISHED",media:"書籍,電子書籍,商品販売",ok_elements:"世界観設定,シナリオ,キャラクター名称",no_elements:"公式イラスト流用",credit_text:"指定の権利表記を記載"},
@@ -517,6 +555,7 @@ var _mInt = {cloudsign:{client_id:"",secret_set:false,template_id:"",callback_ur
 var MOCK = {
   admin_getLegalTexts:function(){ return _mLegal; },
   admin_saveLegalTexts:function(p,t){ _mLegal.privacy=p; _mLegal.termsTemplate=t; return true; },
+  admin_saveGuidelineDraft:function(h){ return MOCK.admin_saveLegalDraft("GUIDELINE",h); },
   admin_listWorksMaster:function(){ return _mWorks; },
   admin_saveWork:function(w){ if(!w.work_id) w.work_id="WRK-NEW-"+(_mWorks.length+1); var i=-1; for(var k=0;k<_mWorks.length;k++){ if(_mWorks[k].work_id===w.work_id) i=k; } if(i>=0){ for(var key in w) _mWorks[i][key]=w[key]; } else { _mWorks.push(w); } return w.work_id; },
   admin_setWorkPublish:function(id,s){ for(var k=0;k<_mWorks.length;k++){ if(_mWorks[k].work_id===id) _mWorks[k].publish_status=s; } return true; },
@@ -535,30 +574,72 @@ var MOCK = {
 var settingsLoaded = false;
 function loadSettings(){ if(settingsLoaded) return; settingsLoaded=true; loadLegal(); loadWorksPane(); loadFeePane(); loadIntegration(); loadXConfig(); loadBadgeConfig(); loadAdminAccess(); }
 
-// 同意文・規約
-function loadLegal(){ call("admin_getLegalTexts",[],function(l){ if(!l) return; $("set-privacy").value=l.privacy||""; $("set-terms").value=l.termsTemplate||""; }); loadLegalVersions(); }
-function saveLegal(){ call("admin_saveLegalTexts",[$("set-privacy").value,$("set-terms").value],function(){ toast("同意文・規約を保存しました（簡易・版管理なし）"); }); }
-// 版管理（§7.2）：下書き保存 → 公開（PUBLISHED。以後の申込はこの版に同意）
+// 同意文・規約（PRIVACY／GUIDELINE／TERMS の3文書・文書ごとに版管理）
+var LEGAL_TYPES=["PRIVACY","GUIDELINE","TERMS"];
+var LEGAL_LABEL={PRIVACY:"個人情報の取得同意",GUIDELINE:"SPLL二次創作ガイドライン",TERMS:"利用規約"};
+var LEGAL_BOX={PRIVACY:"set-privacy",GUIDELINE:"set-guideline",TERMS:"set-terms"};
 var _draftIds={};
-function saveLegalDrafts(){
-  call("admin_saveLegalDraft",["PRIVACY",$("set-privacy").value],function(r1){ _draftIds.PRIVACY=r1.legal_document_id;
-    call("admin_saveLegalDraft",["TERMS",$("set-terms").value],function(r2){ _draftIds.TERMS=r2.legal_document_id;
-      toast("下書きを保存しました（同意文 v"+r1.version+" / 規約 v"+r2.version+"）"); loadLegalVersions();
-    });
+function legalBox(t){ return $(LEGAL_BOX[t]); }
+function loadLegal(){
+  call("admin_getLegalTexts",[],function(l){
+    if(!l) return;
+    if(legalBox("PRIVACY")) legalBox("PRIVACY").value=l.privacy||"";
+    if(legalBox("GUIDELINE")) legalBox("GUIDELINE").value=l.guideline||"";
+    if(legalBox("TERMS")) legalBox("TERMS").value=l.termsTemplate||"";
+  });
+  loadLegalVersions();
+}
+/** docs/legal/*.body.html をそのまま読み込む（アップロードはせずブラウザ内で読むだけ） */
+function loadLegalFile(type, input){
+  var f=input&&input.files&&input.files[0]; if(!f) return;
+  var r=new FileReader();
+  r.onload=function(){
+    var html=String(r.result||"");
+    // 公開用ページ（<body>…）を読み込んだ場合は本文だけを取り出す
+    var m=html.match(/<main[^>]*>([\s\S]*?)<\/main>/i)||html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    if(m) html=m[1];
+    legalBox(type).value=html.trim();
+    toast(LEGAL_LABEL[type]+"に "+f.name+" を読み込みました（未保存）");
+  };
+  r.readAsText(f,"UTF-8");
+  input.value="";
+}
+function previewLegal(type){
+  var panel=$("legal-preview-panel"); if(!panel) return;
+  $("legal-preview-title").textContent="プレビュー：" + LEGAL_LABEL[type];
+  panel.style.display="";
+  var fr=$("legal-preview");
+  var css="body{font-family:'Yu Gothic','Hiragino Kaku Gothic ProN',sans-serif;line-height:1.8;font-size:14px;color:#211E2B;padding:16px}h2{font-size:16px;border-left:4px solid #3D2F6B;padding-left:8px}h3,h4{font-size:14px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #DAD7E2;padding:6px 8px}";
+  fr.srcdoc="<!doctype html><meta charset='utf-8'><style>"+css+"</style>"+(legalBox(type).value||"<p>（本文が空です）</p>");
+  panel.scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+function saveLegalDraft(type){
+  var html=(legalBox(type)||{}).value||"";
+  if(!html.trim()){ toast(LEGAL_LABEL[type]+"の本文が空です",true); return; }
+  call("admin_saveLegalDraft",[type,html],function(r){
+    _draftIds[type]=r.legal_document_id;
+    toast(LEGAL_LABEL[type]+"の下書きを保存しました（v"+r.version+"）");
+    loadLegalVersions();
   });
 }
-function publishLegalDrafts(){
-  if(!_draftIds.PRIVACY || !_draftIds.TERMS){ toast("先に「下書き保存」を実行してください", true); return; }
-  if(!confirm("下書きを公開します。以後の申込はこの版に同意した記録になります。よろしいですか？")) return;
-  call("admin_publishLegalDoc",[_draftIds.PRIVACY],function(){
-    call("admin_publishLegalDoc",[_draftIds.TERMS],function(){ toast("公開しました"); _draftIds={}; loadLegalVersions(); });
+function publishLegalDraft(type){
+  if(!_draftIds[type]){ toast("先に「下書き保存」を実行してください",true); return; }
+  if(!confirm(LEGAL_LABEL[type]+"を公開します。以後の申込はこの版に同意した記録になります。よろしいですか？")) return;
+  call("admin_publishLegalDoc",[_draftIds[type]],function(){
+    toast(LEGAL_LABEL[type]+"を公開しました"); delete _draftIds[type]; loadLegal();
   });
 }
 function loadLegalVersions(){
-  call("admin_listLegalDocs",[],function(rows){ rows=rows||[];
-    var pub=rows.filter(function(d){return d.status==="PUBLISHED";});
-    var pv=pub.find(function(d){return d.document_type==="PRIVACY";}), tv=pub.find(function(d){return d.document_type==="TERMS";});
-    var el=$("legal-versions"); if(el) el.innerHTML="公開中の版：同意文 "+(pv?("v"+pv.version+"（"+esc(pv.approved_at||"")+" 承認: "+esc(pv.approved_by||"")+"）"):"（版管理未使用）")+" ／ 規約 "+(tv?("v"+tv.version):"（版管理未使用）");
+  call("admin_listLegalDocs",[],function(rows){
+    rows=rows||[];
+    LEGAL_TYPES.forEach(function(t){
+      var el=$("ver-"+t); if(!el) return;
+      var pub=rows.filter(function(d){ return d.document_type===t && d.status==="PUBLISHED"; })
+                  .sort(function(a,b){ return Number(b.version)-Number(a.version); })[0];
+      var drafts=rows.filter(function(d){ return d.document_type===t && d.status==="DRAFT"; }).length;
+      el.innerHTML="公開中の版："+(pub?("<b>v"+pub.version+"</b>（"+esc(pub.approved_at||"")+" 承認: "+esc(pub.approved_by||"")+"）")
+        :'<span style="color:var(--fail)">未公開</span>')+(drafts?("　／　下書き "+drafts+"件"):"");
+    });
   });
 }
 
@@ -1168,7 +1249,7 @@ var _mNotify=[
 MOCK.admin_listNotifications=function(){ return _mNotify; };
 MOCK.admin_markNotificationHandled=function(id){ _mNotify=_mNotify.filter(function(n){return n.notification_id!==id;}); return true; };
 MOCK.admin_countOpenErrors=function(){ return 0; };
-var _mLegalDocs=[{legal_document_id:"LD1",document_type:"PRIVACY",version:1,status:"PUBLISHED",approved_by:"legal@example.com",approved_at:"2026-07-01"},{legal_document_id:"LD2",document_type:"TERMS",version:1,status:"PUBLISHED",approved_by:"legal@example.com",approved_at:"2026-07-01"}];
+var _mLegalDocs=[{legal_document_id:"LD1",document_type:"PRIVACY",version:1,status:"PUBLISHED",approved_by:"legal@example.com",approved_at:"2026-07-01"},{legal_document_id:"LD2",document_type:"TERMS",version:1,status:"PUBLISHED",approved_by:"legal@example.com",approved_at:"2026-07-01"},{legal_document_id:"LD3",document_type:"GUIDELINE",version:2,status:"PUBLISHED",approved_by:"legal@example.com",approved_at:"2026-08-12"}];
 MOCK.admin_listLegalDocs=function(){ return _mLegalDocs; };
 MOCK.admin_saveLegalDraft=function(t){ var v=_mLegalDocs.filter(function(d){return d.document_type===t;}).length+1; var id="LD"+(_mLegalDocs.length+1); _mLegalDocs.push({legal_document_id:id,document_type:t,version:v,status:"DRAFT"}); return {legal_document_id:id,version:v}; };
 MOCK.admin_publishLegalDoc=function(id){ _mLegalDocs.forEach(function(d){ var target=_mLegalDocs.find(function(x){return x.legal_document_id===id;}); if(d.document_type===target.document_type&&d.status==="PUBLISHED") d.status="RETIRED"; }); _mLegalDocs.find(function(x){return x.legal_document_id===id;}).status="PUBLISHED"; return true; };

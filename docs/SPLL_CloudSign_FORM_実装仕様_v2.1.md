@@ -300,7 +300,15 @@ FormRun v4改変検知は `v4:` 申込だけに適用し、既存申込・既締
 
 本番切替前に、次を実施する。
 
-1. `GUIDELINE` v4.1を `Legal_Documents` にPUBLISHED登録（管理コンソール 設定→同意文・規約）
+1. 法務3文書を `Legal_Documents` にPUBLISHED登録（管理コンソール 設定→同意文・規約）
+   - 正本は `docs/*.md`、公開用HTMLは `docs/legal/*.html`（`node docs/build_legal_html.js` で生成）
+   - 管理画面の各枠で `docs/legal/<doc>.body.html` を「HTMLファイルから読み込む」→「下書き保存」→「この文書を公開する」
+
+   | 文書種別 | 正本Markdown | 公開用HTML | ポータルでの用途 |
+   |---|---|---|---|
+   | `PRIVACY` | `SPLL_個人情報取得同意_v1.0.md` | `legal/spll_privacy.html` | ステップ1で同意取得 |
+   | `GUIDELINE` | `SPLL_二次創作ガイドライン_v4.1.md` | `legal/spll_guideline.html` | ステップ2で確認取得 |
+   | `TERMS` | `SPLL_利用規約_v1.0.md` | `legal/spll_terms.html` | 窓口の利用条件（掲示） |
 2. CloudSignにv4.1契約書テンプレートを登録（定額用・売上連動用）
 3. FormRunの個人向けフォームを作成又は変更
 4. ユーザー入力項目を6項目前後へ縮小

@@ -756,10 +756,21 @@ ok(btFlat.fee_model==='FLAT'&&Number(btFlat.amount)===16500,'引渡の請求条�
 
 // ============ CloudSign FORM v4（SPLL-LIC-001 v4.1）：個別条件のFORM引渡と改変検知 ============
 // 79. v4申込：ガイドライン同意・SPLL番号・個別条件スナップショット
+// 法務3文書（PRIVACY／GUIDELINE／TERMS）は同じ版管理APIで扱う
+ok(G.api_getLegalTexts().guideline&&/ガイドライン/.test(G.api_getLegalTexts().guideline),'GUIDELINE未公開時は既定文言へフォールバック');
+let legalTypeErr=false; try{ G.admin_saveLegalDraft('UNKNOWN','<p>x</p>'); }catch(e){ legalTypeErr=/PRIVACY \/ GUIDELINE \/ TERMS/.test(String(e.message)); }
+ok(legalTypeErr,'未知の文書種別は拒否');
+let emptyErr=false; try{ G.admin_saveLegalDraft('TERMS','   '); }catch(e){ emptyErr=/本文が空/.test(String(e.message)); }
+ok(emptyErr,'本文が空の下書きは拒否');
+const tdraft=G.admin_saveLegalDraft('TERMS','<h2>第1条（本規約の適用範囲）</h2><p>テスト利用規約</p>');
+G.admin_publishLegalDoc(tdraft.legal_document_id);
+ok(/第1条/.test(G.api_getLegalTexts().termsTemplate),'利用規約も同じ画面から公開できる');
 const gdraft=G.admin_saveGuidelineDraft('<p>SPLL二次創作ガイドライン v4.1（テスト）</p>');
 G.admin_publishLegalDoc(gdraft.legal_document_id);
 const legalV4=G.api_getLegalTextsV4();
 ok(legalV4.guideline_doc_id===gdraft.legal_document_id&&/ガイドライン/.test(legalV4.guideline),'v4法務文書API（PRIVACY＋GUIDELINE）');
+ok(G.api_getLegalTexts().guideline_doc_id===gdraft.legal_document_id,'api_getLegalTextsもGUIDELINEの公開版を返す（管理画面の3枠と同一の正本）');
+ok(G.admin_listLegalDocs().filter(d=>d.document_type==='GUIDELINE'&&d.status==='PUBLISHED').length===1,'GUIDELINEの公開版は常に1つ');
 function mkAppV4(workIds,usage,extra){ return G.web_createApplicationV4(Object.assign({ workIds:workIds, usageCategory:usage,
   privacyConsent:true, guidelineConsent:true, consentSessionId:'sess-v4', displayHash:'fnv1a:v4',
   privacyDocumentId:legalV4.privacy_doc_id, guidelineDocumentId:gdraft.legal_document_id }, extra||{})); }
