@@ -57,6 +57,10 @@ function checkReady(){
 
 1. `PORTAL_URL` で原作を選択（例：2作品）→ 利用目的を選択 → 同意チェック → 申込
 2. 完了画面の **application_ref（REF-YYYYMM-XXXXXX）を控える**
+
+> **法人の退避確認（CloudSign FORM v4）**：契約者の区分で「法人」を選ぶと、申込ボタンが
+> 無効化され法人向け問い合わせ窓口が表示されること（申込レコード・SPLL番号は作られない）。
+> `CORPORATE_INQUIRY_URL` 未設定でも案内文が出ることを確認する。
 3. admin「契約管理」に申込が「締結待ち」で出ることを確認
 
 ### 2.2 formrun Webhook（フォーム回答の擬似送信）

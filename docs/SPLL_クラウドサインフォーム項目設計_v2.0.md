@@ -12,9 +12,10 @@
 > 契約締結方式が「CloudSign FORM（利用者は契約者情報のみ入力・個別条件はSPLLがhiddenで引渡）」へ移行したため、
 > フォーム項目の正本は **`SPLL_CloudSign_FORM_実装仕様_v2.1.md`** および **`SPLL_CloudSign_FORM_設定マッピング_v1.0.md`** です。
 > 特に次の点が本書と異なります：
-> - **法人フォーム（§2.2）は廃止**。現行制度では法人を標準契約の対象外とし（利用許諾契約書v4.1 第3条4）、
->   `decideContractRouteV4_` がMANUAL_REVIEWへ振り分けます。`FORM_URL_CORPORATION` は使用しません
->   （個別確認用は `FORM_URL_MANUAL_REVIEW`）。
+> - **法人フォーム（§2.2）は廃止**。本窓口は個人（個人事業主を含む）専用とし、法人は
+>   別途の問い合わせ窓口から個別契約ルートへ退避します（利用許諾契約書v4.1 第3条1(1)・第3条4）。
+>   法人申込は申込レコードもSPLL番号も作らず `CORPORATE_INQUIRY_REQUIRED` で拒否します。
+>   `FORM_URL_CORPORATION` は使用せず、案内先は `CORPORATE_INQUIRY_URL` / `CORPORATE_INQUIRY_EMAIL` で設定します。
 > - **hidden必須は4つ**（`license_id` / `application_ref` / `handoff_token` / `terms_snapshot_hash`）。
 >   個別条件（料金・期間・地域・クレジット等）もhiddenで引き渡し、受信時にハッシュで改変検知します。
 > - ポータルでは**契約本文への同意を取得しません**（PRIVACY＋GUIDELINEの確認のみ）。契約成立はCloudSign上の同意時点です。

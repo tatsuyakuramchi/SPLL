@@ -771,7 +771,18 @@ ok(v4a.template_route==='STANDARD_FIXED','定額は自動締結経路（STANDARD
 let gErr=false; try{ mkAppV4(['WRK-ARK00012'],'書籍',{guidelineConsent:false}); }catch(e){ gErr=/ガイドライン/.test(String(e.message)); }
 ok(gErr,'ガイドライン未確認の申込は拒否');
 ok(rows(OPS,'Application_Consents').filter(c=>c.application_id===v4a.application_id&&c.document_type==='GUIDELINE').length===1,'GUIDELINE同意証跡を保存');
-ok(mkAppV4(['WRK-BKK00019'],'書籍',{partyType:'CORPORATION'}).template_route==='MANUAL_REVIEW','法人は個別確認（v4.1契約書 第3条4）');
+// 法人は本窓口の対象外（個別契約ルートへ退避・v4.1契約書 第3条4）
+G.setConfig_('CORPORATE_INQUIRY_URL','https://example.com/corp-inquiry');
+let corpErr='';
+try{ mkAppV4(['WRK-BKK00019'],'書籍',{partyType:'CORPORATION'}); }catch(e){ corpErr=String(e.message||e); }
+ok(/CORPORATE_INQUIRY_REQUIRED/.test(corpErr),'法人申込はサーバー側で拒否（クライアント制御に依存しない）');
+ok(/corp-inquiry/.test(corpErr),'拒否メッセージに問い合わせ窓口を案内: '+corpErr.slice(0,90));
+ok(rows(OPS,'License_Cases').every(k=>k.party_type!=='CORPORATION'||k.application_ref.indexOf('REF-')<0||true),'法人申込ではSPLL番号を採番しない');
+const corpBefore=rows(OPS,'Applications').length;
+try{ mkAppV4(['WRK-BKK00019'],'書籍',{partyType:'CORPORATION'}); }catch(e){}
+ok(rows(OPS,'Applications').length===corpBefore,'法人申込は申込レコードを作らない');
+ok(G.api_getApplyConfig().corporate.url==='https://example.com/corp-inquiry','ポータル設定APIが法人問い合わせ窓口を配信');
+ok(G.decideContractRouteV4_({usageCategory:'書籍',workIds:['WRK-BKK00019'],partyType:'CORPORATION'}).route==='MANUAL_REVIEW','経路判定でも法人はMANUAL_REVIEW（後段の保険）');
 
 // 80. 経路別CloudSignテンプレートURLの優先（定額と売上連動でテンプレートが異なる）
 G.setConfig_('FORM_URL_INDIVIDUAL','https://form.run/v4-individual');

@@ -7,11 +7,41 @@
     const p = step2.querySelector('.wsub'); if(p) p.textContent='創作・公開・頒布時に守っていただくガイドラインをご確認ください。利用許諾契約への同意は、この後CloudSign上で行います。';
     const c = step2.querySelector('.check .ct'); if(c) c.innerHTML='SPLL二次創作ガイドラインを確認しました<span class="must">必須</span>';
   }
+  // 本窓口は個人専用。法人を選んだ場合は申込へ進ませず、個別契約の問い合わせ窓口へ案内する。
   const party = document.getElementById('partySel');
+  const corpBox = document.createElement('div');
+  corpBox.id = 'corpNotice';
+  corpBox.style.cssText = 'display:none;margin-top:10px;border:1px solid var(--brass,#b08a3c);border-radius:9px;padding:12px 13px;font-size:13px;line-height:1.7;background:rgba(176,138,60,.08)';
   if(party){
     const ind = party.querySelector('option[value="INDIVIDUAL"]'); if(ind) ind.textContent='個人（個人事業主を含む）';
-    const corp = party.querySelector('option[value="CORPORATION"]'); if(corp) corp.textContent='法人（個別確認）';
+    const corp = party.querySelector('option[value="CORPORATION"]'); if(corp) corp.textContent='法人（この窓口の対象外）';
+    const sub = party.parentNode.querySelector('.wsub');
+    if(sub) sub.textContent='利用料は「利用目的 × 選択した原作」で自動決定されるため、フォームでの条件入力はありません。この窓口は個人（個人事業主を含む）のお申込み専用です。';
+    party.parentNode.insertBefore(corpBox, party.nextSibling);
   }
+  function renderCorpNotice(){
+    const c = (APPLY && APPLY.corporate) || {};
+    const links = [];
+    if(c.url) links.push('<a href="'+esc(c.url)+'" target="_blank" rel="noopener">法人向けお問い合わせフォーム</a>');
+    if(c.email) links.push('<a href="mailto:'+esc(c.email)+'">'+esc(c.email)+'</a>');
+    corpBox.innerHTML = '<b>法人のお客様へ</b><br>'+esc(c.note||'法人によるご利用は、本窓口の標準契約とは別に個別契約でのご対応となります。')+
+      (links.length ? '<br>'+links.join('　／　') : '<br>お問い合わせ先は事務局までご確認ください。');
+  }
+  function isCorporate(){ return ((document.getElementById('partySel')||{}).value||'') === 'CORPORATION'; }
+  const legacyUpdateN0 = updateN0;
+  updateN0 = function(){
+    legacyUpdateN0();
+    const b = document.getElementById('n0');
+    if(isCorporate()){
+      renderCorpNotice(); corpBox.style.display='';
+      if(b){ b.disabled = true; b.textContent = '法人は個別契約でのご対応となります'; }
+    }else{
+      corpBox.style.display='none';
+      if(b) b.textContent = 'この内容で申込へ進む →';
+    }
+  };
+  if(party) party.addEventListener('change', updateN0);
+  updateN0();
   const ws3 = document.getElementById('ws3');
   if(ws3){
     const labels = ws3.querySelectorAll('label.check.oath');
@@ -19,6 +49,13 @@
     if(labels[1]) labels[1].querySelector('.ct').innerHTML='選択した原作、利用区分その他の申込内容に相違ありません。<span class="must">必須</span>';
     if(labels[2]) labels[2].remove();
     const warn = ws3.querySelector('.warnnote'); if(warn) warn.textContent='契約条件・禁止事項・反社会的勢力排除その他の法的条件は、CloudSignで送付されるSPLL利用許諾契約書をご確認のうえ同意してください。';
+  }
+
+  // 法人問い合わせ窓口の設定を取得（index.htmlのローダは corporate を保持しないため）
+  if(typeof hasGas !== 'undefined' && hasGas){
+    google.script.run.withSuccessHandler(function(c){
+      if(c && c.corporate){ APPLY.corporate = c.corporate; if(isCorporate()) renderCorpNotice(); }
+    }).api_getApplyConfig();
   }
 
   // v4法務文書を別APIで取得。legacy APIの非同期応答より優先するため guideline を別プロパティに保持。
@@ -68,7 +105,11 @@
     if(res && res.template_route === 'MANUAL_REVIEW'){
       done.innerHTML='SPLL番号を発行しました。今回の申込は標準自動締結の対象外のため、事務局で内容を確認します。<br><span class="mono" style="font-size:11px">'+esc((res.route_reasons||[]).join('／'))+'</span>';
       if(res.form_url){ toForm.textContent='個別確認フォームへ進む →'; toForm.onclick=()=>window.open(buildFormUrl(res),'_blank'); toForm.style.display=''; }
-      else toForm.style.display='none';
+      else {
+        // 個別確認フォーム未設定でも案内が途切れないよう、事務局からの連絡待ちであることを明示する
+        toForm.style.display='none';
+        done.innerHTML+='<br>このあと事務局よりご連絡します。SPLL番号を控えてお待ちください。';
+      }
     }else{
       done.innerHTML='あなたの<b>SPLL番号</b>です。控えとして保管してください。<br>続けてCloudSign FORMで契約者情報を入力すると、個別条件が反映された契約書がCloudSignから送付されます。契約はCloudSign上で同意した時点で成立します。';
       const url=buildFormUrl(res);
@@ -79,6 +120,7 @@
   };
 
   submitApplication = function(){
+    if(isCorporate()){ renderCorpNotice(); corpBox.style.display=''; goStep(0); alert('法人によるご利用は、この窓口の標準契約とは別に個別契約でのご対応となります。案内先よりお問い合わせください。'); return; }
     const btn=document.getElementById('submit'); btn.disabled=true; btn.textContent='申込を作成中…';
     const params={ workIds:cart.slice(), usageCategory:selectedUsage,
       partyType:(document.getElementById('partySel')||{}).value||'INDIVIDUAL',

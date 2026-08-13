@@ -26,7 +26,21 @@ function api_getApplyConfig(){
     formUrl:   prop_('FORMRUN_FORM_URL') || '',
     refParam:  prop_('FORM_REF_PARAM')   || 'application_ref',   // 後方互換（hiddenMap未設定時）
     hiddenMap: parseJson_(prop_('FORM_HIDDEN_MAP'), {}),
-    maxWorks:  parseInt(prop_('FORM_MAX_WORKS') || '5', 10) || 5
+    maxWorks:  parseInt(prop_('FORM_MAX_WORKS') || '5', 10) || 5,
+    corporate: corporateInquiry_()   // 法人は本窓口の対象外（別ルート＝個別契約）
+  };
+}
+
+/**
+ * 法人向け問い合わせ窓口（CloudSign FORMの対象外）。
+ * 本窓口は個人（個人事業主を含む）専用のため、法人は個別契約ルートへ案内する。
+ */
+function corporateInquiry_(){
+  return {
+    url:   getConfig_('CORPORATE_INQUIRY_URL',''),
+    email: getConfig_('CORPORATE_INQUIRY_EMAIL',''),
+    note:  getConfig_('CORPORATE_INQUIRY_NOTE',
+      '法人によるご利用は、本窓口の標準契約とは別に個別契約でのご対応となります。下記よりお問い合わせください。')
   };
 }
 

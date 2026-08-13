@@ -54,6 +54,7 @@ CloudSign
 ## 3. ユーザー入力項目
 
 現行制度では法人を標準SPLL契約の対象外とするため、通常のCloudSign FORMは個人用とする。
+法人は本窓口では受け付けず、別途の問い合わせ窓口から個別契約とする（§7.0）。
 
 | 項目 | 必須 | 用途 |
 |---|---:|---|
@@ -64,7 +65,7 @@ CloudSign
 | メールアドレス | ○ | CloudSign送信先 |
 | 成年確認 | ○ | 標準フロー適格性確認 |
 
-未成年・法人は標準自動締結から外し、個別確認とする。
+未成年は標準自動締結から外し、個別確認とする。法人は窓口の対象外とする（§7.0）。
 
 ### 取得しない項目
 
@@ -187,7 +188,30 @@ CloudSign上の受信者用フリーテキスト・押印欄・署名欄・チ�
 
 次は `MANUAL_REVIEW` とし、標準CloudSign FORMへ自動遷移させない。
 
-- 法人
+### 7.0 法人（窓口の対象外）
+
+本CloudSign FORM窓口は**個人（個人事業主を含む）専用**とする。
+法人によるSPLL利用は標準契約の対象外であり（利用許諾契約書v4.1 第3条1(1)・第3条4）、
+**別途の問い合わせ窓口から個別契約ルートへ退避**させる。
+
+- ポータルで「法人」を選択した時点で申込ボタンを無効化し、問い合わせ窓口を表示する
+- サーバー側でも `web_createApplicationV4` が `CORPORATE_INQUIRY_REQUIRED` で拒否する
+  （クライアント制御に依存しない）。**申込レコード・SPLL番号は採番しない**
+- 案内先はConfigで設定する
+
+| Config | 内容 |
+|---|---|
+| `CORPORATE_INQUIRY_URL` | 法人向け問い合わせフォームのURL |
+| `CORPORATE_INQUIRY_EMAIL` | 法人向け問い合わせ先メールアドレス |
+| `CORPORATE_INQUIRY_NOTE` | 案内文（未設定時は既定文言） |
+
+`decideContractRouteV4_` も法人をMANUAL_REVIEWとするが、これは旧データの再申込など
+後段経路での保険であり、通常フローでは到達しない。
+
+### 7.1 個別確認（MANUAL_REVIEW）
+
+法人以外で標準自動締結に載せない案件は、申込（SPLL番号）を発行したうえで個別確認とする。
+
 - 未成年
 - 海外居住者
 - イベント利用
@@ -196,10 +220,11 @@ CloudSign上の受信者用フリーテキスト・押印欄・署名欄・チ�
 - 標準料金モデルに該当しない案件
 
 `FORM_URL_MANUAL_REVIEW` が設定されている場合のみ、個別確認フォームを案内する。
+未設定の場合は「事務局から連絡する」旨を完了画面に表示する（案内を途切れさせない）。
 
 標準フォームURLへのフォールバックは行わない。
 
-### 7.1 標準経路のフォームURL解決順
+### 7.2 標準経路のフォームURL解決順
 
 定額（`STANDARD_FIXED`）と売上連動（`STANDARD_RATE`）ではCloudSignテンプレートが異なるため、
 `partyFormUrlV4_` は次の順で解決する。
@@ -275,7 +300,8 @@ FormRun v4改変検知は `v4:` 申込だけに適用し、既存申込・既締
 7. `FORM_HIDDEN_MAP` を設定
 8. `FORMRUN_FIELD_MAP` を設定
 9. `FORM_URL_STANDARD_FIXED` / `FORM_URL_STANDARD_RATE`（テンプレートが1種類なら `FORM_URL_INDIVIDUAL`）を設定
-10. 法人等の個別確認を使う場合のみ `FORM_URL_MANUAL_REVIEW` を設定
+10. 個別確認（未成年・イベント等）を使う場合のみ `FORM_URL_MANUAL_REVIEW` を設定
+10.5. `CORPORATE_INQUIRY_URL`（又は `CORPORATE_INQUIRY_EMAIL`）を設定＝法人の退避先
 11. stagingでFORM→CloudSign→Webhookの一連テストを行う
 12. 締結後に `Contracts.terms_snapshot` の `terms_snapshot_hash_verified` が `true` であることを確認する
     （`false` の場合は個別条件を受信証跡から復元できておらず、TERMS_MISMATCHで自動有効化が止まる）

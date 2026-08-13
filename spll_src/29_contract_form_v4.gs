@@ -37,6 +37,12 @@ function web_createApplicationV4(params){
     ? String(params.partyType) : 'INDIVIDUAL';
   if(!ids.length) throw new Error('原作が選択されていません');
   if(ids.length > formMaxWorks_()) throw new Error('対象原作は最大' + formMaxWorks_() + '件までです');
+  // 本窓口は個人専用（利用許諾契約書v4.1 第3条1(1)・同条4）。法人は個別契約ルートへ退避させる。
+  if(partyType === 'CORPORATION'){
+    const inq = corporateInquiry_();
+    throw new Error('CORPORATE_INQUIRY_REQUIRED: ' + inq.note +
+      (inq.url ? '（' + inq.url + '）' : (inq.email ? '（' + inq.email + '）' : '')));
+  }
   if(params.privacyConsent !== true) throw new Error('VALIDATION_ERROR: 個人情報の取扱いへの同意が必要です');
   if(params.guidelineConsent !== true) throw new Error('VALIDATION_ERROR: SPLL二次創作ガイドラインの確認が必要です');
 

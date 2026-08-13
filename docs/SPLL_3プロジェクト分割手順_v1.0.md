@@ -91,6 +91,8 @@ npm run deploy:portal       # 個別（deploy:workflow / deploy:admin）
 | `DRIVE_ROOT` | — | ✔ | ✔ |
 | `GCP_PROJECT` / `GCP_REGION` / `GEMINI_MODEL` | — | ✔ | ✔ |
 | `FORMRUN_FORM_URL` / `FORM_REF_PARAM` / `FORM_HIDDEN_MAP` / `FORM_MAX_WORKS` | ✔ | — | ✔ |
+| CloudSign FORM v4：`FORM_URL_STANDARD_FIXED` / `FORM_URL_STANDARD_RATE`（無ければ `FORM_URL_INDIVIDUAL`）／`FORM_URL_MANUAL_REVIEW`（個別確認）※Config（台帳）に保存 | ✔ | — | ✔ |
+| 法人の退避先：`CORPORATE_INQUIRY_URL` / `CORPORATE_INQUIRY_EMAIL`（窓口は個人専用）※Config | ✔ | — | ✔ |
 | `CLOUDSIGN_CLIENT_ID` ほかCloudSign系 | — | ✔ | ✔ |
 | `FORMRUN_WEBHOOK_SECRET` / `CLOUDSIGN_WEBHOOK_KEY` | — | ✔ | — |
 | `X_API_KEY` ほかX系 | — | — | ✔ |

@@ -109,13 +109,17 @@ function contractFormFieldsFromReceiptV4_(app){
   return null;
 }
 
-/** v4の自動締結経路。法人・未成年・海外・イベント・その他・特約は個別確認。 */
+/**
+ * v4の自動締結経路。未成年・海外・イベント・その他・特約は個別確認（申込は受け付ける）。
+ * 法人は本窓口の対象外＝個別契約ルートへ退避させるため、web_createApplicationV4 が申込作成前に拒否する。
+ * ここで CORPORATION を MANUAL_REVIEW に落とすのは、旧データの再申込など後段経路での保険。
+ */
 function decideContractRouteV4_(ctx){
   ctx = ctx || {};
   const reasons = [];
   const rule = ctx.usageCategory ? feeRuleFor_(ctx.usageCategory) : null;
   if(!rule) reasons.push('料金表が未設定');
-  if(String(ctx.partyType || '') === 'CORPORATION') reasons.push('法人申込は現行制度の標準契約対象外');
+  if(String(ctx.partyType || '') === 'CORPORATION') reasons.push('法人は本窓口の対象外（個別契約ルート）');
   if(/イベント|EVENT/i.test(String(ctx.usageCategory||''))) reasons.push('イベント利用は制度条件の個別確認が必要');
   if(/その他|OTHER/i.test(String(ctx.usageCategory||''))) reasons.push('利用目的がその他');
   if((ctx.workIds || []).length > formMaxWorks_()) reasons.push('対象原作数が上限超過');
