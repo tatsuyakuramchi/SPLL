@@ -459,15 +459,15 @@ ok(ctx2.badge_url && ctx2.badge_url.indexOf('page=badge')>=0,'提出ページに
 
 // ============ A-中（通知・SLA・AI証跡・版管理・レート制限） ============
 // 27. 通知キュー（§10）
-ok(rows(OPS,'Notification_Queue').some(n=>n.type==='UPLOAD_GUIDE'),'締結時に提出案内の通知を起票');
+ok(rows(OPS,'Notification_Queue').some(n=>n.type==='GUIDE_READY'&&/page=guide/.test(String(n.payload_json||''))),'締結時に「今後のお手続き」案内URLを通知へ起票');
 ok(rows(OPS,'Notification_Queue').some(n=>n.type==='CORRECTION_REQUEST'),'是正要求で通知を起票');
 const nq=rows(OPS,'Notification_Queue').find(n=>n.type==='CORRECTION_REQUEST');
 ok(nq.status==='MANUAL_REQUIRED','通知は人手対応（MANUAL_REQUIRED）');
 G.admin_markNotificationHandled(nq.notification_id);
 ok(rows(OPS,'Notification_Queue').find(n=>n.notification_id===nq.notification_id).status==='SENT','対応済み記録（handled_by付き）');
-const dupN=rows(OPS,'Notification_Queue').filter(n=>n.type==='UPLOAD_GUIDE'&&n.reference_id===contract.contract_id).length;
-G.enqueueNotification_(contract.contract_id,'UPLOAD_GUIDE',contract.contract_id,{});
-ok(rows(OPS,'Notification_Queue').filter(n=>n.type==='UPLOAD_GUIDE'&&n.reference_id===contract.contract_id).length===dupN,'同一参照の通知は重複起票しない');
+const dupN=rows(OPS,'Notification_Queue').filter(n=>n.type==='GUIDE_READY'&&n.reference_id===contract.contract_id).length;
+G.enqueueNotification_(contract.contract_id,'GUIDE_READY',contract.contract_id,{});
+ok(rows(OPS,'Notification_Queue').filter(n=>n.type==='GUIDE_READY'&&n.reference_id===contract.contract_id).length===dupN,'同一参照の通知は重複起票しない');
 
 // 28. SLA監視（§18）— 起点は「最新版の提出日時」（V2-017：再提出でSLAを再計算）
 G.updateRow_(OPS,'Submissions','submission_id',sub1.submission_id,{ status:'HUMAN_REVIEW_PENDING', submitted_at:'2020-01-01T00:00:00.000Z' });
@@ -946,6 +946,59 @@ const ctxResume=G.web_getSubmitContext(bigLink.token);
 const resumeV=(ctxResume.submissions.find(s=>s.submission_id===openedD.submission_id).versions||[]).find(v=>v.folder_status==='OPEN');
 ok(resumeV&&resumeV.version_id===openedD.version_id&&resumeV.folder_url,'未確定の受け口はページ再訪時に復帰できる');
 ok(!ctxResume.submissions.find(s=>s.submission_id===opened.submission_id).versions.some(v=>v.version_id),'確定済みの版は操作対象として返さない');
+
+
+// ============ 締結後の「今後のお手続き」案内ページ ============
+// 91. 締結でGUIDEトークンと案内URLが払い出される
+const guideNote=rows(OPS,'Notification_Queue').find(n=>n.type==='GUIDE_READY'&&n.reference_id===contract.contract_id);
+ok(guideNote&&/page=guide&t=/.test(JSON.parse(guideNote.payload_json).guide_url),'締結通知に案内ページURLが入る');
+ok(rows(OPS,'Access_Tokens').some(t=>t.contract_id===contract.contract_id&&t.purpose==='GUIDE'),'GUIDEトークンを発行');
+
+// 92. 利用者向けページのURLはWORKFLOW_URL基準（adminから発行しても正しく開ける）
+G.setConfig_('WORKFLOW_URL','https://script.google.com/macros/s/WORKFLOW-DEPLOY/exec');
+const gl=G.admin_issueGuideLink(contract.contract_id);
+ok(gl.url.indexOf('https://script.google.com/macros/s/WORKFLOW-DEPLOY/exec?page=guide&t=')===0,'案内URLはGAS②のURLで発行: '+gl.url.slice(0,72));
+ok(G.admin_sendUploadLink(contract.contract_id).url.indexOf('WORKFLOW-DEPLOY/exec?page=upload')>0,'提出リンクもGAS②のURLで発行（旧実装はadminのURLを指していた）');
+const guideToken=gl.url.split('t=')[1];
+
+// 93. 案内ページの内容：契約情報・振込先・バッジ・検証
+G.admin_saveGuideConfig({ bank_name:'テスト銀行', branch:'本店', account_type:'普通', account_number:'1234567',
+  account_holder:'TRPGライツ事務局', holder_kana:'テスト', note:'振込名義にSPLL番号を添えてください', office_contact:'spll@example.com' });
+const gctx=G.web_getGuideContext(decodeURIComponent(guideToken));
+ok(gctx.license_id&&gctx.works.length===2,'案内ページにSPLL番号と対象原作を表示');
+ok(gctx.payment&&gctx.payment.bank_name==='テスト銀行'&&gctx.payment.account_number==='1234567','振込先を表示（設定画面から変更可能）');
+ok(/page=badge/.test(gctx.badge_url)&&/page=verify/.test(gctx.verify_url),'認証バッジ（QR入り）と検証ポータルへの導線');
+ok(gctx.cert_status==='ACTIVE'&&gctx.cert_id,'認証IDと状態を表示');
+// 口座を変えると、発行済みの同じURLでも新しい内容が出る（案内をメールに焼き付けない利点）
+G.admin_saveGuideConfig({ bank_name:'変更後銀行', account_number:'7654321' });
+ok(G.web_getGuideContext(decodeURIComponent(guideToken)).payment.bank_name==='変更後銀行','口座変更は発行済みURLにも即時反映');
+
+// 94. 振込先未設定なら支払欄を出さない（案内ページに空欄を見せない）
+const savedBank=G.getConfig_('PAYMENT_BANK_NAME','');
+G.admin_saveGuideConfig({ bank_name:'', account_number:'', account_holder:'' });
+ok(G.web_getGuideContext(decodeURIComponent(guideToken)).payment===null,'振込先未設定時はお支払い欄を出さない');
+G.admin_saveGuideConfig({ bank_name:savedBank, account_number:'7654321', account_holder:'TRPGライツ事務局' });
+
+// 95. 案内ページから提出ページへ（押された時だけ提出トークンを発行）
+const beforeSub=rows(OPS,'Access_Tokens').filter(t=>t.contract_id===contract.contract_id&&t.purpose==='SUBMISSION'&&t.status==='OPEN').length;
+const sl=G.web_getSubmitLinkFromGuide(decodeURIComponent(guideToken));
+ok(/page=upload&t=/.test(sl.url),'案内ページから提出ページのリンクを発行');
+const openSub=rows(OPS,'Access_Tokens').filter(t=>t.contract_id===contract.contract_id&&t.purpose==='SUBMISSION'&&t.status==='OPEN');
+ok(openSub.length===1&&beforeSub>=1,'発行のたび旧提出トークンは失効し有効なものは常に1本');
+ok(G.web_getSubmitContext(decodeURIComponent(sl.url.split('t=')[1])).contract_id===contract.contract_id,'発行された提出リンクで提出ページを開ける');
+
+// 96. バッジは案内トークンのままでも取得できる（再発行不要）
+const gBadge=G.serveBadge_({ parameter:{ page:'badge', token:decodeURIComponent(guideToken) } });
+ok(gBadge._h.indexOf('data:image/png;base64,')>=0,'案内トークンでバッジPNGを配信');
+
+// 97. 再発行で旧URLは無効／未締結は案内できない
+const gl2=G.admin_issueGuideLink(contract.contract_id);
+ok(G.resolveToken_(decodeURIComponent(guideToken),'GUIDE')===null,'案内リンクの再発行で旧URLは無効化');
+ok(G.web_getGuideContext(decodeURIComponent(gl2.url.split('t=')[1])).license_id===gctx.license_id,'新しいURLでは同じ案件が開ける');
+let notSigned=false; try{ G.admin_issueGuideLink('CTR-NOT-EXIST'); }catch(e){ notSigned=/契約が見つかりません/.test(String(e.message)); }
+ok(notSigned,'存在しない契約の案内発行は拒否');
+let badWfUrl=false; try{ G.admin_saveGuideConfig({ workflow_url:'http://example.com/exec' }); }catch(e){ badWfUrl=/https/.test(String(e.message)); }
+ok(badWfUrl,'利用者向けページURLはhttps必須');
 
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');

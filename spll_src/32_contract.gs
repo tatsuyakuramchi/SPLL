@@ -91,7 +91,11 @@ function finishLicenseActivation_(contractId){
   const cert = issueCert_(contractId);   // 平文コードはここでのみ取得可能（バッジQRへ焼き込む）
   if(prop_('BADGE_AUTO') !== 'false'){ enqueueBadgeJob_(contractId, cert && cert.verify_url); }   // 失敗時はBadge_Jobsで再実行（V2-014-8）
   prepareSubmissionToken_(contractId);
-  enqueueNotification_(contractId, 'UPLOAD_GUIDE', contractId, { note:'締結完了。提出リンクを利用者へ案内してください（契約管理→提出リンク発行）' });
+  // 締結直後に「今後のお手続き」案内ページのURLを払い出す（振込先・提出導線・バッジをまとめた1枚）
+  const guideToken = prepareGuideToken_(contractId);
+  enqueueNotification_(contractId, 'GUIDE_READY', contractId,
+    { guide_url: userPageUrl_('guide','t',guideToken),
+      note:'締結完了。この案内ページURLを契約者へお伝えください（振込先・作品提出・認証バッジを含みます）' });
   const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === contractId; });
   if(c && c.license_id) updateLicenseCase_(c.license_id, { certification_status:'ACTIVE', review_status:'PENDING' });
 }
@@ -313,8 +317,7 @@ function slideThumbnailPng_(presId, size){
  */
 function distributeBadge_(c, badgeId){
   const token = issueToken_(c.contract_id, 'BADGE_DOWNLOAD', 90, 20);
-  let base = ''; try{ base = ScriptApp.getService().getUrl() || ''; }catch(e){}
-  return (base||'') + '?page=badge&token=' + token;   // 利用時のみ使用（メール送信はしない）
+  return userPageUrl_('badge','token',token);   // 利用時のみ使用（メール送信はしない）
 }
 
 // ============================================================

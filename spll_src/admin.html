@@ -206,6 +206,7 @@
       <div class="subtab" data-p="fee">利用料条件</div>
       <div class="subtab" data-p="cloudsign">CloudSign API</div>
       <div class="subtab" data-p="formrun">FormRun</div>
+      <div class="subtab" data-p="guide">手続き案内・振込先</div>
       <div class="subtab" data-p="xbadge">X・認証バッジ</div>
       <div class="subtab" data-p="access">管理者・権限</div>
     </div>
@@ -367,6 +368,34 @@
         <div class="pfoot"><button class="btn" onclick="testCloudSign()">接続テスト</button><button class="save" onclick="saveCloudSign()">CloudSign設定を保存</button></div>
       </div>
       <div class="note">締結Webhookのペイロードは <span class="mono">documentID / status(2=締結完了) / userID / email / text</span> のみで、フォーム入力値は含まれません。<b>application_ref は契約書タイトルに含める</b>ことで突合します（取れない場合は書類取得APIでタイトルを引くフォールバックあり）。秘密情報は ScriptProperties に保存され画面には再表示されません。試験運用のためサンドボックスを既定で使用します。</div>
+    </div>
+
+    <!-- 締結後の手続き案内・振込先 -->
+    <div class="setpane" id="p-guide">
+      <div class="panel">
+        <div class="ph"><h3>振込先（利用許諾料）</h3><span class="hint">Config（台帳）／案内ページに即時反映</span></div>
+        <div class="pbody">
+          <p class="setnote">締結後に契約者へお渡しする<b>「今後のお手続き」ページ</b>に表示されます。口座を変更した場合、過去に発行済みの案内URLでも<b>常に最新の内容が表示されます</b>（メール本文に口座情報を書かない運用のため、振込先を騙る偽装メールと区別しやすくなります）。</p>
+          <div class="grid2">
+            <div class="fld"><label>金融機関 <span class="h">PAYMENT_BANK_NAME</span></label><input id="gc-bank_name" placeholder="○○銀行"></div>
+            <div class="fld"><label>支店 <span class="h">PAYMENT_BRANCH</span></label><input id="gc-branch" placeholder="○○支店（店番 000）"></div>
+          </div>
+          <div class="grid2">
+            <div class="fld"><label>口座種別 <span class="h">PAYMENT_ACCOUNT_TYPE</span></label><input id="gc-account_type" placeholder="普通"></div>
+            <div class="fld"><label>口座番号 <span class="h">PAYMENT_ACCOUNT_NUMBER</span></label><input id="gc-account_number" placeholder="1234567"></div>
+          </div>
+          <div class="grid2">
+            <div class="fld"><label>口座名義 <span class="h">PAYMENT_ACCOUNT_HOLDER</span></label><input id="gc-account_holder" placeholder="株式会社○○"></div>
+            <div class="fld"><label>口座名義（カナ） <span class="h">PAYMENT_HOLDER_KANA</span></label><input id="gc-holder_kana" placeholder="カ)マルマル"></div>
+          </div>
+          <div class="fld"><label>お支払いに関する注記 <span class="h">PAYMENT_NOTE（振込手数料の負担、振込名義の指定など）</span></label><input id="gc-note" placeholder="振込手数料はご負担ください。振込名義にSPLL番号を添えてください。"></div>
+          <div class="fld"><label>事務局の問い合わせ先 <span class="h">OFFICE_CONTACT（案内ページ末尾に表示）</span></label><input id="gc-office_contact" placeholder="spll@example.com"></div>
+          <div class="fld"><label>利用者向けページのURL <span class="h">WORKFLOW_URL（GAS②のウェブアプリURL /exec）</span></label><input id="gc-workflow_url" placeholder="https://script.google.com/macros/s/.../exec"></div>
+          <div class="note" id="gc-status" style="margin:0"></div>
+        </div>
+        <div class="pfoot"><button class="save" onclick="saveGuideConfig()">振込先・案内設定を保存</button></div>
+      </div>
+      <div class="note"><b>案内ページの発行：</b>締結時に自動でURLが払い出され、ダッシュボードの「要対応の通知」に <span class="mono">GUIDE_READY</span> として表示されます。個別に再発行する場合は「契約管理」タブの契約一覧から「案内リンク」を押してください（再発行すると以前のURLは無効になります）。</div>
     </div>
 
     <!-- FORMRUN / クラウドサインフォーム -->
@@ -546,6 +575,9 @@ var _mFee = [
 ];
 var _mDS = {SS_MASTER:"",SS_OPS:"",DRIVE_ROOT:"",GCP_PROJECT:"",GCP_REGION:"",GEMINI_MODEL:"",
   defaults:{SS_MASTER:"PUT_WORKS_MASTER_SPREADSHEET_ID",SS_OPS:"PUT_OPS_SPREADSHEET_ID",DRIVE_ROOT:"PUT_SHARED_DRIVE_FOLDER_ID",GCP_PROJECT:"PUT_GCP_PROJECT_ID",GCP_REGION:"us-central1",GEMINI_MODEL:"gemini-2.5-flash"}};
+var _mGuide = {bank_name:"三菱UFJ銀行",branch:"神田支店（店番 001）",account_type:"普通",account_number:"1234567",
+  account_holder:"TRPGライツ事務局",holder_kana:"ティーアールピージーライツジムキョク",
+  note:"振込手数料はご負担ください。振込名義にSPLL番号を添えてください。",office_contact:"spll@example.com",workflow_url:""};
 var _mRouting = {form_url_standard_fixed:"",form_url_standard_rate:"",form_url_individual:"https://form.run/@spll-individual",
   form_url_manual_review:"",corporate_inquiry_url:"",corporate_inquiry_email:"spll-corporate@example.com",
   corporate_inquiry_note:"",
@@ -566,13 +598,16 @@ var MOCK = {
   admin_getIntegrationConfig:function(){ return _mInt; },
   admin_saveCloudSignConfig:function(c){ _mInt.cloudsign.client_id=c.client_id; _mInt.cloudsign.template_id=c.template_id; _mInt.cloudsign.callback_url=c.callback_url; _mInt.cloudsign.sandbox=c.sandbox; if(c.secret) _mInt.cloudsign.secret_set=true; return true; },
   admin_saveFormRunConfig:function(c){ _mInt.formrun.form_url=c.form_url; _mInt.formrun.field_map=c.field_map; _mInt.formrun.ref_param=c.ref_param; _mInt.formrun.hidden_map=c.hidden_map; _mInt.formrun.max_works=c.max_works; if(c.webhook_secret) _mInt.formrun.webhook_secret_set=true; return true; },
+  admin_getGuideConfig:function(){ return Object.assign({}, _mGuide, {configured:!!(_mGuide.bank_name||_mGuide.account_number), workflow_url_effective:_mGuide.workflow_url||"https://script.google.com/macros/s/WORKFLOW/exec"}); },
+  admin_saveGuideConfig:function(c){ Object.keys(c||{}).forEach(function(k){ _mGuide[k]=c[k]; }); return true; },
+  admin_issueGuideLink:function(id){ return { url:"https://script.google.com/macros/s/WORKFLOW/exec?page=guide&t=mock-guide-token", license_id:"SPLL-202608-0001", payment_configured:!!_mGuide.bank_name }; },
   admin_getPortalRoutingConfig:function(){ return _mRouting; },
   admin_savePortalRoutingConfig:function(c){ Object.keys(c||{}).forEach(function(k){ _mRouting[k]=c[k]; }); return true; }
 };
 
 // ===== 設定ロード =====
 var settingsLoaded = false;
-function loadSettings(){ if(settingsLoaded) return; settingsLoaded=true; loadLegal(); loadWorksPane(); loadFeePane(); loadIntegration(); loadXConfig(); loadBadgeConfig(); loadAdminAccess(); }
+function loadSettings(){ if(settingsLoaded) return; settingsLoaded=true; loadLegal(); loadWorksPane(); loadFeePane(); loadIntegration(); loadGuideConfig(); loadXConfig(); loadBadgeConfig(); loadAdminAccess(); }
 
 // 同意文・規約（PRIVACY／GUIDELINE／TERMS の3文書・文書ごとに版管理）
 var LEGAL_TYPES=["PRIVACY","GUIDELINE","TERMS"];
@@ -729,6 +764,24 @@ function loadIntegration(){
   });
   loadPortalRouting();
 }
+// ---- 締結後の手続き案内・振込先 ----
+var GC_FIELDS=["bank_name","branch","account_type","account_number","account_holder","holder_kana","note","office_contact","workflow_url"];
+function loadGuideConfig(){
+  call("admin_getGuideConfig",[],function(c){
+    if(!c) return;
+    GC_FIELDS.forEach(function(k){ var el=$("gc-"+k); if(el) el.value=c[k]||""; });
+    var el=$("gc-status"); if(!el) return;
+    el.innerHTML=(c.configured
+      ? '<b style="color:var(--pass)">✓ 振込先が設定されています</b>'
+      : '<b style="color:var(--fail)">⚠ 振込先が未設定です</b>（案内ページにお支払い欄が表示されません）')+
+      '　／　利用者向けページURL：<span class="mono">'+esc(c.workflow_url_effective||"（未設定・adminのURLが使われます）")+'</span>';
+  });
+}
+function saveGuideConfig(){
+  var c={}; GC_FIELDS.forEach(function(k){ var el=$("gc-"+k); if(el) c[k]=el.value; });
+  call("admin_saveGuideConfig",[c],function(){ toast("振込先・案内設定を保存しました"); loadGuideConfig(); });
+}
+
 // ---- 申込導線（経路別フォームURL・法人の案内先）----
 var PR_FIELDS=["form_url_standard_fixed","form_url_standard_rate","form_url_individual","form_url_manual_review",
   "corporate_inquiry_url","corporate_inquiry_email","corporate_inquiry_note"];
@@ -962,6 +1015,12 @@ function showUploadLink(contractId, res){
   if(!url){ toast("提出リンクの発行に失敗しました"); return; }
   window.prompt("契約 "+contractId+" の作品提出リンク（利用者へ共有。当社からのメール送信は行いません）：", url);
 }
+function showGuideLink(contractId, res){
+  var url=(res&&res.url)||"";
+  if(!url){ toast("案内リンクの発行に失敗しました"); return; }
+  if(res && res.payment_configured===false) toast("振込先が未設定のため、案内ページにお支払い欄が出ません（設定→手続き案内・振込先）", true);
+  window.prompt("SPLL番号 "+((res&&res.license_id)||contractId)+" の「今後のお手続き」案内リンク\n（振込先・作品提出・認証バッジをまとめたページ。利用者へ共有してください）：", url);
+}
 
 // ---- 未紐付け締結の手動紐付け ----
 var _linkable=[];   // 候補申込のキャッシュ（select描画用）
@@ -1084,6 +1143,10 @@ function loadContract(){
       var act=document.createElement("td"); act.className="actions";
       var hasContract = c.contract_id && c.contract_id!=="—";
       if(hasContract){
+        act.appendChild(mkBtn("案内リンク","btn p",function(){
+          if(!confirm("「今後のお手続き」案内ページのURLを発行します。\n以前に発行したURLは無効になります。よろしいですか？")) return;
+          call("admin_issueGuideLink",[c.contract_id],function(res){ showGuideLink(c.contract_id,res); });
+        }));
         act.appendChild(mkBtn("提出リンク発行","btn",function(){ call("admin_sendUploadLink",[c.contract_id],function(res){ showUploadLink(c.contract_id, res); }); }));
       }
       if(cs==="ACTIVE"){

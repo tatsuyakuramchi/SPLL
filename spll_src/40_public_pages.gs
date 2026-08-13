@@ -142,7 +142,7 @@ function serveBadge_(e){
   const token = (e.parameter && e.parameter.token) || '';
   let tok = resolveToken_(token, 'BADGE_DOWNLOAD');
   if(tok){ consumeToken_(tok); }
-  else { tok = resolveToken_(token, 'SUBMISSION'); }   // 提出者は提出トークンのまま閲覧可（再発行不要）
+  else { tok = resolveToken_(token, 'SUBMISSION') || resolveToken_(token, 'GUIDE'); }   // 提出・案内トークンのまま閲覧可（再発行不要）
   const b = tok ? readRows_(ssOps_(),'Badges').find(function(x){ return x.contract_id === tok.contract_id && String(x.status) === 'ISSUED'; }) : null;
   if(!b) return HtmlService.createHtmlOutput('<p style="font-family:sans-serif">リンクが無効か、有効期限が切れています。</p>').setTitle('SPLL 認証バッジ');
   const workNames = contractWorkNames_(b.contract_id).join('、');   // 契約単位（複数原作）

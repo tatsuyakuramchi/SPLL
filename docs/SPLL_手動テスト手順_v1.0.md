@@ -90,6 +90,19 @@ curl -L -H "Content-Type: application/json" -d "{\"document_id\":\"DOC-TEST-1\",
 - [ ] Certificates・Badges（またはBadge_Jobs）・Access_Tokens（SUBMISSION）が発行
 - [ ] License_Cases が SIGNED／Finance_Handoffs に READY の引渡行（経理側が参照するスナップショット）
 
+### 2.3.1 「今後のお手続き」案内ページ
+
+締結すると、ダッシュボードの「要対応の通知」に <span class="mono">GUIDE_READY</span> が起票され、案内ページURLが入ります。
+
+1. admin「設定→手続き案内・振込先」で振込先と `WORKFLOW_URL`（GAS②の /exec）を設定
+2. admin「契約管理」→ 対象契約の「案内リンク」→ 表示されたURLを開く
+   - [ ] SPLL番号・契約者・対象原作・利用許諾料が出る
+   - [ ] 振込先が出る（未設定ならお支払い欄そのものが出ない）
+   - [ ] 「作品提出ページを開く」で提出ページが別タブで開く
+   - [ ] 「認証バッジをダウンロード」でQR入りPNGが取得できる
+3. 振込先を変更して保存 → **同じURLを再読込すると新しい口座が表示される**（案内はメールに焼き付けない）
+4. 「案内リンク」を再発行 → 以前のURLを開くとエラーになる
+
 ### 2.4 条件不一致（TERMS_MISMATCH）の確認
 
 2.1でもう1件申込を作成し、**2.2をスキップして** 2.3の締結Webhookだけ送る（document_idは別の値に）。

@@ -160,6 +160,23 @@ function api_getLegalTexts(){
     guideline_version: g ? g.version : '', guideline_doc_id: g ? g.legal_document_id : ''
   };
 }
+/**
+ * 利用者向けページ（提出・手続き案内・バッジ・検証）を配信するGAS②のURL。
+ * admin（GAS③）から発行するリンクは自プロジェクトのURLでは開けないため、Configで明示する。
+ * 未設定時は自プロジェクトURLへフォールバック（単一プロジェクト構成・開発時の互換）。
+ */
+function workflowUrl_(){
+  const cfg = String(getConfig_('WORKFLOW_URL','') || '').trim();
+  if(cfg) return cfg.replace(/\/+$/, '');
+  let base = ''; try{ base = ScriptApp.getService().getUrl() || ''; }catch(e){}
+  return String(base).replace(/\/+$/, '');
+}
+/** 利用者向けページのURLを組み立てる（page＋トークン） */
+function userPageUrl_(page, tokenParam, token){
+  const base = workflowUrl_();
+  return (base || '') + '?page=' + encodeURIComponent(page) + '&' + tokenParam + '=' + encodeURIComponent(token);
+}
+
 /** 管理対象の法務文書（管理コンソール「同意文・規約」の3枠） */
 const LEGAL_DOC_TYPES = ['PRIVACY','GUIDELINE','TERMS'];
 const LEGAL_DOC_LABELS = { PRIVACY:'個人情報の取得同意', GUIDELINE:'SPLL二次創作ガイドライン', TERMS:'利用規約' };

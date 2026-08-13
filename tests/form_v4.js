@@ -30,5 +30,7 @@ ok(/portal_contract_v4_patch/.test(entry),'portal entryがv4 UI patchを注入')
 
 ok(/id="set-privacy"/.test(adminHtml)&&/id="set-guideline"/.test(adminHtml)&&/id="set-terms"/.test(adminHtml),'管理画面 同意文・規約に3文書の枠がある');
 ok(/loadLegalFile/.test(adminHtml)&&/previewLegal/.test(adminHtml),'HTMLファイル読込とプレビューを備える');
+ok(/id="gc-bank_name"/.test(adminHtml)&&/saveGuideConfig/.test(adminHtml),'管理画面に振込先の設定がある');
+ok(/admin_issueGuideLink/.test(adminHtml),'契約管理から案内リンクを発行できる');
 console.log('\nFORM V4 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

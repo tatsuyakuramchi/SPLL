@@ -184,8 +184,7 @@ function admin_sendUploadLink(contractId){ requireRole_(['OPERATIONS']);
   if(!c) throw new Error('契約が見つかりません: '+contractId);
   revokeTokens_(contractId, 'SUBMISSION');            // 再発行時は旧トークンを失効（§9.1）
   const token = prepareSubmissionToken_(contractId);
-  let base = ''; try{ base = ScriptApp.getService().getUrl() || ''; }catch(e){}
-  const url = base ? (base + '?page=upload&t=' + token) : ('?page=upload&t=' + token);
+  const url = userPageUrl_('upload','t',token);   // 利用者向けページはGAS②（WORKFLOW_URL）で配信
   logEvent_('contract', contractId, actor_(), null, {upload_link_issued:true});
   return { url:url, token:token };
 }
@@ -366,6 +365,51 @@ function admin_saveFormRunConfig(c){ requireRole_(['SYSTEM_ADMIN']);
   if(c.max_works      !== undefined) sp.setProperty('FORM_MAX_WORKS',    String(parseInt(c.max_works,10) || 5));
   logEvent_('config', 'FORMRUN', actor_(), null, { saved: true });
   return true;
+}
+
+// ---- 締結後の手続き案内（振込先・案内ページ）----
+const PAYMENT_CONFIG_KEYS = [
+  ['bank_name','PAYMENT_BANK_NAME'], ['branch','PAYMENT_BRANCH'], ['account_type','PAYMENT_ACCOUNT_TYPE'],
+  ['account_number','PAYMENT_ACCOUNT_NUMBER'], ['account_holder','PAYMENT_ACCOUNT_HOLDER'],
+  ['holder_kana','PAYMENT_HOLDER_KANA'], ['note','PAYMENT_NOTE'], ['office_contact','OFFICE_CONTACT'],
+  ['workflow_url','WORKFLOW_URL']
+];
+/** 振込先・案内ページ設定の取得（振込先は口座情報のため SYSTEM_ADMIN/ACCOUNTING/OPERATIONS のみ） */
+function admin_getGuideConfig(){ requireRole_(['SYSTEM_ADMIN','OPERATIONS','LEGAL_ADMIN']);
+  const out = {};
+  PAYMENT_CONFIG_KEYS.forEach(function(x){ out[x[0]] = getConfig_(x[1],''); });
+  out.configured = paymentConfigured_();
+  out.workflow_url_effective = workflowUrl_();
+  return out;
+}
+/** 振込先・案内ページ設定の保存。口座情報の変更は監査ログに残す（金額そのものは記録しない）。 */
+function admin_saveGuideConfig(c){ const actor = requireRole_(['SYSTEM_ADMIN','OPERATIONS']);
+  c = c || {};
+  const url = String(c.workflow_url || '').trim();
+  if(url && !/^https:\/\//i.test(url))
+    throw new Error('VALIDATION_ERROR: 利用者向けページURLは https:// で始まる必要があります');
+  const before = {};
+  PAYMENT_CONFIG_KEYS.forEach(function(x){ before[x[0]] = getConfig_(x[1],''); });
+  PAYMENT_CONFIG_KEYS.forEach(function(x){
+    if(c[x[0]] !== undefined) setConfig_(x[1], sanitizeCell_(String(c[x[0]]).trim()).slice(0,200));
+  });
+  const changed = PAYMENT_CONFIG_KEYS.filter(function(x){ return c[x[0]] !== undefined && String(c[x[0]]).trim() !== before[x[0]]; })
+    .map(function(x){ return x[0]; });
+  logEvent_('config', 'GUIDE_PAYMENT', actor.email, null, { changed: changed });
+  return true;
+}
+/**
+ * 「今後のお手続き」案内ページのURLを発行（既存トークンは失効させて作り直す）。
+ * 契約者へ渡す唯一の導線であり、振込先・提出・バッジをこの1枚に集約している。
+ */
+function admin_issueGuideLink(contractId){ const actor = requireRole_(['OPERATIONS','LEGAL_ADMIN']);
+  const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === String(contractId||''); });
+  if(!c) throw new Error('DATA_NOT_FOUND: 契約が見つかりません: ' + contractId);
+  if(String(c.status) !== 'SIGNED') throw new Error('DATA_CONFLICT: 締結済みの契約のみ案内できます（現在: ' + c.status + '）');
+  revokeTokens_(c.contract_id, 'GUIDE');
+  const token = prepareGuideToken_(c.contract_id);
+  logEvent_('contract', c.contract_id, actor.email, null, { guide_link_issued:true });
+  return { url: userPageUrl_('guide','t',token), license_id: c.license_id || '', payment_configured: paymentConfigured_() };
 }
 
 // ---- 申込窓口の案内先（Config・環境ごとに切替可能） ----

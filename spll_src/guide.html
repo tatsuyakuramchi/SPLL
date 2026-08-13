@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPLL 今後のお手続き</title>
+<style>
+  :root{--ink:#211E2B;--paper:#F2F1F5;--surface:#fff;--brand:#3D2F6B;--brand2:#6B4FB0;--brass:#A87B2E;--brass-bg:#F4EBD8;--ok:#2F7D5B;--ok-bg:#E2F0E9;--warn:#A6342F;--warn-bg:#F3DEDC;--line:#DAD7E2;--soft:#6A6577;}
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",system-ui,sans-serif;line-height:1.7;}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace;}
+  header{background:var(--ink);color:#EDEAF4;border-bottom:3px solid var(--brass);}
+  .hwrap{max-width:720px;margin:0 auto;padding:14px 22px;display:flex;align-items:center;gap:12px;}
+  .seal{width:34px;height:34px;border:2px solid var(--brass);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900;color:var(--brass);font-size:13px;}
+  main{max-width:720px;margin:0 auto;padding:26px 22px 80px;}
+  h1{font-size:21px;margin:0 0 4px;font-weight:800;}
+  .sub{color:var(--soft);font-size:13px;margin:0 0 20px;}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:16px;}
+  .card h2{font-size:15px;margin:0 0 12px;color:var(--brand);font-weight:800;border-left:4px solid var(--brand);padding-left:9px;}
+  .kv{display:grid;grid-template-columns:120px 1fr;font-size:13.5px;}
+  .kv .k{background:#F7F6FA;font-weight:600;color:var(--brand);padding:9px 12px;border:1px solid var(--line);border-bottom:none;}
+  .kv .v{padding:9px 12px;border:1px solid var(--line);border-bottom:none;border-left:none;}
+  .kv .k:nth-last-child(2),.kv .v:last-child{border-bottom:1px solid var(--line);}
+  .lic{font-size:20px;font-weight:800;letter-spacing:.04em;color:var(--brand);}
+  .btn{display:inline-block;background:var(--brand);color:#fff;border:none;border-radius:9px;padding:13px 22px;font-size:14.5px;font-weight:700;cursor:pointer;text-decoration:none;font-family:inherit;}
+  .btn.sec{background:var(--brass-bg);color:var(--ink);border:1px solid #E4D3A8;}
+  .btn:disabled{background:#C7C3D2;cursor:not-allowed;}
+  .steps{counter-reset:s;list-style:none;padding:0;margin:0;}
+  .steps li{position:relative;padding:0 0 16px 38px;font-size:13.5px;}
+  .steps li:before{counter-increment:s;content:counter(s);position:absolute;left:0;top:1px;width:25px;height:25px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;}
+  .steps li b{display:block;font-size:14px;margin-bottom:2px;}
+  .note{font-size:12px;color:var(--soft);background:#F7F6FA;border-radius:9px;padding:11px 13px;margin-top:12px;}
+  .warn{font-size:12.5px;background:var(--warn-bg);color:var(--warn);border-radius:9px;padding:11px 13px;margin-top:12px;}
+  .err{background:var(--warn-bg);color:var(--warn);border-radius:9px;padding:14px 16px;font-size:13.5px;}
+  @media(max-width:520px){.kv{grid-template-columns:96px 1fr;}}
+</style>
+</head>
+<body>
+<header><div class="hwrap"><div class="seal">SPLL</div><div style="font-weight:800;font-size:16px;">SPLL 今後のお手続き</div></div></header>
+<main>
+  <div id="loading" class="sub">読み込み中…</div>
+  <div id="app" style="display:none;">
+    <h1>ご契約ありがとうございます</h1>
+    <p class="sub">契約が成立しました。このページに、利用許諾料のお支払い・作品のご提出・認証バッジの受け取りまでをまとめています。<b>ブックマークしてご利用ください。</b></p>
+
+    <div class="card">
+      <h2>ご契約内容</h2>
+      <div class="kv">
+        <div class="k">SPLL番号</div><div class="v"><span class="lic mono" id="gLic">—</span></div>
+        <div class="k">契約者</div><div class="v" id="gParty">—</div>
+        <div class="k">対象原作</div><div class="v" id="gWorks">—</div>
+        <div class="k">利用区分</div><div class="v" id="gUsage">—</div>
+        <div class="k">利用許諾料</div><div class="v" id="gFee">—</div>
+        <div class="k">締結日</div><div class="v mono" id="gSigned">—</div>
+      </div>
+      <div class="note">SPLL番号は、お問い合わせ・お振込・作品提出のすべてで使う受付番号です。</div>
+    </div>
+
+    <div class="card" id="payCard" style="display:none;">
+      <h2>1. 利用許諾料のお支払い</h2>
+      <div class="kv" id="payKv"></div>
+      <div class="note" id="payTerms"></div>
+      <div class="warn">お振込先が記載されたメールが届いても、内容はこのページで必ずご確認ください。事務局が口座情報をメール本文でお知らせすることはありません。</div>
+    </div>
+
+    <div class="card">
+      <h2 id="submitHead">2. 作品のご提出</h2>
+      <p style="font-size:13.5px;margin:0 0 12px;">完成した二次創作作品をご提出ください。提出作品はAIによる一次確認と事務局の確認に付されます。<b>20MBを超える動画・音源・入稿データ等も、専用フォルダからご提出いただけます。</b></p>
+      <button class="btn" id="toSubmit">作品提出ページを開く →</button>
+      <div class="note" id="submitNote">ボタンを押すと、この契約専用の提出ページが開きます（リンクは都度発行されます）。</div>
+    </div>
+
+    <div class="card">
+      <h2 id="badgeHead">3. 認証バッジ（QRコード付き）</h2>
+      <p style="font-size:13.5px;margin:0 0 12px;">正規ライセンスであることを示す認証バッジです。<b>QRコードから誰でも有効性を確認できます。</b>作品のクレジット表記欄などにご利用ください。</p>
+      <div id="badgeArea"></div>
+      <div class="kv" style="margin-top:12px;">
+        <div class="k">認証ID</div><div class="v mono" id="gCertId">—</div>
+        <div class="k">認証状態</div><div class="v" id="gCertStatus">—</div>
+      </div>
+      <div class="note">検証ページ：<a id="gVerify" href="#" target="_blank" rel="noopener">SPLL ライセンス認証</a>（認証IDと、バッジQRに含まれる照合コードで確認します）</div>
+    </div>
+
+    <div class="card">
+      <h2>今後の流れ</h2>
+      <ol class="steps">
+        <li><b>利用許諾料をお振込みください</b>お振込名義にはSPLL番号を添えていただけると確認がスムーズです。</li>
+        <li><b>作品が完成したらご提出ください</b>頒布・公開の前後どちらでも構いません（契約条件に定めがある場合はそれに従います）。</li>
+        <li><b>認証バッジを表示してください</b>クレジット表記とあわせてご利用いただけます。</li>
+        <li><b>是正のご連絡がある場合</b>提出ページに内容が表示されます。修正版を同じ提出の新しい版としてご提出ください。</li>
+      </ol>
+      <div class="note" id="gContact"></div>
+    </div>
+  </div>
+  <div id="error" style="display:none;"><div class="err" id="errMsg"></div></div>
+</main>
+
+<script>
+var TOKEN = "<?= token ?>";
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]; }); }
+
+function render(c){
+  $("loading").style.display="none"; $("app").style.display="";
+  $("gLic").textContent=c.license_id||"—";
+  $("gParty").textContent=c.party_name||"—";
+  $("gWorks").textContent=(c.works&&c.works.length)?c.works.join("、"):"—";
+  $("gUsage").textContent=c.usage_category||"—";
+  $("gFee").textContent=c.fee_label||"—";
+  $("gSigned").textContent=c.signed_at||"—";
+
+  if(c.payment){
+    $("payCard").style.display="";
+    var p=c.payment, rows=[["金融機関",p.bank_name],["支店",p.branch],["口座種別",p.account_type],
+      ["口座番号",p.account_number],["口座名義",p.account_holder+(p.holder_kana?("（"+p.holder_kana+"）"):"")]];
+    $("payKv").innerHTML=rows.filter(function(r){return r[1];})
+      .map(function(r){ return '<div class="k">'+esc(r[0])+'</div><div class="v mono">'+esc(r[1])+'</div>'; }).join("");
+    var terms=[c.payment_terms,p.note].filter(Boolean).join(" ／ ");
+    $("payTerms").textContent=terms||"お支払い時期は契約書の記載に従います。";
+  }else{
+    $("submitHead").textContent="1. 作品のご提出";
+    $("badgeHead").textContent="2. 認証バッジ（QRコード付き）";
+  }
+
+  if(c.badge_url){
+    $("badgeArea").innerHTML='<a class="btn sec" href="'+esc(c.badge_url)+'" target="_blank" rel="noopener">🏅 認証バッジをダウンロード →</a>';
+  }else{
+    $("badgeArea").innerHTML='<div class="note" style="margin:0">認証バッジを発行中です。しばらくしてからこのページを再読み込みしてください。</div>';
+  }
+  $("gCertId").textContent=c.cert_id||"—";
+  var cm={ACTIVE:"✔ 有効",SUSPENDED:"一時停止",REVOKED:"失効",EXPIRED:"期限切れ",NONE:"発行準備中"};
+  $("gCertStatus").textContent=cm[c.cert_status]||c.cert_status||"—";
+  $("gVerify").href=c.verify_url||"#";
+  $("gContact").innerHTML=c.office_contact
+    ? ("ご不明な点は事務局までお問い合わせください："+esc(c.office_contact))
+    : "ご不明な点は事務局までお問い合わせください。";
+}
+
+$("toSubmit").addEventListener("click",function(){
+  var b=this; b.disabled=true; b.textContent="提出ページを準備中…";
+  google.script.run
+    .withSuccessHandler(function(r){
+      b.disabled=false; b.textContent="作品提出ページを開く →";
+      if(r&&r.url){ window.open(r.url,"_blank"); $("submitNote").innerHTML='提出ページを別のタブで開きました。開かない場合は <a href="'+esc(r.url)+'" target="_blank" rel="noopener">こちらのリンク</a> をご利用ください。'; }
+    })
+    .withFailureHandler(function(err){ b.disabled=false; b.textContent="作品提出ページを開く →";
+      $("submitNote").innerHTML='<span style="color:#A6342F">提出ページを開けませんでした：'+esc(err&&err.message||err)+'</span>'; })
+    .web_getSubmitLinkFromGuide(TOKEN);
+});
+
+if(typeof google!=="undefined" && google.script && google.script.run){
+  google.script.run
+    .withSuccessHandler(render)
+    .withFailureHandler(function(err){ $("loading").style.display="none"; $("error").style.display="";
+      $("errMsg").textContent=(err&&err.message)||String(err); })
+    .web_getGuideContext(TOKEN);
+}else{
+  $("loading").textContent="この案内ページはSPLLサーバー上でのみ動作します。";
+}
+</script>
+</body>
+</html>
