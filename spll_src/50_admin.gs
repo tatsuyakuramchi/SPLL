@@ -374,6 +374,52 @@ function admin_saveFormRunConfig(c){ requireRole_(['SYSTEM_ADMIN']);
   return true;
 }
 
+// ---- AI一次審査プロンプト（管理コンソールで差し替え）----
+/** 現在のプロンプト・版・モデル設定を返す（既定文も併せて返し「既定に戻す」を可能にする） */
+function admin_getAiConfig(){ requireRole_([]);
+  return {
+    prompt: getConfig_('AI_REVIEW_PROMPT','') || AI_REVIEW_PROMPT_DEFAULT,
+    is_default: !String(getConfig_('AI_REVIEW_PROMPT','') || '').trim(),
+    default_prompt: AI_REVIEW_PROMPT_DEFAULT,
+    version_label: getConfig_('AI_PROMPT_VERSION','') || AI_PROMPT_VERSION,
+    effective_version: aiPromptVersion_(),
+    model: prop_('GEMINI_MODEL') || '', region: prop_('GCP_REGION') || '', project_set: !!prop_('GCP_PROJECT'),
+    schema_fields: Object.keys(REVIEW_SCHEMA.properties)
+  };
+}
+/**
+ * プロンプトの保存。出力形式は responseSchema で拘束しているため文面変更で壊れないが、
+ * ルールの差込（{{rules}}）が消えると審査条件が伝わらなくなるため警告を返す。
+ */
+function admin_saveAiConfig(c){ const actor = requireRole_(['SYSTEM_ADMIN','OPERATIONS','LEGAL_ADMIN']);
+  c = c || {};
+  const warnings = [];
+  if(c.prompt !== undefined){
+    const p = String(c.prompt || '').trim();
+    if(!p) throw new Error('VALIDATION_ERROR: プロンプトが空です（既定に戻す場合は「既定文を読み込む」を使ってください）');
+    if(p.length > 8000) throw new Error('VALIDATION_ERROR: プロンプトが長すぎます（8000字まで）');
+    if(p.indexOf('{{rules}}') < 0) warnings.push('{{rules}} が含まれていないため、原作別ルールは本文の末尾へ自動付与されます');
+    setConfig_('AI_REVIEW_PROMPT', p);
+  }
+  if(c.version_label !== undefined) setConfig_('AI_PROMPT_VERSION', sanitizeCell_(String(c.version_label).trim()).slice(0,40));
+  logEvent_('config', 'AI_REVIEW_PROMPT', actor.email, null,
+    { effective_version: aiPromptVersion_(), length: aiReviewPrompt_().length });
+  return { effective_version: aiPromptVersion_(), warnings: warnings };
+}
+/** 実際にGeminiへ送る文面のプレビュー（指定契約の対象原作ルールを差し込む） */
+function admin_previewAiPrompt(contractId){ requireRole_([]);
+  let works = [];
+  if(contractId){
+    const cws = readRows_(ssOps_(),'Contract_Works').filter(function(w){ return w.contract_id === String(contractId); });
+    const master = readRows_(ssMaster_(),'Works_Master');
+    works = cws.map(function(w){ return master.find(function(m){ return m.work_id === w.work_id; }); }).filter(Boolean);
+  }
+  if(!works.length) works = readRows_(ssMaster_(),'Works_Master').slice(0,2);   // 未指定はマスタ先頭でサンプル表示
+  const text = buildReviewPrompt_(buildRulesMulti_(works));
+  return { text: text, length: text.length, works: works.map(function(w){ return w.work_name || w.work_id; }),
+    effective_version: aiPromptVersion_() };
+}
+
 // ---- 案内メールの自動送信（管理コンソール操作）----
 /** 管理コンソールからのテスト送信（本番の宛先には送らず、指定アドレスへ見本を送る） */
 function admin_sendGuideEmailTest(toEmail, contractId){

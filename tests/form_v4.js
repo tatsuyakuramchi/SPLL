@@ -34,5 +34,6 @@ ok(/id="gc-bank_name"/.test(adminHtml)&&/saveGuideConfig/.test(adminHtml),'管�
 ok(/admin_issueGuideLink/.test(adminHtml),'契約管理から案内リンクを発行できる');
 ok(/gc-guide_email_auto_send/.test(adminHtml)&&/sendMailTest/.test(adminHtml),'管理画面に案内メールの自動送信設定がある');
 ok(/admin_setCertEnabled/.test(adminHtml),'契約管理に認証オン／オフのスイッチがある');
+ok(/id="ai-prompt"/.test(adminHtml)&&/saveAiConfig/.test(adminHtml),'管理画面にAI審査プロンプトの設定がある');
 console.log('\nFORM V4 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

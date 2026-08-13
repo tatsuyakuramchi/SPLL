@@ -1187,5 +1187,42 @@ const gTok=rows(OPS,'Access_Tokens').filter(t=>t.contract_id===contract.contract
 ok(String(gTok.max_uses)==='0','案内ページは閲覧回数の上限なし（何度でも開ける）');
 
 
+// ============ AI一次審査プロンプトの設定 ============
+// 108. 既定文・差込・版の記録
+const ai0=G.admin_getAiConfig();
+ok(ai0.is_default===true&&/{{rules}}/.test(ai0.prompt),'既定プロンプトに{{rules}}差込がある');
+ok(/^v1:.{8}$/.test(ai0.effective_version),'版は「ラベル:本文ハッシュ」で表す: '+ai0.effective_version);
+const sampleRules=[{work_id:'WRK-ARK00012',ok:['世界観']}];
+ok(G.buildReviewPrompt_(sampleRules).indexOf(JSON.stringify(sampleRules))>=0,'{{rules}}へルールJSONを差し込む');
+
+// 109. 設定画面から差し替えでき、次の審査から適用される
+G.admin_saveAiConfig({ prompt:'あなたはTRPG二次創作の一次スクリーナーです。特にクレジット表記の欠落を重点確認してください。\n{{rules}}',
+  version_label:'v2' });
+const ai1=G.admin_getAiConfig();
+ok(ai1.is_default===false&&/クレジット表記の欠落/.test(ai1.prompt),'プロンプトを差し替えられる');
+ok(/^v2:/.test(ai1.effective_version)&&ai1.effective_version!==ai0.effective_version,'文面を変えると版が変わる: '+ai1.effective_version);
+ok(G.buildReviewPrompt_(sampleRules).indexOf('クレジット表記の欠落')>=0,'審査は保存後のプロンプトを使う');
+// 審査ジョブに版が記録される（どの文面の結果か後から追える）
+const aiLink=G.admin_sendUploadLink(contract.contract_id);
+const aiSub=G.web_submitWork(aiLink.token,{ title:'プロンプト版テスト', filename:'p.pdf', mimeType:'application/pdf', dataBase64:b64 });
+ok(rows(OPS,'AI_Review_Jobs').slice(-1)[0].prompt_version===ai1.effective_version,'審査ジョブに適用版を記録');
+
+// 110. 検証：空・長すぎ・{{rules}}欠落
+let emptyP=false; try{ G.admin_saveAiConfig({ prompt:'   ' }); }catch(e){ emptyP=/空です/.test(String(e.message)); }
+ok(emptyP,'空のプロンプトは拒否');
+let longP=false; try{ G.admin_saveAiConfig({ prompt:new Array(8100).join('あ') }); }catch(e){ longP=/長すぎます/.test(String(e.message)); }
+ok(longP,'8000字超は拒否');
+const warned=G.admin_saveAiConfig({ prompt:'ルール差込を消した文面です。' });
+ok(warned.warnings.length===1&&/末尾へ自動付与/.test(warned.warnings[0]),'{{rules}}欠落は警告を返す');
+ok(G.buildReviewPrompt_(sampleRules).indexOf(JSON.stringify(sampleRules))>=0,'{{rules}}が無くてもルールは必ず渡す（審査条件を欠落させない）');
+
+// 111. プレビューと既定へ戻す
+const pv=G.admin_previewAiPrompt('');
+ok(pv.text&&pv.length>0&&Array.isArray(pv.works),'送信文面をプレビューできる');
+G.setConfig_('AI_REVIEW_PROMPT','');
+ok(G.admin_getAiConfig().is_default===true&&G.aiReviewPrompt_()===G.AI_REVIEW_PROMPT_DEFAULT||G.admin_getAiConfig().is_default===true,
+  '設定を空にすると既定文へ戻る');
+
+
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

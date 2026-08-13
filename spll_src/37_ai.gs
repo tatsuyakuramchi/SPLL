@@ -8,7 +8,7 @@
 function enqueueAiReview_(submissionId, versionId){
   const aiId = newId_('AIR');
   appendRow_(ssOps_(),'AI_Review_Jobs',{ ai_review_id:aiId, submission_id:submissionId||'', version_id:versionId||'',
-    model:cfg_('GEMINI_MODEL'), prompt_version:AI_PROMPT_VERSION, status:'QUEUED', retry_count:0 });
+    model:cfg_('GEMINI_MODEL'), prompt_version:aiPromptVersion_(), status:'QUEUED', retry_count:0 });
   logEvent_('ai_review', aiId, 'system', null, {status:'QUEUED', version_id:versionId||''});
   // 即時実行を試行（失敗時はQUEUEDのまま batch_runAiReviews_ が再試行）
   try{ runAiReview_(aiId); }catch(e){ /* バッチ再試行に委ねる */ }
@@ -40,14 +40,37 @@ const REVIEW_SCHEMA = { type:'object', properties:{
     page:{type:'integer'}, evidence:{type:'string'}, recommended_action:{type:'string'}, confidence:{type:'number'}
   }}}
 }};
+/**
+ * 一次審査プロンプトの既定文。管理コンソール「設定→AI審査」で差し替えできる。
+ * {{rules}} に原作別ルール・契約条件のJSONが差し込まれる（省略しても末尾へ自動付与する）。
+ * 出力形式は responseSchema（REVIEW_SCHEMA）で拘束しているため、文面の変更で壊れない。
+ */
+const AI_REVIEW_PROMPT_DEFAULT = [
+  'あなたは審査者ではなく一次スクリーナーです。根拠箇所を示し、不明は不明としてください。',
+  '本提出作品は、複数の原作を同時に利用している可能性があります。',
+  '各指摘(finding)には、どの原作(work_id)のルールに関するものかを必ず付与してください。',
+  '次の原作別ルールと契約条件に対する適合候補・要確認・高リスク候補を抽出してください。',
+  '{{rules}}'
+].join('\n');
+
+/** 現在有効なプロンプト（Config優先・未設定は既定文） */
+function aiReviewPrompt_(){
+  const v = String(getConfig_('AI_REVIEW_PROMPT','') || '').trim();
+  return v || AI_REVIEW_PROMPT_DEFAULT;
+}
+/**
+ * ジョブに記録する版。ラベル（Config）＋プロンプト本文のハッシュ先頭8桁。
+ * 文面を変えると版が変わるため、過去の審査結果がどの文面で出たかを後から追える。
+ */
+function aiPromptVersion_(){
+  const label = String(getConfig_('AI_PROMPT_VERSION','') || AI_PROMPT_VERSION);
+  return label + ':' + String(hash_(aiReviewPrompt_())).slice(0,8);
+}
 function buildReviewPrompt_(rules){
-  return [
-    'あなたは審査者ではなく一次スクリーナーです。根拠箇所を示し、不明は不明としてください。',
-    '本提出作品は、複数の原作を同時に利用している可能性があります。',
-    '各指摘(finding)には、どの原作(work_id)のルールに関するものかを必ず付与してください。',
-    '次の原作別ルールと契約条件に対する適合候補・要確認・高リスク候補を抽出してください。',
-    JSON.stringify(rules)
-  ].join('\n');
+  const tpl = aiReviewPrompt_();
+  const rulesJson = JSON.stringify(rules);
+  // {{rules}} を消してしまってもルールは必ず渡す（審査条件の欠落を防ぐ）
+  return tpl.indexOf('{{rules}}') >= 0 ? tpl.split('{{rules}}').join(rulesJson) : (tpl + '\n' + rulesJson);
 }
 
 // ---- 4.1 AI審査ジョブ実行（runAiReview_） ----

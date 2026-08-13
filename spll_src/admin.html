@@ -208,6 +208,7 @@
       <div class="subtab" data-p="cloudsign">CloudSign API</div>
       <div class="subtab" data-p="formrun">FormRun</div>
       <div class="subtab" data-p="guide">手続き案内・振込先</div>
+      <div class="subtab" data-p="ai">AI審査</div>
       <div class="subtab" data-p="xbadge">X・認証バッジ</div>
       <div class="subtab" data-p="access">管理者・権限</div>
     </div>
@@ -369,6 +370,32 @@
         <div class="pfoot"><button class="btn" onclick="testCloudSign()">接続テスト</button><button class="save" onclick="saveCloudSign()">CloudSign設定を保存</button></div>
       </div>
       <div class="note">締結Webhookのペイロードは <span class="mono">documentID / status(2=締結完了) / userID / email / text</span> のみで、フォーム入力値は含まれません。<b>application_ref は契約書タイトルに含める</b>ことで突合します（取れない場合は書類取得APIでタイトルを引くフォールバックあり）。秘密情報は ScriptProperties に保存され画面には再表示されません。試験運用のためサンドボックスを既定で使用します。</div>
+    </div>
+
+    <!-- AI一次審査 -->
+    <div class="setpane" id="p-ai">
+      <div class="panel">
+        <div class="ph"><h3>AI一次審査のプロンプト</h3><span class="hint">Config: AI_REVIEW_PROMPT ／ 保存後の提出から適用</span></div>
+        <div class="pbody">
+          <p class="setnote">提出作品をGeminiへ渡すときの指示文です。<b><span class="mono">{{rules}}</span> の位置に、対象原作のルール・契約条件がJSONで差し込まれます</b>（書き忘れても末尾へ自動付与されます）。出力の形式（総合結果・指摘一覧など）はサーバー側のスキーマで固定しているため、文面を変えても壊れません。</p>
+          <div class="fld"><label>プロンプト <span class="h">最大8000字</span></label><textarea id="ai-prompt" class="code" style="min-height:240px"></textarea></div>
+          <div class="grid2">
+            <div class="fld"><label>版ラベル <span class="h">AI_PROMPT_VERSION（審査ジョブに記録されます）</span></label><input id="ai-version_label" placeholder="v1"></div>
+            <div class="fld"><label>プレビュー対象の契約ID <span class="h">任意・空欄なら作品マスタの先頭でサンプル表示</span></label><input id="ai-preview-contract" placeholder="CTR-…"></div>
+          </div>
+          <div class="note" id="ai-status" style="margin:0"></div>
+          <div id="ai-preview-box" style="display:none;margin-top:12px;">
+            <label style="font-size:12px;font-weight:600;color:var(--brand);">実際に送信される文面</label>
+            <pre id="ai-preview" style="white-space:pre-wrap;word-break:break-all;background:#F7F6FA;border:1px solid var(--line);border-radius:8px;padding:12px;font-size:11.5px;max-height:340px;overflow:auto;"></pre>
+          </div>
+        </div>
+        <div class="pfoot">
+          <button class="btn" onclick="loadAiDefault()">既定文を読み込む</button>
+          <button class="btn" onclick="previewAiPrompt()">プレビュー</button>
+          <button class="save" onclick="saveAiConfig()">プロンプトを保存</button>
+        </div>
+      </div>
+      <div class="note"><b>運用上の注意：</b>AI審査は一次スクリーニングであり、承認・適法性保証ではありません（最終判断は人手）。プロンプトを変更すると版が変わり、各審査ジョブの <span class="mono">prompt_version</span> に「ラベル:本文ハッシュ」で記録されるため、<b>どの文面で出た結果かを後から追えます</b>。モデル・GCPプロジェクト・リージョンは「作品マスタ→データソース接続」で設定します。</div>
     </div>
 
     <!-- 締結後の手続き案内・振込先 -->
@@ -597,6 +624,8 @@ var _mFee = [
 ];
 var _mDS = {SS_MASTER:"",SS_OPS:"",DRIVE_ROOT:"",GCP_PROJECT:"",GCP_REGION:"",GEMINI_MODEL:"",
   defaults:{SS_MASTER:"PUT_WORKS_MASTER_SPREADSHEET_ID",SS_OPS:"PUT_OPS_SPREADSHEET_ID",DRIVE_ROOT:"PUT_SHARED_DRIVE_FOLDER_ID",GCP_PROJECT:"PUT_GCP_PROJECT_ID",GCP_REGION:"us-central1",GEMINI_MODEL:"gemini-2.5-flash"}};
+var _mAiDefault="あなたは審査者ではなく一次スクリーナーです。根拠箇所を示し、不明は不明としてください。\n本提出作品は、複数の原作を同時に利用している可能性があります。\n各指摘(finding)には、どの原作(work_id)のルールに関するものかを必ず付与してください。\n次の原作別ルールと契約条件に対する適合候補・要確認・高リスク候補を抽出してください。\n{{rules}}";
+var _mAiPrompt=_mAiDefault;
 var _mGuide = {bank_name:"三菱UFJ銀行",branch:"神田支店（店番 001）",account_type:"普通",account_number:"1234567",
   account_holder:"TRPGライツ事務局",holder_kana:"ティーアールピージーライツジムキョク",
   note:"振込手数料はご負担ください。振込名義にSPLL番号を添えてください。",office_contact:"spll@example.com",workflow_url:"",
@@ -624,6 +653,11 @@ var MOCK = {
   admin_getIntegrationConfig:function(){ return _mInt; },
   admin_saveCloudSignConfig:function(c){ _mInt.cloudsign.client_id=c.client_id; _mInt.cloudsign.template_id=c.template_id; _mInt.cloudsign.callback_url=c.callback_url; _mInt.cloudsign.sandbox=c.sandbox; if(c.secret) _mInt.cloudsign.secret_set=true; return true; },
   admin_saveFormRunConfig:function(c){ _mInt.formrun.form_url=c.form_url; _mInt.formrun.field_map=c.field_map; _mInt.formrun.ref_param=c.ref_param; _mInt.formrun.hidden_map=c.hidden_map; _mInt.formrun.max_works=c.max_works; if(c.webhook_secret) _mInt.formrun.webhook_secret_set=true; return true; },
+  admin_getAiConfig:function(){ return { prompt:_mAiPrompt, is_default:_mAiPrompt===_mAiDefault, default_prompt:_mAiDefault,
+    version_label:"v1", effective_version:"v1:1a2b3c4d", model:"gemini-2.0-flash", region:"asia-northeast1", project_set:true,
+    schema_fields:["overall_result","risk_score","human_review_required","findings"] }; },
+  admin_saveAiConfig:function(c){ if(c&&c.prompt) _mAiPrompt=c.prompt; return { effective_version:"v1:9f8e7d6c", warnings:(c&&c.prompt&&c.prompt.indexOf("{{rules}}")<0)?["{{rules}} が含まれていないため、原作別ルールは本文の末尾へ自動付与されます"]:[] }; },
+  admin_previewAiPrompt:function(){ return { text:_mAiPrompt.replace("{{rules}}", JSON.stringify([{work_id:"WRK-ARK00012",work_name:"新クトゥルフ神話TRPG",ok:["世界観・神話設定"],no:["公式イラスト流用"],rules:[]}],null,1)), length:420, works:["新クトゥルフ神話TRPG"], effective_version:"v1:1a2b3c4d" }; },
   admin_setCertEnabled:function(id,on){ _mContracts&&0; return { status:on?"ACTIVE":"PAYMENT_HOLD", changed:true }; },
   admin_getMailStatus:function(){ return {enabled:_mGuide.guide_email_auto_send!=="false",sent:12,pending:1,failed:0,remaining_quota:1487,from_name:_mGuide.mail_from_name,reply_to:_mGuide.mail_reply_to}; },
   admin_sendGuideEmailTest:function(to){ return {sent:true,to:to}; },
@@ -636,7 +670,7 @@ var MOCK = {
 
 // ===== 設定ロード =====
 var settingsLoaded = false;
-function loadSettings(){ if(settingsLoaded) return; settingsLoaded=true; loadLegal(); loadWorksPane(); loadFeePane(); loadIntegration(); loadGuideConfig(); loadXConfig(); loadBadgeConfig(); loadAdminAccess(); }
+function loadSettings(){ if(settingsLoaded) return; settingsLoaded=true; loadLegal(); loadWorksPane(); loadFeePane(); loadIntegration(); loadGuideConfig(); loadAiConfig(); loadXConfig(); loadBadgeConfig(); loadAdminAccess(); }
 
 // 同意文・規約（PRIVACY／GUIDELINE／TERMS の3文書・文書ごとに版管理）
 var LEGAL_TYPES=["PRIVACY","GUIDELINE","TERMS"];
@@ -793,6 +827,44 @@ function loadIntegration(){
   });
   loadPortalRouting();
 }
+// ---- AI一次審査のプロンプト ----
+var _aiDefaultPrompt="";
+function loadAiConfig(){
+  call("admin_getAiConfig",[],function(c){
+    if(!c) return;
+    _aiDefaultPrompt=c.default_prompt||"";
+    if($("ai-prompt")) $("ai-prompt").value=c.prompt||"";
+    if($("ai-version_label")) $("ai-version_label").value=c.version_label||"";
+    var el=$("ai-status"); if(!el) return;
+    el.innerHTML="適用中の版：<b class='mono'>"+esc(c.effective_version||"")+"</b>"+
+      (c.is_default?"（既定文）":"（カスタム）")+
+      "　／　モデル："+esc(c.model||"未設定")+"　リージョン："+esc(c.region||"未設定")+
+      "　GCPプロジェクト："+(c.project_set?"設定済み":'<span style="color:var(--fail)">未設定</span>');
+  });
+}
+function loadAiDefault(){
+  if(!_aiDefaultPrompt){ toast("既定文を取得できていません",true); return; }
+  if(!confirm("編集中の内容を既定文で置き換えます。よろしいですか？（保存するまで反映されません）")) return;
+  $("ai-prompt").value=_aiDefaultPrompt;
+}
+function previewAiPrompt(){
+  call("admin_previewAiPrompt",[($("ai-preview-contract")||{}).value||""],function(r){
+    if(!r) return;
+    $("ai-preview-box").style.display="";
+    $("ai-preview").textContent=r.text||"";
+    toast("プレビュー："+(r.length||0)+"字（対象原作 "+((r.works||[]).join("、")||"—")+"）");
+  });
+}
+function saveAiConfig(){
+  var p=($("ai-prompt")||{}).value||"";
+  if(!p.trim()){ toast("プロンプトが空です",true); return; }
+  call("admin_saveAiConfig",[{prompt:p, version_label:($("ai-version_label")||{}).value||""}],function(r){
+    toast("プロンプトを保存しました（版 "+((r&&r.effective_version)||"")+"）");
+    if(r&&r.warnings&&r.warnings.length) toast(r.warnings.join(" ／ "), true);
+    loadAiConfig();
+  });
+}
+
 // ---- 締結後の手続き案内・振込先 ----
 var GC_FIELDS=["bank_name","branch","account_type","account_number","account_holder","holder_kana","note","office_contact","workflow_url","office_email_domain",
   "mail_from_name","mail_reply_to","guide_email_subject","guide_email_body"];
