@@ -27,7 +27,8 @@ ok(!/function setup_/.test(p),               'portal に setup_ 関数が含ま�
 ok(!/function doPost/.test(p),               'portal に doPost（Webhook受け口）が無い');
 ok(!/function issueToken_/.test(p),          'portal にトークン発行が無い');
 ok(!/function receiveWebhook_/.test(p),      'portal にWebhook処理が無い');
-ok(/function web_createApplication/.test(p), 'portal に申込作成がある');
+ok(/function web_createApplicationV4/.test(p), 'portal に申込作成（v4）がある');
+ok(!/function web_createApplication\(/.test(p), 'portal に旧申込API（web_createApplication）が残っていない');
 // workflow（匿名公開・トークン/Webhook防御）
 ok(!/function admin_/.test(w),               'workflow に admin_ 関数が含まれない');
 ok(!/function setup_bootstrap/.test(w),      'workflow に setup_bootstrap（台帳作り直し）が無い');

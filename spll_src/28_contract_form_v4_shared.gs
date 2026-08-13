@@ -123,6 +123,14 @@ function decideContractRouteV4_(ctx){
   if(/イベント|EVENT/i.test(String(ctx.usageCategory||''))) reasons.push('イベント利用は制度条件の個別確認が必要');
   if(/その他|OTHER/i.test(String(ctx.usageCategory||''))) reasons.push('利用目的がその他');
   if((ctx.workIds || []).length > formMaxWorks_()) reasons.push('対象原作数が上限超過');
+  // クレジット・原作名が契約書テンプレートの差込枠を超える場合（既定400字）
+  if(ctx.workIds && ctx.workIds.length){
+    const master = readRows_(ssMaster_(),'Works_Master');
+    const creditLen = ctx.workIds.map(function(id){
+      const w = master.find(function(x){ return String(x.work_id) === String(id); });
+      return w ? (String(w.credit_text||'') + String(w.work_name||'')) : ''; }).join('').length;
+    if(creditLen > (num_(getConfig_('CS_CREDIT_MAX_CHARS','400')) || 400)) reasons.push('クレジット表記が上限超過');
+  }
   if(ctx.isMinor) reasons.push('未成年');
   if(ctx.isOverseas) reasons.push('海外居住');
   if(ctx.hasSpecialTerms) reasons.push('特約あり');

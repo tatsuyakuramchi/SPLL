@@ -934,14 +934,12 @@ function admin_createReplacementApplication(applicationId, reason){
   const handoff = makeHandoffToken_(newId, newRef, workIds, old.usage_category, newTermsHash, handoffExpires);
   logEvent_('application', newId, actor.email, null,
     { replacement_of: old.application_id, reason:String(reason), application_ref:newRef, license_id:newLicenseId });
-  // 経路・フォームURLはv4申込ならv4判定を使う（法人・イベント等はMANUAL_REVIEWへ）
-  const isV4 = /^v4:/.test(String(newTermsHash || '')) && typeof decideContractRouteV4_ === 'function';
-  const route = isV4
-    ? decideContractRouteV4_({ usageCategory: old.usage_category, workIds: workIds, partyType:(kaseOld && kaseOld.party_type) || '' }).route
-    : decideContractRoute_({ usageCategory: old.usage_category, workIds: workIds }).route;
+  // 経路・フォームURLはv4判定に一本化（旧申込APIは廃止済み。法人・イベント等はMANUAL_REVIEWへ）
+  const route = decideContractRouteV4_({ usageCategory: old.usage_category, workIds: workIds,
+    partyType:(kaseOld && kaseOld.party_type) || '' }).route;
   return { application_id:newId, application_ref:newRef, license_id:newLicenseId, handoff_token:handoff,
     terms_snapshot_hash: newTermsHash, template_route: route, form_fields: newFormFields || undefined,
-    form_url: isV4 ? partyFormUrlV4_((kaseOld && kaseOld.party_type) || '', route) : routeFormUrl_(route) };
+    form_url: partyFormUrlV4_((kaseOld && kaseOld.party_type) || '', route) };
 }
 /** CloudSignテンプレート・フォームURLの版管理（§10.11）。Configで経路別に保持。 */
 const CS_TEMPLATE_ROUTES = ['STANDARD_FIXED','STANDARD_RATE','MANUAL_REVIEW'];

@@ -476,7 +476,7 @@ const DEFAULT_TERMS_TEMPLATE=`
 <h4>第7条（準拠法・管轄）</h4><ol><li>日本法に準拠し、当社所在地を管轄する裁判所を専属的合意管轄とします。</li></ol>`;
 
 let LEGAL = { privacy: DEFAULT_PRIVACY, termsTemplate: DEFAULT_TERMS_TEMPLATE };
-let LEGAL_META = { privacy_doc_id:"", terms_doc_id:"", privacy_version:"", terms_version:"" };
+let LEGAL_META = { privacy_doc_id:"", terms_doc_id:"", guideline_doc_id:"", privacy_version:"", terms_version:"", guideline_version:"" };
 const CONSENT_SESSION_ID = "cs-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2,10);
 function fnv1a(s){ let h=0x811c9dc5; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=(h*0x01000193)>>>0; } return ("0000000"+h.toString(16)).slice(-8); }
 function displayHash(){ return "fnv1a:" + fnv1a(String(LEGAL.privacy)) + "-" + fnv1a(String(LEGAL.termsTemplate)); }
@@ -577,14 +577,14 @@ function submitApplication(){
   const ids=cart.slice();
   const params={ workIds:ids, usageCategory:selectedUsage,
     partyType:(document.getElementById("partySel")||{}).value||"INDIVIDUAL",
-    privacyConsent:true, termsConsent:true,                       // チェックボックスは updateGates で担保済み
-    privacyDocumentId:LEGAL_META.privacy_doc_id, termsDocumentId:LEGAL_META.terms_doc_id,
+    privacyConsent:true, guidelineConsent:true,                   // チェックボックスは updateGates で担保済み
+    privacyDocumentId:LEGAL_META.privacy_doc_id, guidelineDocumentId:LEGAL_META.guideline_doc_id,
     consentSessionId:CONSENT_SESSION_ID, displayHash:displayHash() };
   if(hasGas){
     google.script.run
       .withSuccessHandler(res=>onCreated(res))
       .withFailureHandler(err=>{ btn.disabled=false; btn.textContent="申込を作成してクラウドサインへ進む →"; alert("申込の作成に失敗しました：\n"+(err&&err.message||err)); })
-      .web_createApplication(params);
+      .web_createApplicationV4(params);
   } else {
     // standalone mock
     const ym=new Date(); const mm=(""+ym.getFullYear()+String(ym.getMonth()+1).padStart(2,"0")).slice(2);

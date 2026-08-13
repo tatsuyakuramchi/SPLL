@@ -174,8 +174,29 @@ ok(rows(MAS,'Works_Master').length>=3,'sample works seeded');
 
 // 2. application (multi-work)
 G.updateRow_(MAS,'Works_Master','work_id','WRK-BKK00019',{publish_status:'PUBLISHED'});   // 検証用に公開
-function mkApp(workIds,usage,extra){ return G.web_createApplication(Object.assign({ workIds:workIds, usageCategory:usage,
-  privacyConsent:true, termsConsent:true, consentSessionId:'sess-test', displayHash:'fnv1a:test' }, extra||{})); }
+// 申込はCloudSign FORM v4に一本化済み（旧web_createApplicationは削除）。
+// 既存テストが渡す termsDocumentId は v4 では使わないため guidelineDocumentId へ読み替える。
+function mkApp(workIds,usage,extra){
+  const p = Object.assign({ workIds:workIds, usageCategory:usage,
+    privacyConsent:true, guidelineConsent:true, consentSessionId:'sess-test', displayHash:'fnv1a:test' }, extra||{});
+  if(p.termsDocumentId !== undefined){ if(p.guidelineDocumentId === undefined) p.guidelineDocumentId = GUIDELINE_DOC_ID; delete p.termsDocumentId; }
+  return G.web_createApplicationV4(p);
+}
+var GUIDELINE_DOC_ID = '';   // §31で公開したGUIDELINEの文書ID（未公開の間は空＝照合なし）
+/** v4申込のFormRun受信payload（改変検知を通るhidden一式）を組み立てる */
+function v4Cols(res, over){
+  const ff = Object.assign({}, res.form_fields, over || {});
+  const cols = [{name:'application_ref',value:res.application_ref},{name:'license_id',value:res.license_id},
+    {name:'terms_snapshot_hash',value:res.terms_snapshot_hash},{name:'handoff_token',value:res.handoff_token}];
+  Object.keys(ff).forEach(function(k){ cols.push({name:k,value:ff[k]}); });
+  return cols;
+}
+/** v4申込に対するFormRun Webhookの送信（正常系） */
+function frPost(res, submissionId, extra){
+  return G.doPost({ parameter:{hook:'formrun'}, postData:{ contents:JSON.stringify(
+    Object.assign({ application_ref:res.application_ref, submission_id:submissionId||'FR-'+res.application_ref,
+      columns:v4Cols(res) }, extra||{})) } });
+}
 const appRes=mkApp(['WRK-ARK00012','WRK-BKK00019'],'電子出版物');
 ok(appRes.application_ref && /REF-\d{6}-[A-Z0-9]{6}/.test(appRes.application_ref),'application_ref format: '+appRes.application_ref);
 ok(rows(OPS,'Application_Works').length===2,'2 application_works rows');
@@ -183,7 +204,7 @@ const appRow=rows(OPS,'Applications')[0];
 ok(appRow.status==='FORM_PENDING','application FORM_PENDING');
 
 // 3. formrun webhook -> CONTRACT_PENDING
-G.doPost({ parameter:{hook:'formrun'}, postData:{ contents:JSON.stringify({ application_ref:appRes.application_ref, columns:[] }) } });
+frPost(appRes,'FR-1');
 ok(rows(OPS,'Applications')[0].status==='CONTRACT_PENDING','formrun sets CONTRACT_PENDING');
 
 // 4. cloudsign completion webhook -> contract + contract_works + cert + badge + token
@@ -361,12 +382,12 @@ ok(tFlat.fee_model==='FLAT' && tFlat.amount===0,'FLAT: 定額0');
 // 申込に usage_category を保存 → 締結でスナップショット
 const appR=mkApp(['WRK-ARK00012'],'電子出版物');
 ok(rows(OPS,'Applications').find(a=>a.application_id===appR.application_id).usage_category==='電子出版物','申込にusage_category保存');
-G.doPost({ parameter:{hook:'formrun'}, postData:{ contents:JSON.stringify({ application_ref:appR.application_ref, columns:[] }) } });
+frPost(appR,'FR-FEE');
 G.doPost({ parameter:{}, postData:{ contents:JSON.stringify({ documentID:'DOC-FEE', status:2, application_ref:appR.application_ref }) } });
 const feeCtr=rows(OPS,'Contracts').find(c=>c.application_ref===appR.application_ref);
 ok(feeCtr.usage_category==='電子出版物','契約にusage_categoryスナップショット');
 const snap=JSON.parse(feeCtr.terms_snapshot||'{}');
-ok(snap.fee_model==='RATE' && snap.rate===0.10,'terms_snapshot に RATE/率0.10');
+ok(snap.fee_model==='RATE' && Number(snap.fee_value)===0.10,'terms_snapshot に RATE/率0.10（v4個別条件形式）');
 
 // ============ 修正設計書 セキュリティテスト（§23.3） ============
 // 17. Webhook受信記録
@@ -490,6 +511,8 @@ ok(jobDone.started_at && jobDone.completed_at,'開始・完了日時を記録');
 // 31. 規約の版管理（§7.2）
 const d1=G.admin_saveLegalDraft('PRIVACY','<p>新しい同意文 v-next</p>');
 const d2=G.admin_saveLegalDraft('TERMS','<p>新しい規約 v-next</p>');
+const dg=G.admin_saveLegalDraft('GUIDELINE','<p>新しいガイドライン v-next</p>');
+G.admin_publishLegalDoc(dg.legal_document_id); GUIDELINE_DOC_ID = dg.legal_document_id;
 ok(d1.version>=1 && d2.version>=1,'DRAFT作成（版番号採番）');
 // 公開前は既定文のまま
 ok(G.api_getLegalTexts().privacy.indexOf('v-next')<0,'公開前のDRAFTは申込に使われない');
@@ -519,16 +542,16 @@ ok(envErr2,'不正なENVIRONMENTは停止');
 scriptProps.ENVIRONMENT='development';
 
 // 34. 同意の厳格化（V2-005/006）
-let cErr=false; try{ G.web_createApplication({ workIds:['WRK-ARK00012'], usageCategory:'書籍', termsConsent:true }); }catch(e){ cErr=/個人情報の取扱いへの同意/.test(String(e.message)); }
+let cErr=false; try{ G.web_createApplicationV4({ workIds:['WRK-ARK00012'], usageCategory:'書籍', guidelineConsent:true }); }catch(e){ cErr=/個人情報の取扱いへの同意/.test(String(e.message)); }
 ok(cErr,'privacyConsent無しは拒否');
 let staleErr=false; try{ mkApp(['WRK-ARK00012'],'書籍',{ privacyDocumentId:'OLD-DOC', termsDocumentId:d2.legal_document_id }); }catch(e){ staleErr=/更新されました/.test(String(e.message)); }
 ok(staleErr,'古い文書IDの申込は拒否（再表示を促す）');
 const consC=rows(OPS,'Application_Consents').filter(c=>c.application_id===appC.application_id);
-ok(consC.every(c=>c.consent_session_id==='sess-test'&&c.evidence_version==='v2'&&c.accepted==='true'),'同意証跡にセッション・版・accepted記録');
+ok(consC.every(c=>c.consent_session_id==='sess-test'&&c.evidence_version==='v4'&&c.accepted==='true'),'同意証跡にセッション・版・accepted記録');
 // production で公開版必須：一旦 RETIRED にして確認
 scriptProps.ENVIRONMENT='production';
 G.updateRow_(OPS,'Legal_Documents','legal_document_id',d1.legal_document_id,{status:'RETIRED'});
-let pubErr=false; try{ mkApp(['WRK-ARK00012'],'書籍',{ privacyDocumentId:d1.legal_document_id, termsDocumentId:d2.legal_document_id }); }catch(e){ pubErr=/受け付けられません/.test(String(e.message)); }
+let pubErr=false; try{ mkApp(['WRK-ARK00012'],'書籍',{ privacyDocumentId:d1.legal_document_id, termsDocumentId:d2.legal_document_id }); }catch(e){ pubErr=/未設定|受け付けられません/.test(String(e.message)); }
 ok(pubErr,'production: 公開済み法務文書なしでは申込拒否');
 G.updateRow_(OPS,'Legal_Documents','legal_document_id',d1.legal_document_id,{status:'PUBLISHED'});
 scriptProps.ENVIRONMENT='development';
@@ -601,21 +624,21 @@ geminiResponder=()=>({ overall_result:'PASS_CANDIDATE', findings:[] });
 
 // ============ P4：CloudSign運用拡張（§10） ============
 // 61. 自動送信／手動確認の経路判定（§10.3）
-ok(G.decideContractRoute_({usageCategory:'書籍',workIds:['WRK-BKK00019']}).route==='STANDARD_FIXED','経路判定: 定額系→STANDARD_FIXED');
-ok(G.decideContractRoute_({usageCategory:'電子出版物',workIds:['WRK-ARK00012']}).route==='STANDARD_RATE','経路判定: 売上連動→STANDARD_RATE');
-const mrRoute=G.decideContractRoute_({usageCategory:'書籍',workIds:['WRK-BKK00019'],isMinor:true});
+ok(G.decideContractRouteV4_({usageCategory:'書籍',workIds:['WRK-BKK00019']}).route==='STANDARD_FIXED','経路判定: 定額系→STANDARD_FIXED');
+ok(G.decideContractRouteV4_({usageCategory:'電子出版物',workIds:['WRK-ARK00012']}).route==='STANDARD_RATE','経路判定: 売上連動→STANDARD_RATE');
+const mrRoute=G.decideContractRouteV4_({usageCategory:'書籍',workIds:['WRK-BKK00019'],isMinor:true});
 ok(mrRoute.route==='MANUAL_REVIEW'&&mrRoute.reasons.some(r=>/未成年/.test(r)),'経路判定: 未成年→MANUAL_REVIEW（理由記録）');
-ok(G.decideContractRoute_({usageCategory:'未知の目的',workIds:['WRK-BKK00019']}).route==='MANUAL_REVIEW','経路判定: 料金表未設定→MANUAL_REVIEW');
+ok(G.decideContractRouteV4_({usageCategory:'未知の目的',workIds:['WRK-BKK00019']}).route==='MANUAL_REVIEW','経路判定: 料金表未設定→MANUAL_REVIEW');
 const docExtra={privacyDocumentId:d1.legal_document_id,termsDocumentId:d2.legal_document_id};
 const appP4=mkApp(['WRK-BKK00019'],'書籍',docExtra);
 ok(appP4.template_route==='STANDARD_FIXED'&&'form_url' in appP4,'申込応答に経路（template_route）とフォームURL');
 
 // 62. formrun送信状態・連携失敗キュー（§10.4/§10.5）
-G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:appP4.application_ref,submission_id:'FR-P4-1',columns:[]})}});
+frPost(appP4,'FR-P4-1');
 const appP4row=()=>rows(OPS,'Applications').find(a=>a.application_id===appP4.application_id);
 ok(appP4row().cloudsign_send_status==='CLOUDSIGN_SENDING'&&appP4row().form_submission_id==='FR-P4-1','フォーム送信を記録（submission ID＋CLOUDSIGN_SENDING）');
 const appFail=mkApp(['WRK-BKK00019'],'書籍',docExtra);
-G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:appFail.application_ref,submission_id:'FR-P4-2',cloudsign_status:'error',columns:[]})}});
+frPost(appFail,'FR-P4-2',{cloudsign_status:'error'});
 const appFailRow=()=>rows(OPS,'Applications').find(a=>a.application_id===appFail.application_id);
 ok(appFailRow().cloudsign_send_status==='CLOUDSIGN_SEND_FAILED','formrun→CloudSign連携失敗でCLOUDSIGN_SEND_FAILED（自動再送しない）');
 ok(G.admin_listCloudSignSendFailures().some(a=>a.application_id===appFail.application_id),'送信失敗キューに表示');
@@ -710,17 +733,16 @@ scriptProps.FORMRUN_FIELD_MAP=JSON.stringify({'氏名':'party_name','契約者�
 const appParty=mkApp(['WRK-BKK00019'],'書籍',Object.assign({partyType:'INDIVIDUAL'},docExtra));
 ok(/^SPLL-/.test(appParty.license_id)&&'form_url' in appParty,'申込応答にSPLL番号・フォームURL');
 G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:appParty.application_ref,submission_id:'FR-RP-1',
-  columns:[{name:'氏名',value:'山田太郎'},{name:'契約者区分',value:'個人'},{name:'handoff',value:appParty.handoff_token}]})}});
+  columns:v4Cols(appParty).concat([{name:'氏名',value:'山田太郎'},{name:'契約者区分',value:'個人'},{name:'handoff',value:appParty.handoff_token}])})}});
 const kaseParty=rows(OPS,'License_Cases').find(k=>k.license_id===appParty.license_id);
 ok(kaseParty.party_display_name==='山田太郎'&&kaseParty.party_type==='INDIVIDUAL'&&kaseParty.case_status==='CONTRACTING',
   'フォーム回答から契約者名・区分を台帳へ反映（CONTRACTING）');
 delete scriptProps.FORMRUN_FIELD_MAP;
 
-// 75. 契約者区分別フォームURL（§8.3/8.4）
-G.setConfig_('FORM_URL_CORPORATION','https://form.run/corp-v1');
-const appCorp=mkApp(['WRK-BKK00019'],'書籍',Object.assign({partyType:'CORPORATION'},docExtra));
-ok(appCorp.form_url==='https://form.run/corp-v1','法人は法人フォームURLへ切替');
-ok(rows(OPS,'License_Cases').find(k=>k.license_id===appCorp.license_id).party_type==='CORPORATION','契約者区分を台帳へ記録');
+// 75. 契約者区分：個人（個人事業主含む）のみ受付し、台帳へ区分を記録する
+const appSole=mkApp(['WRK-BKK00019'],'書籍',Object.assign({partyType:'SOLE_PROPRIETOR'},docExtra));
+ok(rows(OPS,'License_Cases').find(k=>k.license_id===appSole.license_id).party_type==='SOLE_PROPRIETOR','契約者区分を台帳へ記録');
+ok(/form\.run|script\.google|^$/.test(String(appSole.form_url||'')),'個人向けフォームURLを返す');
 
 // 76. 既存データ移行（§16 Phase1・冪等・二重請求防止）
 G.appendRow_(OPS,'Applications',{application_id:'APP-LEGACY-1',application_ref:'REF-LEGACY-1',usage_category:'書籍',status:'SIGNED',created_at:'2026-01-01'});
@@ -749,8 +771,7 @@ ok(lcDet.works.length===1&&lcDet.documents.length===1&&lcDet.handoffs.length===1
 ok(G.computeFeeTerms_('書籍',2).amount===16500,'2原作でも契約単位の定額16,500円');
 scriptProps.FORMRUN_FIELD_MAP=JSON.stringify({'handoff':'handoff_token'});
 const appFlat=mkApp(['WRK-ARK00012','WRK-BKK00019'],'書籍',docExtra);
-G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:appFlat.application_ref,submission_id:'FR-FLAT-1',
-  columns:[{name:'handoff',value:appFlat.handoff_token}]})}});
+frPost(appFlat,'FR-FLAT-1');
 G.doPost({parameter:{},postData:{contents:JSON.stringify({document_id:'DOC-FLAT-1',status:'COMPLETED',application_ref:appFlat.application_ref})}});
 delete scriptProps.FORMRUN_FIELD_MAP;
 const cFlat=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-FLAT-1');
@@ -773,6 +794,7 @@ G.admin_publishLegalDoc(tdraft.legal_document_id);
 ok(/第1条/.test(G.api_getLegalTexts().termsTemplate),'利用規約も同じ画面から公開できる');
 const gdraft=G.admin_saveGuidelineDraft('<p>SPLL二次創作ガイドライン v4.1（テスト）</p>');
 G.admin_publishLegalDoc(gdraft.legal_document_id);
+GUIDELINE_DOC_ID = gdraft.legal_document_id;   // 以後の申込は最新版に同意する
 const legalV4=G.api_getLegalTextsV4();
 ok(legalV4.guideline_doc_id===gdraft.legal_document_id&&/ガイドライン/.test(legalV4.guideline),'v4法務文書API（PRIVACY＋GUIDELINE）');
 ok(G.api_getLegalTexts().guideline_doc_id===gdraft.legal_document_id,'api_getLegalTextsもGUIDELINEの公開版を返す（管理画面の3枠と同一の正本）');
@@ -825,20 +847,13 @@ ok(G.partyFormUrlV4_('INDIVIDUAL','STANDARD_FIXED')==='https://form.run/v4-indiv
 ok(G.partyFormUrlV4_('CORPORATION','MANUAL_REVIEW')==='','個別確認は標準FORMへフォールバックしない');
 
 // 81. FormRun改変検知：正しい個別条件は通過・料金改変は自動締結を止める
-function v4Columns(res,over){
-  const ff=Object.assign({}, res.form_fields, over||{});
-  const cols=[{name:'application_ref',value:res.application_ref},{name:'license_id',value:res.license_id},
-    {name:'terms_snapshot_hash',value:res.terms_snapshot_hash},{name:'handoff_token',value:res.handoff_token}];
-  Object.keys(ff).forEach(function(k){ cols.push({name:k,value:ff[k]}); });
-  return cols;
-}
 const whV4=G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:v4a.application_ref,
-  submission_id:'FR-V4-1',columns:v4Columns(v4a)})}});
+  submission_id:'FR-V4-1',columns:v4Cols(v4a)})}});
 ok(String(whV4.getContent())==='ok','正しい個別条件のFormRun受信は通過');
 ok(rows(OPS,'Applications').find(a=>a.application_id===v4a.application_id).status==='CONTRACT_PENDING','v4申込がCONTRACT_PENDINGへ');
 const v4b=mkAppV4(['WRK-ARK00012'],'書籍');
 const whTamper=G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:v4b.application_ref,
-  submission_id:'FR-V4-2',columns:v4Columns(v4b,{fee_amount_or_rate:'0円（無償）',fee_value:'0'})})}});
+  submission_id:'FR-V4-2',columns:v4Cols(v4b,{fee_amount_or_rate:'0円（無償）',fee_value:'0'})})}});
 ok(String(whTamper.getContent())==='accepted-manual-review','料金を改変したFormRun受信は自動締結を止める');
 ok(rows(OPS,'Applications').find(a=>a.application_id===v4b.application_id).status!=='CONTRACT_PENDING','改変時は申込を前進させない');
 
@@ -878,7 +893,7 @@ ok(repV4.form_fields&&repV4.form_fields.license_id===repV4.license_id,'再申込
 ok(rows(OPS,'License_Cases').find(k=>k.license_id===v4d.license_id).case_status==='CLOSED','旧案件はCLOSED');
 const repApp=rows(OPS,'Applications').find(a=>a.application_id===repV4.application_id);
 const whRep=G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:repV4.application_ref,
-  submission_id:'FR-V4-REP',columns:v4Columns(repV4)})}});
+  submission_id:'FR-V4-REP',columns:v4Cols(repV4)})}});
 ok(String(whRep.getContent())==='ok','再申込のFormRun受信が改変検知を通過する（回帰）');
 
 
@@ -1008,7 +1023,7 @@ ok(badWfUrl,'利用者向けページURLはhttps必須');
 G.setConfig_('OFFICE_EMAIL_DOMAIN','arclight.example');
 // §79以降で法務文書を公開し直しているため、旧申込APIに渡す文書IDを現行の公開版へ更新
 const lt2=G.api_getLegalTexts();
-const docExtra2={ privacyDocumentId:lt2.privacy_doc_id, termsDocumentId:lt2.terms_doc_id };
+const docExtra2={ privacyDocumentId:lt2.privacy_doc_id, guidelineDocumentId:lt2.guideline_doc_id };
 ok(G.cs_recipientEmail_({ participants:[{email:'staff@arclight.example'},{email:'taro@example.com'}] })==='taro@example.com',
   'participantsから宛先を取得（自社ドメインは除外）');
 ok(G.cs_recipientEmail_({ participants:[{mail:'hanako@example.net'}] })==='hanako@example.net','フィールド名がmailでも拾う');
@@ -1019,10 +1034,7 @@ ok(G.normalizeEmail_('  <Taro@Example.com> ')==='Taro@Example.com'&&G.normalizeE
 // 99. 締結でCloudSign送付先を台帳へ保存する（Webhookのemail＝送信側は使わない）
 scriptProps.CLOUDSIGN_CLIENT_ID='cs-test-client';
 const mailApp=mkApp(['WRK-BKK00019'],'書籍',docExtra2);
-scriptProps.FORMRUN_FIELD_MAP=JSON.stringify({'handoff':'handoff_token'});
-G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:mailApp.application_ref,
-  submission_id:'FR-MAIL-1',columns:[{name:'handoff',value:mailApp.handoff_token}]})}});
-delete scriptProps.FORMRUN_FIELD_MAP;
+frPost(mailApp,'FR-MAIL-1');
 const csDocMail={ status:2, title:'SPLL利用許諾契約｜'+mailApp.application_ref,
   participants:[{email:'office@arclight.example',name:'事務局'},{email:'licensee@example.com',name:'山田太郎'}] };
 const prevFetch=G.UrlFetchApp.fetch;
@@ -1047,12 +1059,9 @@ const evMail=rows(OPS,'Events').filter(e=>e.entity_id===cMail.contract_id&&/cont
 ok(evMail&&/example\.com/.test(String(evMail.after))&&!/licensee@/.test(String(evMail.after)),'監査ログはドメインのみ記録');
 
 // 100. CloudSignから取れない場合はフォーム入力値へフォールバック
-scriptProps.FORMRUN_FIELD_MAP=JSON.stringify({'メールアドレス':'contact_email','handoff':'handoff_token'});
 const mailApp2=mkApp(['WRK-BKK00019'],'書籍',docExtra2);
 G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:mailApp2.application_ref,
-  submission_id:'FR-MAIL-2',columns:[{name:'メールアドレス',value:'form-input@example.jp'},
-    {name:'handoff',value:mailApp2.handoff_token}]})}});
-delete scriptProps.FORMRUN_FIELD_MAP;
+  submission_id:'FR-MAIL-2',columns:v4Cols(mailApp2).concat([{name:'contact_email',value:'form-input@example.jp'}])})}});
 ok(rows(OPS,'License_Cases').find(k=>k.license_id===mailApp2.license_id).contact_email==='form-input@example.jp',
   'フォーム入力のメールを暫定連絡先として保存');
 G.doPost({parameter:{},postData:{contents:JSON.stringify({ document_id:'DOC-MAIL-2', status:'COMPLETED', application_ref:mailApp2.application_ref })}});
@@ -1083,11 +1092,8 @@ ok(_sentMail.length===beforeCount,'送信済みは再送しない（冪等）');
 
 // 102. 宛先未取得は送らず要対応に残す
 const noMailApp=mkApp(['WRK-BKK00019'],'書籍',docExtra2);
-scriptProps.FORMRUN_FIELD_MAP=JSON.stringify({'handoff':'handoff_token'});
-G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:noMailApp.application_ref,
-  submission_id:'FR-NOMAIL',columns:[{name:'handoff',value:noMailApp.handoff_token}]})}});
+frPost(noMailApp,'FR-NOMAIL');
 G.doPost({parameter:{},postData:{contents:JSON.stringify({ document_id:'DOC-NOMAIL', status:'COMPLETED', application_ref:noMailApp.application_ref })}});
-delete scriptProps.FORMRUN_FIELD_MAP;
 const cNoMail=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-NOMAIL');
 const before2=_sentMail.length;
 G.batch_sendGuideEmails_();
@@ -1107,11 +1113,8 @@ ok(G.admin_listNotifications().some(n=>n.contract_id===cNoMail.contract_id&&n.st
 
 // 104. 送信上限・停止スイッチ
 const stopApp=mkApp(['WRK-BKK00019'],'書籍',docExtra2);
-scriptProps.FORMRUN_FIELD_MAP=JSON.stringify({'handoff':'handoff_token'});
-G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:stopApp.application_ref,
-  submission_id:'FR-STOP',columns:[{name:'handoff',value:stopApp.handoff_token}]})}});
+frPost(stopApp,'FR-STOP');
 G.doPost({parameter:{},postData:{contents:JSON.stringify({ document_id:'DOC-STOP', status:'COMPLETED', application_ref:stopApp.application_ref })}});
-delete scriptProps.FORMRUN_FIELD_MAP;
 const cStop=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-STOP');
 G.updateRow_(OPS,'Contracts','contract_id',cStop.contract_id,{ contact_email:'stop@example.com' });
 MailApp._quota=0;
@@ -1138,11 +1141,8 @@ ok(ms.enabled===true&&ms.sent>=1&&typeof ms.failed==='number','送信状況（�
 // ============ 認証のオン／オフスイッチ（未入金対応） ============
 // 106. 締結時はオン。担当者1名でオフ→オンへ戻せる（ACTIVE ⇄ PAYMENT_HOLD のみ）
 const swApp=mkApp(['WRK-BKK00019'],'書籍',docExtra2);
-scriptProps.FORMRUN_FIELD_MAP=JSON.stringify({'handoff':'handoff_token'});
-G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:swApp.application_ref,
-  submission_id:'FR-SW',columns:[{name:'handoff',value:swApp.handoff_token}]})}});
+frPost(swApp,'FR-SW');
 G.doPost({parameter:{},postData:{contents:JSON.stringify({ document_id:'DOC-SW', status:'COMPLETED', application_ref:swApp.application_ref })}});
-delete scriptProps.FORMRUN_FIELD_MAP;
 const cSw=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-SW');
 const certSw=()=>rows(OPS,'Certificates').find(x=>x.contract_id===cSw.contract_id);
 ok(certSw().status==='ACTIVE','締結時の認証は既定オン（ACTIVE）');

@@ -418,3 +418,24 @@ CloudSign公式案内では、CloudSign FORM powered by formrunは、Webフォ�
 - `License_Cases.certification_status` も追随するため、一覧表示と実体がずれない
 - **失効（REVOKED）・契約終了（TERMINATED）とそこからの復帰は対象外**。従来どおり
   申請（`admin_requestCertChange`）→ 別担当者の承認（`admin_approveCertChange`）が必要
+
+---
+
+## 15. 旧申込APIの廃止（2026-08-13）
+
+`web_createApplication`（v3以前のポータル申込API）と、その付随処理を**コードごと削除**した。
+
+| 削除したもの | 置き換え |
+|---|---|
+| `web_createApplication` | `web_createApplicationV4` |
+| `partyFormUrl_` | `partyFormUrlV4_`（経路別URL優先・法人はMANUAL_REVIEW） |
+| `decideContractRoute_` / `routeFormUrl_` | `decideContractRouteV4_`（クレジット上限チェックを移植済み） |
+
+旧APIは**ガイドラインの確認取得と法人の個別契約ルート判定を持たない**ため、画面がv4でも
+APIを直接呼べば新方針を迂回して申込を作成できた。契約書v4.1（第3条1(1)・第3条4）で
+「個人であること」を表明保証させる以上、サーバー側に旧経路を残さない。
+
+`admin_createReplacementApplication`（訂正・再申込）も v4 判定へ一本化した。
+ポータルの `index.html` も `web_createApplicationV4` を直接呼ぶよう更新済み
+（`portal_contract_v4_patch.html` が無くても旧APIを参照しない）。
+`tests/sec01.js` に「portalに旧申込APIが残っていない」検査を追加している。
