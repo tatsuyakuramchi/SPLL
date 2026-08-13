@@ -26,7 +26,12 @@
     google.script.run.withSuccessHandler(function(l){
       if(!l) return;
       if(l.privacy) LEGAL.privacy = l.privacy;
-      if(l.guideline){ LEGAL.guideline = l.guideline; }
+      if(l.guideline){
+        LEGAL.guideline = l.guideline;
+        // 取得が表示より後になった場合に備え、既に開いている確認画面を描画し直す
+        const box = document.getElementById('termsText');
+        if(box) box.innerHTML = termsHTML();
+      }
       LEGAL_META.guideline_doc_id = l.guideline_doc_id || '';
       LEGAL_META.guideline_version = l.guideline_version || '';
       if(l.privacy_doc_id) LEGAL_META.privacy_doc_id = l.privacy_doc_id;

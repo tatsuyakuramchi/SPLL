@@ -747,12 +747,23 @@ function admin_createReplacementApplication(applicationId, reason){
   const newId = newId_('APP');
   const newRef = newRef_();
   const handoffExpires = addDaysIso_(14);
+  const workIdsNew = works.map(function(w){ return w.work_id; });
+  // RP-001：再申込も1案件＝1SPLL番号。旧caseは引き継がず新規採番（旧caseはCLOSEDへ）
+  const kaseOld = old.license_id ? readRows_(ssOps_(),'License_Cases').find(function(k){ return k.license_id === old.license_id; }) : null;
+  const newLicenseId = createLicenseCase_(newId, newRef, old.usage_category, workIdsNew, (kaseOld && kaseOld.party_type) || '');
+  if(old.license_id) updateLicenseCase_(old.license_id, { case_status:'CLOSED' });
+  // v4申込は個別条件ハッシュに license_id / application_ref を含むため、新番号で再計算する（旧ハッシュの流用は改変検知に必ず落ちる）
+  let newTermsHash = old.terms_hash, newFormFields = null;
+  if(/^v4:/.test(String(old.terms_hash || '')) && typeof contractFormFieldsV4_ === 'function'){
+    newFormFields = contractFormFieldsV4_(newId, newLicenseId, newRef, old.usage_category, workIdsNew);
+    newTermsHash = 'v4:' + contractFormHashV4_(newFormFields);
+  }
   appendRow_(ssOps_(),'Applications',{ application_id:newId, application_ref:newRef,
-    usage_category:old.usage_category, privacy_hash:old.privacy_hash, terms_hash:old.terms_hash,
+    usage_category:old.usage_category, privacy_hash:old.privacy_hash, terms_hash:newTermsHash,
     handoff_expires_at:handoffExpires, status:'FORM_PENDING', created_at:new Date().toISOString(),
     cloudsign_send_status:'MANUAL_SEND_REQUIRED',
     manual_review_reason:sanitizeCell_('再申込（訂正）: ' + reason),
-    supersedes_application_id: old.application_id });
+    supersedes_application_id: old.application_id, license_id: newLicenseId });
   works.forEach(function(w){ appendRow_(ssOps_(),'Application_Works',{
     application_work_id:newId_('AW'), application_id:newId, work_id:w.work_id }); });
   updateRow_(ssOps_(),'Applications','application_id',old.application_id,
@@ -761,12 +772,18 @@ function admin_createReplacementApplication(applicationId, reason){
   const oldContract = readRows_(ssOps_(),'Contracts').find(function(c){ return c.application_id === old.application_id; });
   if(oldContract) logEvent_('contract', oldContract.contract_id, actor.email, null,
     { note:'再申込により旧契約書類の取消/失効を要手続き', superseded_by_application:newId });
-  const workIds = works.map(function(w){ return w.work_id; });
-  const handoff = makeHandoffToken_(newId, newRef, workIds, old.usage_category, old.terms_hash, handoffExpires);
+  const workIds = workIdsNew;
+  const handoff = makeHandoffToken_(newId, newRef, workIds, old.usage_category, newTermsHash, handoffExpires);
   logEvent_('application', newId, actor.email, null,
-    { replacement_of: old.application_id, reason:String(reason), application_ref:newRef });
-  return { application_id:newId, application_ref:newRef, handoff_token:handoff,
-    form_url: routeFormUrl_(decideContractRoute_({ usageCategory: old.usage_category, workIds: workIds }).route) };
+    { replacement_of: old.application_id, reason:String(reason), application_ref:newRef, license_id:newLicenseId });
+  // 経路・フォームURLはv4申込ならv4判定を使う（法人・イベント等はMANUAL_REVIEWへ）
+  const isV4 = /^v4:/.test(String(newTermsHash || '')) && typeof decideContractRouteV4_ === 'function';
+  const route = isV4
+    ? decideContractRouteV4_({ usageCategory: old.usage_category, workIds: workIds, partyType:(kaseOld && kaseOld.party_type) || '' }).route
+    : decideContractRoute_({ usageCategory: old.usage_category, workIds: workIds }).route;
+  return { application_id:newId, application_ref:newRef, license_id:newLicenseId, handoff_token:handoff,
+    terms_snapshot_hash: newTermsHash, template_route: route, form_fields: newFormFields || undefined,
+    form_url: isV4 ? partyFormUrlV4_((kaseOld && kaseOld.party_type) || '', route) : routeFormUrl_(route) };
 }
 /** CloudSignテンプレート・フォームURLの版管理（§10.11）。Configで経路別に保持。 */
 const CS_TEMPLATE_ROUTES = ['STANDARD_FIXED','STANDARD_RATE','MANUAL_REVIEW'];

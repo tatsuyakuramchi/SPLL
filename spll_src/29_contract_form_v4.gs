@@ -12,10 +12,15 @@ function api_getLegalTextsV4(){
   };
 }
 
-/** MANUAL_REVIEWは標準CloudSign FORMへフォールバックさせない。 */
+/**
+ * MANUAL_REVIEWは標準CloudSign FORMへフォールバックさせない。
+ * 経路別URL（FORM_URL_STANDARD_FIXED / _STANDARD_RATE）を最優先する：定額と売上連動で
+ * CloudSignテンプレートが異なるため、個人共通URLで上書きすると誤ったテンプレートが送付される。
+ * partyType は現行制度では個人のみ標準対象（法人はdecideContractRouteV4_でMANUAL_REVIEW）。
+ */
 function partyFormUrlV4_(partyType, route){
   if(route === 'MANUAL_REVIEW') return getConfig_('FORM_URL_MANUAL_REVIEW','');
-  return getConfig_('FORM_URL_INDIVIDUAL','') || getConfig_('FORM_URL_' + route,'') || prop_('FORMRUN_FORM_URL') || '';
+  return getConfig_('FORM_URL_' + route,'') || getConfig_('FORM_URL_INDIVIDUAL','') || prop_('FORMRUN_FORM_URL') || '';
 }
 
 /**

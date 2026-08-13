@@ -199,6 +199,17 @@ CloudSign上の受信者用フリーテキスト・押印欄・署名欄・チ�
 
 標準フォームURLへのフォールバックは行わない。
 
+### 7.1 標準経路のフォームURL解決順
+
+定額（`STANDARD_FIXED`）と売上連動（`STANDARD_RATE`）ではCloudSignテンプレートが異なるため、
+`partyFormUrlV4_` は次の順で解決する。
+
+1. `FORM_URL_<route>`（`FORM_URL_STANDARD_FIXED` / `FORM_URL_STANDARD_RATE`）
+2. `FORM_URL_INDIVIDUAL`（経路別未設定時の共通フォーム）
+3. `FORMRUN_FORM_URL`（旧設定の互換）
+
+経路別URLを設定した場合に共通URLで上書きされない順序とする（誤ったテンプレートの送付を防ぐため）。
+
 ---
 
 ## 8. コード構成
@@ -255,17 +266,19 @@ FormRun v4改変検知は `v4:` 申込だけに適用し、既存申込・既締
 
 本番切替前に、次を実施する。
 
-1. `GUIDELINE` v4.0を `Legal_Documents` にPUBLISHED登録
-2. CloudSignにv4.0契約書テンプレートを登録
+1. `GUIDELINE` v4.1を `Legal_Documents` にPUBLISHED登録（管理コンソール 設定→同意文・規約）
+2. CloudSignにv4.1契約書テンプレートを登録（定額用・売上連動用）
 3. FormRunの個人向けフォームを作成又は変更
 4. ユーザー入力項目を6項目前後へ縮小
 5. システム項目をhidden項目として追加
 6. FormRun項目とCloudSignテンプレート項目を連携
 7. `FORM_HIDDEN_MAP` を設定
 8. `FORMRUN_FIELD_MAP` を設定
-9. `FORM_URL_INDIVIDUAL` を設定
+9. `FORM_URL_STANDARD_FIXED` / `FORM_URL_STANDARD_RATE`（テンプレートが1種類なら `FORM_URL_INDIVIDUAL`）を設定
 10. 法人等の個別確認を使う場合のみ `FORM_URL_MANUAL_REVIEW` を設定
 11. stagingでFORM→CloudSign→Webhookの一連テストを行う
+12. 締結後に `Contracts.terms_snapshot` の `terms_snapshot_hash_verified` が `true` であることを確認する
+    （`false` の場合は個別条件を受信証跡から復元できておらず、TERMS_MISMATCHで自動有効化が止まる）
 
 ---
 

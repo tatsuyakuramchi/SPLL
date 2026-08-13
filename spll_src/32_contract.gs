@@ -100,6 +100,29 @@ function finishLicenseActivation_(contractId){
  * Finance_Handoffs（READY）へ置くだけ。取込・請求は経理側の独自運用で行う。
  * 冪等キー：license_id + handoff_version。
  */
+/**
+ * 経理引渡の請求条件を正規化する。terms_snapshot は契約書テンプレート版で構造が異なる
+ * （v4: fee_value ／ 旧: rate・amount）ため、経理側が単一の形で読めるよう揃える。
+ *   fee_model / rate（RATEのみ）/ amount（FLAT等のみ・税抜）/ fee_amount_or_rate（表示文言）
+ * 元のスナップショットは source_terms として保持し、契約書との突合に使えるようにする。
+ */
+function billingTerms_(termsSnapshotJson){
+  let t = {}; try{ t = JSON.parse(termsSnapshotJson || '{}') || {}; }catch(e){ t = {}; }
+  const model = String(t.fee_model || '').toUpperCase();
+  let rate = (t.rate === undefined || t.rate === null || t.rate === '') ? null : num_(t.rate);
+  let amount = (t.amount === undefined || t.amount === null || t.amount === '') ? null : num_(t.amount);
+  if(t.fee_value !== undefined && t.fee_value !== null && String(t.fee_value) !== ''){
+    if(model === 'RATE' && rate === null) rate = num_(t.fee_value);
+    if(model !== 'RATE' && amount === null) amount = num_(t.fee_value);
+  }
+  return { fee_model: model, rate: rate, amount: amount,
+    fee_amount_or_rate: String(t.fee_amount_or_rate || ''),
+    payment_terms: String(t.payment_terms || t.payment_due || ''),
+    reporting_terms: String(t.reporting_terms || t.reporting_requirement || ''),
+    contract_template_version: String(t.contract_template_version || ''),
+    terms_snapshot_hash: String(t.terms_snapshot_hash || ''),
+    source_terms: t };
+}
 function createFinanceHandoff_(contractId){
   const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === contractId; });
   if(!c) return null;
@@ -117,7 +140,7 @@ function createFinanceHandoff_(contractId){
     handoff_id: handoffId, license_id: licenseId, handoff_version: version,
     signed_at: c.signed_at || '', party_display_name: kase.party_display_name || '',
     usage_category: c.usage_category || '', works_snapshot_json: JSON.stringify(works),
-    billing_terms_json: c.terms_snapshot || '{}', contract_status: 'ACTIVE',
+    billing_terms_json: JSON.stringify(billingTerms_(c.terms_snapshot)), contract_status: 'ACTIVE',
     status: 'READY', created_at: new Date().toISOString(), accepted_at: '',
   });
   updateLicenseCase_(licenseId, { finance_handoff_status:'READY' });

@@ -217,9 +217,15 @@ function processCloudSignEvent_(body, e){
  */
 function processFormrunEvent_(body){
   body = body || {};
-  const map  = parseJson_(prop_('FORMRUN_FIELD_MAP'), {});
-  const canon = {};
-  (body.columns || []).forEach(function(c){ const k = map[c.name || c.label]; if(k) canon[k] = c.value; });
+  // 正規化はv4ガードと同一ロジックを使う（ガードは通るのに本処理でrefやhandoffを拾えない、を防ぐ）
+  let canon;
+  if(typeof formrunCanonV4_ === 'function'){
+    canon = formrunCanonV4_(body);
+  }else{
+    const map = parseJson_(prop_('FORMRUN_FIELD_MAP'), {});
+    canon = {};
+    (body.columns || []).forEach(function(c){ const k = map[c.name || c.label]; if(k) canon[k] = c.value; });
+  }
   const ref = canon.application_ref || refFromText_(JSON.stringify(body));
   if(!ref){
     logError_('VALIDATION_ERROR','formrun','application_ref がWebhookに含まれていません', { keys:Object.keys(body) });
@@ -252,7 +258,7 @@ function processFormrunEvent_(body){
     sendPatch.cloudsign_send_error = sanitizeCell_(String(csError).slice(0, 200));
     updateRow_(ssOps_(),'Applications','application_id',app.application_id, sendPatch);
     enqueueNotification_('', 'CLOUDSIGN_SEND_FAILED', app.application_id,
-      { application_ref: ref, error: String(csError).slice(0, 200), action: '経理連携→CloudSign例外対応から手動送信してください' });
+      { application_ref: ref, error: String(csError).slice(0, 200), action: '管理コンソール「契約管理」タブのCloudSign例外対応から手動送信してください' });
     logEvent_('application', app.application_id, 'formrun', {status: app.status},
       { cloudsign_send_status: 'CLOUDSIGN_SEND_FAILED', error: String(csError).slice(0, 200) });
     return 'ok-send-failed';
@@ -311,6 +317,13 @@ function verifyContractTerms_(contractId, app){
     problems.push('利用目的が申込と一致しません');
   let t = {}; try{ t = JSON.parse(c.terms_snapshot || '{}'); }catch(e){}
   if(!t.fee_model) problems.push('利用料条件（料金モデル）を確定できません');
+  // CloudSign FORM v4：契約書へ差し込んだ個別条件が申込時スナップショットと一致することを確認
+  if(/^v4:/.test(String(app.terms_hash || ''))){
+    if(String(t.terms_snapshot_hash || '') !== String(app.terms_hash))
+      problems.push('個別条件ハッシュが申込と一致しません');
+    else if(String(t.terms_snapshot_hash_verified) === 'false')
+      problems.push('契約個別条件をFormRun受信証跡から復元できず、再計算値が申込時と一致しません（出所: ' + (t.terms_snapshot_source||'?') + '）');
+  }
   return problems.length ? { ok:false, detail:problems.join('／') } : { ok:true, detail:'' };
 }
 /**
@@ -329,7 +342,7 @@ function notifyCloudSignSendStale_(){
       updateRow_(ssOps_(),'Applications','application_id',a.application_id,{ cloudsign_send_status:'MANUAL_SEND_REQUIRED' });
       if(enqueueNotification_('', 'CLOUDSIGN_SEND_FAILED', a.application_id,
         { application_ref: a.application_ref, error: 'フォーム送信から' + staleDays + '日以上CloudSign締結に進んでいません',
-          action: '経理連携→CloudSign例外対応から状況確認・手動送信してください' })) n++;
+          action: '管理コンソール「契約管理」タブのCloudSign例外対応から状況確認・手動送信してください' })) n++;
     });
   return { processed: n };
 }

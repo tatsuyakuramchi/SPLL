@@ -754,5 +754,89 @@ ok(hoFlat&&JSON.parse(hoFlat.works_snapshot_json||'[]').length===2,'複数原作
 const btFlat=JSON.parse(hoFlat.billing_terms_json||'{}');
 ok(btFlat.fee_model==='FLAT'&&Number(btFlat.amount)===16500,'引渡の請求条件は契約単位の定額16,500円（×原作数にしない）');
 
+// ============ CloudSign FORM v4（SPLL-LIC-001 v4.1）：個別条件のFORM引渡と改変検知 ============
+// 79. v4申込：ガイドライン同意・SPLL番号・個別条件スナップショット
+const gdraft=G.admin_saveGuidelineDraft('<p>SPLL二次創作ガイドライン v4.1（テスト）</p>');
+G.admin_publishLegalDoc(gdraft.legal_document_id);
+const legalV4=G.api_getLegalTextsV4();
+ok(legalV4.guideline_doc_id===gdraft.legal_document_id&&/ガイドライン/.test(legalV4.guideline),'v4法務文書API（PRIVACY＋GUIDELINE）');
+function mkAppV4(workIds,usage,extra){ return G.web_createApplicationV4(Object.assign({ workIds:workIds, usageCategory:usage,
+  privacyConsent:true, guidelineConsent:true, consentSessionId:'sess-v4', displayHash:'fnv1a:v4',
+  privacyDocumentId:legalV4.privacy_doc_id, guidelineDocumentId:gdraft.legal_document_id }, extra||{})); }
+const v4a=mkAppV4(['WRK-ARK00012','WRK-BKK00019'],'書籍');
+ok(/^SPLL-/.test(v4a.license_id)&&/^v4:/.test(v4a.terms_snapshot_hash),'v4申込でSPLL番号＋個別条件ハッシュを発行');
+ok(v4a.form_fields.fee_amount_or_rate.indexOf('16,500')>=0&&v4a.form_fields.work_count==='2'&&v4a.form_fields.contract_template_version==='v4.1',
+  'FORM引渡の個別条件に料金・原作数・契約書版が入る');
+ok(v4a.template_route==='STANDARD_FIXED','定額は自動締結経路（STANDARD_FIXED）');
+let gErr=false; try{ mkAppV4(['WRK-ARK00012'],'書籍',{guidelineConsent:false}); }catch(e){ gErr=/ガイドライン/.test(String(e.message)); }
+ok(gErr,'ガイドライン未確認の申込は拒否');
+ok(rows(OPS,'Application_Consents').filter(c=>c.application_id===v4a.application_id&&c.document_type==='GUIDELINE').length===1,'GUIDELINE同意証跡を保存');
+ok(mkAppV4(['WRK-BKK00019'],'書籍',{partyType:'CORPORATION'}).template_route==='MANUAL_REVIEW','法人は個別確認（v4.1契約書 第3条4）');
+
+// 80. 経路別CloudSignテンプレートURLの優先（定額と売上連動でテンプレートが異なる）
+G.setConfig_('FORM_URL_INDIVIDUAL','https://form.run/v4-individual');
+G.setConfig_('FORM_URL_STANDARD_RATE','https://form.run/v4-rate');
+ok(G.partyFormUrlV4_('INDIVIDUAL','STANDARD_RATE')==='https://form.run/v4-rate','経路別URLが個人共通URLより優先される');
+ok(G.partyFormUrlV4_('INDIVIDUAL','STANDARD_FIXED')==='https://form.run/v4-individual','経路別未設定なら個人共通URLへフォールバック');
+ok(G.partyFormUrlV4_('CORPORATION','MANUAL_REVIEW')==='','個別確認は標準FORMへフォールバックしない');
+
+// 81. FormRun改変検知：正しい個別条件は通過・料金改変は自動締結を止める
+function v4Columns(res,over){
+  const ff=Object.assign({}, res.form_fields, over||{});
+  const cols=[{name:'application_ref',value:res.application_ref},{name:'license_id',value:res.license_id},
+    {name:'terms_snapshot_hash',value:res.terms_snapshot_hash},{name:'handoff_token',value:res.handoff_token}];
+  Object.keys(ff).forEach(function(k){ cols.push({name:k,value:ff[k]}); });
+  return cols;
+}
+const whV4=G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:v4a.application_ref,
+  submission_id:'FR-V4-1',columns:v4Columns(v4a)})}});
+ok(String(whV4.getContent())==='ok','正しい個別条件のFormRun受信は通過');
+ok(rows(OPS,'Applications').find(a=>a.application_id===v4a.application_id).status==='CONTRACT_PENDING','v4申込がCONTRACT_PENDINGへ');
+const v4b=mkAppV4(['WRK-ARK00012'],'書籍');
+const whTamper=G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:v4b.application_ref,
+  submission_id:'FR-V4-2',columns:v4Columns(v4b,{fee_amount_or_rate:'0円（無償）',fee_value:'0'})})}});
+ok(String(whTamper.getContent())==='accepted-manual-review','料金を改変したFormRun受信は自動締結を止める');
+ok(rows(OPS,'Applications').find(a=>a.application_id===v4b.application_id).status!=='CONTRACT_PENDING','改変時は申込を前進させない');
+
+// 82. 締結：個別条件を契約スナップショットへ固定（受信証跡が正本・ハッシュ検証つき）
+G.doPost({parameter:{},postData:{contents:JSON.stringify({document_id:'DOC-V4-1',status:'COMPLETED',application_ref:v4a.application_ref})}});
+const cV4=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-V4-1');
+const tV4=JSON.parse(cV4.terms_snapshot||'{}');
+ok(tV4.terms_snapshot_hash===v4a.terms_snapshot_hash&&tV4.terms_snapshot_source==='FORMRUN_RECEIPT'&&tV4.terms_snapshot_hash_verified==='true',
+  '締結スナップショットはFormRun受信証跡から復元しハッシュ一致を記録');
+ok(cV4.terms_verification_status==='VERIFIED'&&rows(OPS,'Certificates').some(x=>x.contract_id===cV4.contract_id),'条件照合VERIFIEDで認証発行');
+ok(G.admin_listLicenseCases().find(k=>k.license_id===v4a.license_id).fee.indexOf('16,500')>=0,'ライセンス一覧の利用許諾料はv4スナップショットからも表示');
+// 経理引渡：契約書版が変わっても請求条件のキーは同じ形で渡す
+const hoV4=rows(OPS,'Finance_Handoffs').find(h=>h.license_id===v4a.license_id);
+const btV4=JSON.parse(hoV4.billing_terms_json||'{}');
+ok(btV4.fee_model==='FLAT'&&Number(btV4.amount)===16500&&btV4.contract_template_version==='v4.1',
+  'v4契約でも経理引渡の請求条件はfee_model/amountで正規化: '+JSON.stringify({m:btV4.fee_model,a:btV4.amount}));
+ok(btV4.terms_snapshot_hash===v4a.terms_snapshot_hash&&btV4.source_terms,'引渡に個別条件ハッシュと原スナップショットを同梱');
+
+// 83. 個別条件を復元できない締結は自動有効化しない（受信証跡なし＝再計算値）
+const v4c=mkAppV4(['WRK-BKK00019'],'書籍');
+G.updateRow_(OPS,'Applications','application_id',v4c.application_id,{ status:'CONTRACT_PENDING' });   // FormRun受信なしで締結された状況
+G.updateRow_(MAS,'Works_Master','work_id','WRK-BKK00019',{ work_name:'インセイン（改題）' });          // 申込後にマスタが変わった
+G.doPost({parameter:{},postData:{contents:JSON.stringify({document_id:'DOC-V4-NOREC',status:'COMPLETED',application_ref:v4c.application_ref})}});
+const cV4c=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-V4-NOREC');
+const tV4c=JSON.parse(cV4c.terms_snapshot||'{}');
+ok(tV4c.terms_snapshot_source==='RECOMPUTED'&&tV4c.terms_snapshot_hash_verified==='false','受信証跡なしは再計算＋不一致を記録');
+ok(cV4c.terms_verification_status==='TERMS_MISMATCH'&&!rows(OPS,'Certificates').some(x=>x.contract_id===cV4c.contract_id),
+  '申込時条件を復元できない締結は認証・バッジを停止（TERMS_MISMATCH）');
+G.updateRow_(MAS,'Works_Master','work_id','WRK-BKK00019',{ work_name:'インセイン' });
+
+// 84. v4の再申込（訂正）：新SPLL番号で個別条件ハッシュを採り直す
+const v4d=mkAppV4(['WRK-ARK00012'],'書籍');
+const repV4=G.admin_createReplacementApplication(v4d.application_id,'対象原作の訂正');
+ok(/^SPLL-/.test(repV4.license_id)&&repV4.license_id!==v4d.license_id,'再申込にも新しいSPLL番号を発行（1案件1番号）');
+ok(/^v4:/.test(repV4.terms_snapshot_hash)&&repV4.terms_snapshot_hash!==v4d.terms_snapshot_hash,'新番号で個別条件ハッシュを再計算（旧ハッシュを流用しない）');
+ok(repV4.form_fields&&repV4.form_fields.license_id===repV4.license_id,'再申込のFORM引渡値も新番号で再生成');
+ok(rows(OPS,'License_Cases').find(k=>k.license_id===v4d.license_id).case_status==='CLOSED','旧案件はCLOSED');
+const repApp=rows(OPS,'Applications').find(a=>a.application_id===repV4.application_id);
+const whRep=G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:repV4.application_ref,
+  submission_id:'FR-V4-REP',columns:v4Columns(repV4)})}});
+ok(String(whRep.getContent())==='ok','再申込のFormRun受信が改変検知を通過する（回帰）');
+
+
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);
