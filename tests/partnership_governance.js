@@ -20,5 +20,22 @@ ok(/Googleカレンダーに追加/.test(ui)&&/partRenderCalendar/.test(ui),'カ
 ok(/議案・決議/.test(ui)&&/報告・清算/.test(ui)&&/構成員・議長/.test(ui),'事務局運営サブタブ');
 ok(/52_admin_partnership\.gs/.test(build)&&/admin_partnership_patch\.html/.test(build),'adminビルドへ追加');
 ok(/admin_partnership_patch/.test(entry),'admin entryでUI patch注入');
+// 決議の記録が後から動かないこと（確定ガード・スナップショット）
+ok(/decided_at\)\s*throw new Error\('DATA_CONFLICT/.test(gs),'確定済み議案は投票・編集・再確定を拒否');
+ok(/tally_json/.test(gs)&&/source:'SNAPSHOT'/.test(gs),'確定時の集計をスナップショットして表示に使う');
+ok(/function admin_reopenSecretariatAgenda/.test(gs)&&/requireRole_\(\['LEGAL_ADMIN'\]\)/.test(gs),'訂正は理由付きの再開手続きに限定');
+// 日付はJST基準（GASのtoISOStringはUTCで1日ずれる）
+ok(!/toISOString\(\)\.slice\(0,10\)/.test(gs.replace(/Date\.UTC[\s\S]{0,80}?toISOString\(\)\.slice\(0,10\)/g,'')),'期限・当日判定にUTCのtoISOStringを使わない');
+ok(/Utilities\.formatDate\(new Date\(\), 'JST'/.test(gs),'当日・現在時刻はJSTで求める');
+ok(/ctz=Asia%2FTokyo/.test(gs)&&/calDateTime_/.test(gs),'カレンダーURLは秒まで含みJSTで解釈させる');
+// 契約第5条：議長はコアパートナーから
+ok(/議長資格のない構成員は議長に指定できません/.test(gs),'議長資格をサーバー側で検証');
+ok(/pt==='CORE'&&data\.chair_eligible!==false/.test(gs),'議長資格はコアパートナーに限る');
+// シート読取のN+1回避
+ok(/function partnershipContext_/.test(gs)&&/listAgendas_\(ctx/.test(gs),'一覧は読み取りを1回にまとめる');
+// 画面からの導線
+ok(/partOpenAttendance/.test(ui)&&/admin_listSecretariatAttendance/.test(ui),'出欠を画面から記録できる');
+ok(/partReportFromContract/.test(ui)&&/admin_createLicenseReportFromContract/.test(ui),'締結済み契約から報告を起票できる');
+ok(/partReopenAgenda/.test(ui),'確定した決議を画面から再開できる');
 console.log('\nPARTNERSHIP RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

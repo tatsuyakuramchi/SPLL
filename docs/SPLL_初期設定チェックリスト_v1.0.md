@@ -36,6 +36,11 @@ script.google.com → **admin** プロジェクト → 関数選択で `setup_al
 
 - [ ] 実行が完了し、ログに `===== setup_all 完了 =====` が出た
 
+事務局運営（パートナーシップ契約の会議・議案・報告・清算）を使う場合は、続けて admin で
+`admin_setupPartnershipGovernance` を実行します（`Secretariat_*` シートを作成。初回に画面を開いても自動作成されます）。
+
+- [ ] （事務局運営を使う場合）`admin_setupPartnershipGovernance` を実行した
+
 ---
 
 ## Step 2. ScriptProperties を3プロジェクトへ転記

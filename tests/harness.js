@@ -75,7 +75,17 @@ function Blob(content, type, name){
     setName:function(n){this.name=n;return this;}, getAs:function(t){ return Blob(content, t, this.name); } };
 }
 const Utilities={
-  formatDate:function(d,tz,fmt){ const p=n=>String(n).padStart(2,'0'); return ''+d.getFullYear()+p(d.getMonth()+1); },
+  /** 書式トークン（yyyy/MM/dd/HH/mm/ss）と 'T' のようなクォート literal に対応。tz='JST' は+9時間で解釈。 */
+  formatDate:function(d,tz,fmt){
+    const t=new Date(d.getTime()+(String(tz)==='JST'?9*3600*1000:0));
+    const p=n=>String(n).padStart(2,'0');
+    const map={ yyyy:String(t.getUTCFullYear()), MM:p(t.getUTCMonth()+1), dd:p(t.getUTCDate()),
+                HH:p(t.getUTCHours()), mm:p(t.getUTCMinutes()), ss:p(t.getUTCSeconds()) };
+    if(!fmt) return map.yyyy+map.MM;
+    return String(fmt).split(/'([^']*)'/).map(function(part,i){
+      return i%2 ? part : part.replace(/yyyy|MM|dd|HH|mm|ss/g,function(k){return map[k];});
+    }).join('');
+  },
   getUuid:function(){ return 'uuid-'+Math.random().toString(36).slice(2,10); },
   newBlob:function(c,t,n){ return Blob(c,t,n); },
   base64Encode:function(x){ if(Array.isArray(x)) return Buffer.from(x).toString('base64'); return Buffer.from(String(x),'utf8').toString('base64'); },
@@ -1223,6 +1233,146 @@ G.setConfig_('AI_REVIEW_PROMPT','');
 ok(G.admin_getAiConfig().is_default===true&&G.aiReviewPrompt_()===G.AI_REVIEW_PROMPT_DEFAULT||G.admin_getAiConfig().is_default===true,
   '設定を空にすると既定文へ戻る');
 
+
+
+// ============ パートナーシップ事務局運営（会議・議案・決議・報告・清算） ============
+// 112. 構成員と議長資格（契約第5条：議長はコアパートナーから）
+G.admin_setupPartnershipGovernance();
+const mem = {};
+[['coreA','CORE'],['coreB','CORE'],['c1','CONTENT'],['c2','CONTENT'],['c3','CONTENT'],['c4','CONTENT']].forEach(function(x){
+  mem[x[0]] = G.admin_saveSecretariatMember({ partner_id:'PT-'+x[0], partner_name_snapshot:x[0]+'社',
+    partner_type:x[1], representative_name:x[0]+' 代表', representative_email:x[0]+'@example.com' }).member_id;
+});
+const memRows = () => rows(OPS,'Secretariat_Members');
+ok(memRows().find(m=>m.member_id===mem.coreA).chair_eligible==='true','コアパートナーの構成員は議長資格あり');
+ok(memRows().find(m=>m.member_id===mem.c1).chair_eligible==='false','コンテンツパートナーには議長資格を与えない（契約第5条）');
+let badChair=false;
+try{ G.admin_saveSecretariatMeeting({ title:'不正議長', starts_at:'2026-09-01T10:00', chair_member_id:mem.c1 }); }
+catch(e){ badChair=/議長資格/.test(String(e.message)); }
+ok(badChair,'議長資格のない構成員は議長に指定できない');
+
+const mtg = G.admin_saveSecretariatMeeting({ title:'2026年度 第3回定時会議', meeting_type:'REGULAR',
+  starts_at:'2026-09-01T14:00', ends_at:'2026-09-01T16:00', chair_member_id:mem.coreA });
+ok(/dates=20260901T140000%2F20260901T160000/.test(mtg.calendar_url)&&/ctz=Asia%2FTokyo/.test(mtg.calendar_url),
+  'Googleカレンダーのリンクは秒まで含みJSTで解釈される: '+mtg.calendar_url.split('&dates=')[1].split('&')[0]);
+const mtgNoEnd = G.admin_saveSecretariatMeeting({ title:'終了未設定', starts_at:'2026-09-02T09:30' });
+ok(/dates=20260902T093000%2F20260902T103000/.test(mtgNoEnd.calendar_url),'終了時刻が無い会議は1時間として登録される');
+
+// 113. 決議の成立要件（契約第6条）
+function agenda_(type,title){ return G.admin_saveSecretariatAgenda({ meeting_id:mtg.meeting_id, agenda_type:type, title:title }); }
+function vote_(agendaId, keys, v){ keys.forEach(function(k){ G.admin_castSecretariatVote(agendaId, mem[k], v||'FOR',''); }); }
+const ordinary = agenda_('LICENSE_TERMS','利用許諾条件の一部変更');
+ok(ordinary.resolution_rule==='ORDINARY','既定は通常決議');
+vote_(ordinary.agenda_id,['coreA','c1','c2'],'FOR');
+G.admin_castSecretariatVote(ordinary.agenda_id, mem.c3,'AGAINST','');
+ok(G.evaluateAgendaResolution_(ordinary.agenda_id).passed===false,'通常決議：6名中3賛成は過半数に足りない');
+const ev6 = G.admin_castSecretariatVote(ordinary.agenda_id, mem.coreB,'FOR','');
+ok(ev6.passed===true&&ev6.total_members===6&&ev6.yes===4,'通常決議：6名中4賛成で成立（分母は投票者数でなく全構成員）');
+
+const special = agenda_('LICENSE_FEE_CHANGE','ライセンス料改定');
+ok(special.resolution_rule==='SPECIAL','ライセンス料改定は自動的に特別決議');
+vote_(special.agenda_id,['c1','c2','c3','c4'],'FOR');
+const evS1 = G.evaluateAgendaResolution_(special.agenda_id);
+ok(evS1.passed===false&&evS1.yes===4&&evS1.core_yes===0,'特別決議：3分の2を満たしてもコア賛成0では不成立');
+const evS2 = G.admin_castSecretariatVote(special.agenda_id, mem.coreA,'FOR','');
+ok(evS2.passed===true&&evS2.core_yes===1,'特別決議：コアパートナー1名の賛成が加わって成立');
+
+const dis = agenda_('DISSOLUTION','事務局の解散');
+ok(dis.resolution_rule==='UNANIMOUS','解散は全員同意');
+vote_(dis.agenda_id,['coreA','coreB','c1','c2','c3'],'FOR');
+ok(G.evaluateAgendaResolution_(dis.agenda_id).passed===false,'解散：1名でも賛成が欠ければ不成立');
+let disOverride=false;
+try{ G.admin_finalizeSecretariatAgenda(dis.agenda_id,'PASSED','議長裁量で可決',true); }
+catch(e){ disOverride=/議長裁量/.test(String(e.message)); }
+ok(disOverride,'解散は議長裁量で成立させられない（契約第14条）');
+const ptc = agenda_('PARTNER_TYPE_CHANGE','パートナー種別の変更');
+let ptcOverride=false;
+try{ G.admin_finalizeSecretariatAgenda(ptc.agenda_id,'PASSED','議長裁量で可決',true); }
+catch(e){ ptcOverride=/議長裁量/.test(String(e.message)); }
+ok(ptcOverride,'パートナー種別変更も議長裁量で成立させられない（契約第7条）');
+let noQuorum=false;
+try{ G.admin_finalizeSecretariatAgenda(dis.agenda_id,'PASSED','',false); }
+catch(e){ noQuorum=/成立要件/.test(String(e.message)); }
+ok(noQuorum,'要件未達を裁量なしで可決にはできない');
+
+// 114. 議長裁量が使える議案では記録として残る
+const deadlock = agenda_('RECOMMENDED_VENDOR','推奨業者の選定');
+vote_(deadlock.agenda_id,['coreA','c1','c2'],'FOR');
+G.admin_castSecretariatVote(deadlock.agenda_id, mem.coreB,'AGAINST','');
+const dlFin = G.admin_finalizeSecretariatAgenda(deadlock.agenda_id,'PASSED','議長裁量により可決','true');
+ok(dlFin.chair_override==='true'&&dlFin.final_result==='PASSED','デッドロックは議長裁量で確定でき、裁量の事実が残る');
+
+// 115. 確定後は投票・編集・再確定を受け付けない（記録済みの決議を後から動かさない）
+const ordFin = G.admin_finalizeSecretariatAgenda(ordinary.agenda_id,'PASSED','原案どおり可決',false);
+ok(ordFin.final_result==='PASSED'&&ordFin.tally_json,'確定時に集計をスナップショットする');
+let lateVote=false; try{ G.admin_castSecretariatVote(ordinary.agenda_id, mem.c4,'FOR',''); }catch(e){ lateVote=/決議確定済み/.test(String(e.message)); }
+ok(lateVote,'確定後の投票は拒否（computed_resultの上書きを防ぐ）');
+let lateEdit=false; try{ G.admin_saveSecretariatAgenda({ agenda_id:ordinary.agenda_id, meeting_id:mtg.meeting_id, agenda_type:'DISSOLUTION', title:'すり替え' }); }catch(e){ lateEdit=/編集できません/.test(String(e.message)); }
+ok(lateEdit,'確定後に議案の中身・成立要件を書き換えられない');
+let reFin=false; try{ G.admin_finalizeSecretariatAgenda(ordinary.agenda_id,'REJECTED','',false); }catch(e){ reFin=/決議確定済み/.test(String(e.message)); }
+ok(reFin,'確定済み議案の再確定は拒否');
+
+// 116. 確定後に構成員が変わっても過去の決議の分母・可否は動かない
+G.admin_saveSecretariatMember({ member_id:mem.c4, partner_id:'PT-c4', partner_type:'CONTENT',
+  representative_name:'c4 代表', status:'INACTIVE' });
+const snapAgenda = G.admin_listSecretariatAgendas(mtg.meeting_id).find(a=>a.agenda_id===ordinary.agenda_id);
+ok(snapAgenda.evaluation.total_members===6&&snapAgenda.evaluation.source==='SNAPSHOT',
+  '確定済み議案は確定時の構成員数で表示され続ける（退任で判定が変わらない）');
+const liveAgenda = G.admin_listSecretariatAgendas(mtg.meeting_id).find(a=>a.agenda_id===ptc.agenda_id);
+ok(liveAgenda.evaluation.total_members===5&&liveAgenda.evaluation.source==='LIVE','未確定の議案は現在の構成員で判定する');
+
+// 117. 訂正手段：再開はLEGAL_ADMINのみ・理由必須
+const SessPart=G.Session;
+G.Session={ getActiveUser:()=>({ getEmail:()=>'acct@example.com' }) };
+let reopenRole=false; try{ G.admin_reopenSecretariatAgenda(ordinary.agenda_id,'誤記録'); }catch(e){ reopenRole=/AUTHORIZATION_ERROR/.test(String(e.message)); }
+ok(reopenRole,'決議の再開は権限のないロールでは実行できない');
+G.Session={ getActiveUser:()=>({ getEmail:()=>'legal2@example.com' }) };
+let reopenReason=false; try{ G.admin_reopenSecretariatAgenda(ordinary.agenda_id,'  '); }catch(e){ reopenReason=/理由は必須/.test(String(e.message)); }
+ok(reopenReason,'再開には理由が必要');
+G.admin_reopenSecretariatAgenda(ordinary.agenda_id,'議事録との不一致のため訂正');
+const reopened = rows(OPS,'Secretariat_Agendas').find(a=>a.agenda_id===ordinary.agenda_id);
+ok(!reopened.decided_at&&!reopened.tally_json&&/不一致/.test(reopened.reopen_reason),'再開すると確定が外れ、理由が記録される');
+ok(rows(OPS,'Events').some(e=>e.entity_type==='secretariat_resolution'&&e.entity_id===ordinary.agenda_id&&/reopened_at/.test(String(e.after))),
+  '再開は監査ログに残る');
+G.Session=SessPart;
+
+// 118. 出欠（記録漏れが見える形で返す）
+G.admin_recordSecretariatAttendance(mtg.meeting_id, mem.coreA,'ATTENDED');
+G.admin_recordSecretariatAttendance(mtg.meeting_id, mem.c1,'ONLINE');
+G.admin_recordSecretariatAttendance(mtg.meeting_id, mem.c2,'ABSENT');
+const att = G.admin_listSecretariatAttendance(mtg.meeting_id);
+ok(att.length===5&&att.filter(a=>!a.attendance_status).length===2,'出欠は未記録の構成員も含めて返す');
+const mtgRow = G.admin_listSecretariatMeetings().find(m=>m.meeting_id===mtg.meeting_id);
+ok(mtgRow.attendance.attended===2&&mtgRow.attendance.absent===1,'会議一覧に出欠の集計が付く');
+
+// 119. 報告期限は契約締結月の翌月末（JST基準・月またぎ）
+ok(G.nextMonthEnd_('2026-08-13')==='2026-09-30','8月締結 → 9月末が期限');
+ok(G.nextMonthEnd_('2026-12-05')==='2027-01-31','12月締結 → 翌年1月末が期限（年またぎ）');
+ok(G.nextMonthEnd_('2026-01-31')==='2026-02-28','1月締結 → 2月末が期限');
+const lrep = G.admin_createLicenseReportFromContract(contract.contract_id,'PT-coreA');
+ok(/^\d{4}-\d{2}-\d{2}$/.test(lrep.due_date),'締結済み契約から利用許諾報告を起票できる（第9条3項）: '+lrep.due_date);
+const lrep2 = G.admin_createLicenseReportFromContract(contract.contract_id,'PT-coreA');
+ok(lrep2.report_id===lrep.report_id&&lrep2.duplicate===true,'同じ契約から二重に起票しない');
+
+// 120. 清算記録と月次ビュー
+G.admin_saveSecretariatSettlement({ period_label:'2026 Q3', partner_id:'PT-coreA', due_date:'2026-09-30',
+  revenue_total:'1000000', distribution_amount:'300000', expense_share:'50000', status:'REPORTED' });
+const setRow = rows(OPS,'Secretariat_Settlements').slice(-1)[0];
+ok(String(setRow.net_amount)==='250000','差引額は分配額−費用負担で自動計算される');
+const ovv = G.admin_partnershipOverview(2026,9);
+ok(ovv.events.some(e=>e.kind==='MEETING')&&ovv.events.some(e=>e.kind==='SETTLEMENT_DUE'),'カレンダーに会議と清算期限が載る');
+ok(ovv.events.every((e,i,arr)=>i===0||arr[i-1].date<=e.date),'カレンダーの予定は日付順');
+ok(ovv.kpis.active_members===5&&ovv.kpis.pending_settlements===1,'KPIは有効構成員・未完了清算を数える');
+ok(G.admin_partnershipOverview(2026,10).events.length===0,'対象月以外の予定は返さない');
+
+// 121. 権限（登録系はLEGAL_ADMIN/OPERATIONSのみ・閲覧は既存ロールで可）
+G.Session={ getActiveUser:()=>({ getEmail:()=>'auditor@example.com' }) };
+ok(Array.isArray(G.admin_listSecretariatMembers()),'AUDITOR: 事務局台帳の閲覧は許可');
+let memRole=false; try{ G.admin_saveSecretariatMember({ partner_type:'CORE', representative_name:'x' }); }catch(e){ memRole=/AUTHORIZATION_ERROR/.test(String(e.message)); }
+ok(memRole,'AUDITOR: 構成員の登録は拒否');
+let voteRole=false; try{ G.admin_castSecretariatVote(ptc.agenda_id, mem.coreA,'FOR',''); }catch(e){ voteRole=/AUTHORIZATION_ERROR/.test(String(e.message)); }
+ok(voteRole,'AUDITOR: 投票の記録は拒否');
+G.Session=SessPart;
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);
