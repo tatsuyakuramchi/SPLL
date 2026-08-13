@@ -33,11 +33,11 @@ const MANIFEST = {
     title: 'SPLL 契約・提出 (GAS②)',
   },
   admin: {
-    gs: ['00_core.gs','05_schema.gs','10_auth.gs','15_fee.gs','20_tokens.gs','25_portal.gs','28_contract_form_v4_shared.gs','29_contract_form_v4.gs','30_cloudsign.gs','32_contract.gs','37_ai.gs','44_guide.gs','46_mailer.gs','50_admin.gs','51_admin_contract_v4.gs'],
+    gs: ['00_core.gs','05_schema.gs','10_auth.gs','15_fee.gs','20_tokens.gs','25_portal.gs','28_contract_form_v4_shared.gs','29_contract_form_v4.gs','30_cloudsign.gs','32_contract.gs','37_ai.gs','44_guide.gs','46_mailer.gs','50_admin.gs','51_admin_contract_v4.gs','52_admin_partnership.gs'],
     overlays: {
       '32_contract.gs': ['33_contract_snapshot_v4.gs'],
     },
-    html: ['admin.html','admin_contract_v4_patch.html'],
+    html: ['admin.html','admin_contract_v4_patch.html','admin_partnership_patch.html'],
     title: 'SPLL 管理コンソール (GAS③)',
   },
 };
