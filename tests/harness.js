@@ -121,7 +121,9 @@ const ScriptApp={ getService:()=>({ getUrl:()=>'https://script.example/exec' }),
     return chain; } };
 const Session={ getActiveUser:()=>({ getEmail:()=>'admin@example.com' }) };
 const Logger={ log:function(){ } };
-const MailApp={ sendEmail:function(){} };
+const _sentMail=[];
+const MailApp={ sendEmail:function(o){ if(MailApp._fail) throw new Error(MailApp._fail); _sentMail.push(o); },
+  getRemainingDailyQuota:function(){ return MailApp._quota===undefined ? 1500 : MailApp._quota; }, _quota:undefined, _fail:'' };
 const ContentService={ createTextOutput:function(s){ return { _t:s, getContent:()=>s }; } };
 const HtmlService={ createHtmlOutput:function(h){ return { _h:h, setTitle:function(){return this;} }; },
   createHtmlOutputFromFile:function(f){ return { file:f, setTitle:function(){return this;} }; },
@@ -1017,7 +1019,10 @@ ok(G.normalizeEmail_('  <Taro@Example.com> ')==='Taro@Example.com'&&G.normalizeE
 // 99. 締結でCloudSign送付先を台帳へ保存する（Webhookのemail＝送信側は使わない）
 scriptProps.CLOUDSIGN_CLIENT_ID='cs-test-client';
 const mailApp=mkApp(['WRK-BKK00019'],'書籍',docExtra2);
-G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:mailApp.application_ref,submission_id:'FR-MAIL-1',columns:[]})}});
+scriptProps.FORMRUN_FIELD_MAP=JSON.stringify({'handoff':'handoff_token'});
+G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:mailApp.application_ref,
+  submission_id:'FR-MAIL-1',columns:[{name:'handoff',value:mailApp.handoff_token}]})}});
+delete scriptProps.FORMRUN_FIELD_MAP;
 const csDocMail={ status:2, title:'SPLL利用許諾契約｜'+mailApp.application_ref,
   participants:[{email:'office@arclight.example',name:'事務局'},{email:'licensee@example.com',name:'山田太郎'}] };
 const prevFetch=G.UrlFetchApp.fetch;
@@ -1054,6 +1059,80 @@ G.doPost({parameter:{},postData:{contents:JSON.stringify({ document_id:'DOC-MAIL
 const cMail2=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-MAIL-2');
 ok(cMail2&&cMail2.contact_email==='form-input@example.jp'&&cMail2.contact_email_source==='FORM',
   'CloudSign照会できない場合はフォーム入力値を採用（source=FORM）');
+
+
+// ============ 案内メールの自動送信 ============
+// 101. 締結→5分バッチで案内URLのみを送信（本文に口座情報を入れない）
+G.setConfig_('OFFICE_CONTACT','事務局 spll@example.com');
+G.admin_saveGuideConfig({ bank_name:'テスト銀行', account_number:'1111111', account_holder:'事務局',
+  mail_from_name:'TRPGライツ事務局', mail_reply_to:'spll@example.com' });
+_sentMail.length=0;
+const mailRes=G.batch_sendGuideEmails_();
+ok(mailRes.processed>=1,'案内メールを自動送信: '+mailRes.processed+'件');
+const sentTo=_sentMail.find(m=>m.to==='licensee@example.com');
+ok(!!sentTo,'CloudSign送付先へ送信');
+ok(/SPLL-/.test(sentTo.subject)&&/page=guide/.test(sentTo.body),'件名にSPLL番号・本文に案内ページURL');
+ok(sentTo.body.indexOf('1111111')<0&&sentTo.body.indexOf('テスト銀行')<0,'本文に口座情報を含めない（振込先は案内ページのみ）');
+ok(/口座情報をお知らせすることはありません/.test(sentTo.body),'なりすまし注意の記載を含む');
+ok(sentTo.name==='TRPGライツ事務局'&&sentTo.replyTo==='spll@example.com','差出人名・返信先を設定から反映');
+const sentNotif=rows(OPS,'Notification_Queue').find(n=>n.type==='GUIDE_READY'&&n.contract_id===cMail.contract_id);
+ok(sentNotif.status==='SENT'&&sentNotif.handled_by==='auto-mailer'&&sentNotif.sent_to_domain==='example.com','送信済を記録（宛先はドメインのみ）');
+const beforeCount=_sentMail.length;
+G.batch_sendGuideEmails_();
+ok(_sentMail.length===beforeCount,'送信済みは再送しない（冪等）');
+
+// 102. 宛先未取得は送らず要対応に残す
+const noMailApp=mkApp(['WRK-BKK00019'],'書籍',docExtra2);
+scriptProps.FORMRUN_FIELD_MAP=JSON.stringify({'handoff':'handoff_token'});
+G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:noMailApp.application_ref,
+  submission_id:'FR-NOMAIL',columns:[{name:'handoff',value:noMailApp.handoff_token}]})}});
+G.doPost({parameter:{},postData:{contents:JSON.stringify({ document_id:'DOC-NOMAIL', status:'COMPLETED', application_ref:noMailApp.application_ref })}});
+delete scriptProps.FORMRUN_FIELD_MAP;
+const cNoMail=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-NOMAIL');
+const before2=_sentMail.length;
+G.batch_sendGuideEmails_();
+ok(_sentMail.length===before2,'連絡先が無い案件は送信しない');
+ok(rows(OPS,'Notification_Queue').find(n=>n.type==='GUIDE_READY'&&n.contract_id===cNoMail.contract_id).status==='MANUAL_REQUIRED','宛先未取得は要対応のまま残る');
+ok(G.admin_listNotifications().some(n=>n.contract_id===cNoMail.contract_id),'管理画面の要対応一覧に出る');
+
+// 103. 送信失敗は再試行し、上限でSEND_FAILEDへ
+G.updateRow_(OPS,'Contracts','contract_id',cNoMail.contract_id,{ contact_email:'retry@example.com' });
+MailApp._fail='SMTP error';
+for(let mi=0;mi<4;mi++) G.batch_sendGuideEmails_();
+MailApp._fail='';
+const failNotif=()=>rows(OPS,'Notification_Queue').find(n=>n.type==='GUIDE_READY'&&n.contract_id===cNoMail.contract_id);
+ok(Number(failNotif().attempts)===3&&failNotif().status==='SEND_FAILED','3回失敗でSEND_FAILED（無限再送しない）');
+ok(/SMTP error/.test(String(failNotif().last_error)),'失敗理由を記録');
+ok(G.admin_listNotifications().some(n=>n.contract_id===cNoMail.contract_id&&n.status==='SEND_FAILED'),'失敗も要対応一覧に出る（手動で案内できる）');
+
+// 104. 送信上限・停止スイッチ
+const stopApp=mkApp(['WRK-BKK00019'],'書籍',docExtra2);
+scriptProps.FORMRUN_FIELD_MAP=JSON.stringify({'handoff':'handoff_token'});
+G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:stopApp.application_ref,
+  submission_id:'FR-STOP',columns:[{name:'handoff',value:stopApp.handoff_token}]})}});
+G.doPost({parameter:{},postData:{contents:JSON.stringify({ document_id:'DOC-STOP', status:'COMPLETED', application_ref:stopApp.application_ref })}});
+delete scriptProps.FORMRUN_FIELD_MAP;
+const cStop=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-STOP');
+G.updateRow_(OPS,'Contracts','contract_id',cStop.contract_id,{ contact_email:'stop@example.com' });
+MailApp._quota=0;
+const before3=_sentMail.length;
+G.batch_sendGuideEmails_();
+ok(_sentMail.length===before3,'当日の送信上限に達したら送らず持ち越す');
+MailApp._quota=undefined;
+G.admin_saveGuideConfig({ guide_email_auto_send:'false' });
+const before4=_sentMail.length;
+ok(G.batch_sendGuideEmails_().skipped&&_sentMail.length===before4,'自動送信を停止できる（GUIDE_EMAIL_AUTO_SEND=false）');
+G.admin_saveGuideConfig({ guide_email_auto_send:'true' });
+G.batch_sendGuideEmails_();
+ok(_sentMail.some(m=>m.to==='stop@example.com'),'再開すると持ち越し分を送信');
+
+// 105. テスト送信・状況表示
+const mt=G.admin_sendGuideEmailTest('tester@example.com','');
+ok(mt.sent&&_sentMail.slice(-1)[0].to==='tester@example.com','管理画面からテスト送信できる');
+let badTo=false; try{ G.admin_sendGuideEmailTest('not-an-email',''); }catch(e){ badTo=/形式/.test(String(e.message)); }
+ok(badTo,'不正なテスト送信先は拒否');
+const ms=G.admin_getMailStatus();
+ok(ms.enabled===true&&ms.sent>=1&&typeof ms.failed==='number','送信状況（有効・送信済・失敗数）を表示');
 
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');

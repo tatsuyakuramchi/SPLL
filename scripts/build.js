@@ -24,7 +24,7 @@ const MANIFEST = {
     title: 'SPLL 公開ポータル (GAS①)',
   },
   workflow: {
-    gs: ['00_core.gs','15_fee.gs','20_tokens.gs','28_contract_form_v4_shared.gs','30_cloudsign.gs','32_contract.gs','35_webhooks.gs','37_ai.gs','40_public_pages.gs','42_large_submission.gs','44_guide.gs','47_batches.gs'],
+    gs: ['00_core.gs','15_fee.gs','20_tokens.gs','28_contract_form_v4_shared.gs','30_cloudsign.gs','32_contract.gs','35_webhooks.gs','37_ai.gs','40_public_pages.gs','42_large_submission.gs','44_guide.gs','46_mailer.gs','47_batches.gs'],
     overlays: {
       '32_contract.gs': ['33_contract_snapshot_v4.gs'],
       '35_webhooks.gs': ['36_formrun_contract_v4.gs'],
@@ -33,7 +33,7 @@ const MANIFEST = {
     title: 'SPLL 契約・提出 (GAS②)',
   },
   admin: {
-    gs: ['00_core.gs','05_schema.gs','10_auth.gs','15_fee.gs','20_tokens.gs','25_portal.gs','28_contract_form_v4_shared.gs','29_contract_form_v4.gs','30_cloudsign.gs','32_contract.gs','37_ai.gs','44_guide.gs','50_admin.gs','51_admin_contract_v4.gs'],
+    gs: ['00_core.gs','05_schema.gs','10_auth.gs','15_fee.gs','20_tokens.gs','25_portal.gs','28_contract_form_v4_shared.gs','29_contract_form_v4.gs','30_cloudsign.gs','32_contract.gs','37_ai.gs','44_guide.gs','46_mailer.gs','50_admin.gs','51_admin_contract_v4.gs'],
     overlays: {
       '32_contract.gs': ['33_contract_snapshot_v4.gs'],
     },

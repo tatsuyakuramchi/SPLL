@@ -357,3 +357,32 @@ CloudSign公式案内では、CloudSign FORM powered by formrunは、Webフォ�
 `participants` のフィールド名は版・プランで揺れる可能性があるため、`email` / `mail` /
 `email_address` / `user.email` を許容し、いずれも取れない場合はレスポンス全体からの抽出へフォールバックする。
 本番切替前に、サンドボックスで1件締結し `contact_email_source` が `CLOUDSIGN` になることを確認すること。
+
+---
+
+## 13. 締結後の案内メール（自動送信）
+
+締結すると `Notification_Queue` に `GUIDE_READY` が起票され、**GAS②の5分バッチ**が案内メールを送信する。
+締結Webhookの中で送らないのは、メール障害・送信上限で締結処理そのものを失敗させないため。
+
+**本文には案内ページのURLだけを載せ、口座情報は書かない。** 振込先は案内ページで表示する（§12の理由と同じ）。
+本文には「事務局がメール本文で口座情報を知らせることはない」旨の注意書きを含める。
+
+| 設定（Config） | 内容 |
+|---|---|
+| `GUIDE_EMAIL_AUTO_SEND` | 自動送信の有効・無効（既定 true） |
+| `GUIDE_EMAIL_SUBJECT` / `GUIDE_EMAIL_BODY` | 件名・本文テンプレート（差込 `{{license_id}}` `{{party_name}}` `{{guide_url}}` `{{usage_category}}` `{{works}}` `{{office_contact}}`） |
+| `MAIL_FROM_NAME` / `MAIL_REPLY_TO` | 差出人名・返信先 |
+
+すべて管理コンソール「設定 → 手続き案内・振込先 → 案内メールの自動送信」から編集し、テスト送信もできる。
+
+### 送信されない場合の扱い
+
+| 状況 | 通知の状態 | 運用 |
+|---|---|---|
+| 連絡先が未取得 | `MANUAL_REQUIRED` のまま | 要対応一覧に残る。案内リンクを手動で共有する |
+| 送信失敗（3回まで再試行） | 3回目で `SEND_FAILED` | 要対応一覧に理由つきで表示。手動で案内する |
+| 当日の送信上限に到達 | `MANUAL_REQUIRED` のまま | 翌日のバッチが自動で送信する |
+| 自動送信を停止中 | `MANUAL_REQUIRED` のまま | 従来どおり事務局が手動で案内する |
+
+送信ログ（`Events`）には宛先ドメインのみ記録し、アドレス平文を積み上げない。

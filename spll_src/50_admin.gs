@@ -374,12 +374,47 @@ function admin_saveFormRunConfig(c){ requireRole_(['SYSTEM_ADMIN']);
   return true;
 }
 
+// ---- 案内メールの自動送信（管理コンソール操作）----
+/** 管理コンソールからのテスト送信（本番の宛先には送らず、指定アドレスへ見本を送る） */
+function admin_sendGuideEmailTest(toEmail, contractId){
+  const actor = requireRole_(['SYSTEM_ADMIN','OPERATIONS']);
+  const to = normalizeEmail_(toEmail);
+  if(!to) throw new Error('VALIDATION_ERROR: 送信先メールアドレスの形式が正しくありません');
+  let v = { to:to, license_id:'SPLL-000000-0000', party_name:'テスト 太郎', usage_category:'書籍',
+    works:'（テスト作品）', guide_url: workflowUrl_() + '?page=guide&t=TEST', office_contact:getConfig_('OFFICE_CONTACT','') };
+  if(contractId){
+    const n = readRows_(ssOps_(),'Notification_Queue')
+      .find(function(x){ return x.type === 'GUIDE_READY' && x.contract_id === String(contractId); });
+    if(n){ v = guideMailVars_(n); v.to = to; }             // 実データの見本を、指定した宛先だけへ送る
+  }
+  sendGuideEmail_(v);
+  logEvent_('notification', 'TEST', actor.email, null, { channel:'EMAIL', to_domain:(to.split('@')[1] || '') });
+  return { sent:true, to:to };
+}
+
+/** 自動送信の状況（管理コンソール表示用） */
+function admin_getMailStatus(){ requireRole_([]);
+  const rows = readRows_(ssOps_(),'Notification_Queue').filter(function(n){ return n.type === 'GUIDE_READY'; });
+  let quota = null; try{ quota = num_(MailApp.getRemainingDailyQuota()); }catch(e){}
+  return {
+    enabled: guideEmailEnabled_(),
+    sent: rows.filter(function(n){ return n.status === 'SENT'; }).length,
+    pending: rows.filter(function(n){ return n.status === 'MANUAL_REQUIRED'; }).length,
+    failed: rows.filter(function(n){ return n.status === 'SEND_FAILED'; }).length,
+    remaining_quota: quota,
+    from_name: getConfig_('MAIL_FROM_NAME','TRPGライツ事務局'),
+    reply_to: getConfig_('MAIL_REPLY_TO','')
+  };
+}
+
 // ---- 締結後の手続き案内（振込先・案内ページ）----
 const PAYMENT_CONFIG_KEYS = [
   ['bank_name','PAYMENT_BANK_NAME'], ['branch','PAYMENT_BRANCH'], ['account_type','PAYMENT_ACCOUNT_TYPE'],
   ['account_number','PAYMENT_ACCOUNT_NUMBER'], ['account_holder','PAYMENT_ACCOUNT_HOLDER'],
   ['holder_kana','PAYMENT_HOLDER_KANA'], ['note','PAYMENT_NOTE'], ['office_contact','OFFICE_CONTACT'],
-  ['workflow_url','WORKFLOW_URL'], ['office_email_domain','OFFICE_EMAIL_DOMAIN']
+  ['workflow_url','WORKFLOW_URL'], ['office_email_domain','OFFICE_EMAIL_DOMAIN'],
+  ['mail_from_name','MAIL_FROM_NAME'], ['mail_reply_to','MAIL_REPLY_TO'],
+  ['guide_email_auto_send','GUIDE_EMAIL_AUTO_SEND'], ['guide_email_subject','GUIDE_EMAIL_SUBJECT'], ['guide_email_body','GUIDE_EMAIL_BODY']
 ];
 /** 振込先・案内ページ設定の取得（振込先は口座情報のため SYSTEM_ADMIN/ACCOUNTING/OPERATIONS のみ） */
 function admin_getGuideConfig(){ requireRole_(['SYSTEM_ADMIN','OPERATIONS','LEGAL_ADMIN']);
@@ -398,7 +433,10 @@ function admin_saveGuideConfig(c){ const actor = requireRole_(['SYSTEM_ADMIN','O
   const before = {};
   PAYMENT_CONFIG_KEYS.forEach(function(x){ before[x[0]] = getConfig_(x[1],''); });
   PAYMENT_CONFIG_KEYS.forEach(function(x){
-    if(c[x[0]] !== undefined) setConfig_(x[1], sanitizeCell_(String(c[x[0]]).trim()).slice(0,200));
+    if(c[x[0]] === undefined) return;
+    // 本文テンプレートは長文・改行を含むため、サニタイズ短縮の対象外にする
+    const raw = String(c[x[0]]);
+    setConfig_(x[1], x[0] === 'guide_email_body' ? raw.slice(0,4000) : sanitizeCell_(raw.trim()).slice(0,300));
   });
   const changed = PAYMENT_CONFIG_KEYS.filter(function(x){ return c[x[0]] !== undefined && String(c[x[0]]).trim() !== before[x[0]]; })
     .map(function(x){ return x[0]; });
@@ -689,9 +727,10 @@ function admin_getCertStatus(contractId){ requireRole_([]);
 function admin_listNotifications(){ requireRole_([]);
   const ctrWorks = contractWorksMap_();
   return readRows_(ssOps_(),'Notification_Queue')
-    .filter(function(n){ return n.status === 'MANUAL_REQUIRED'; })
+    .filter(function(n){ return n.status === 'MANUAL_REQUIRED' || n.status === 'SEND_FAILED'; })
     .map(function(n){ return { notification_id:n.notification_id, contract_id:n.contract_id,
-      work:contractWorkLabel_(ctrWorks, n.contract_id), type:n.type,
+      work:contractWorkLabel_(ctrWorks, n.contract_id), type:n.type, status:n.status,
+      attempts:num_(n.attempts), last_error:String(n.last_error||''),
       payload:parseJson_(n.payload_json, {}), created_at:String(n.created_at||'').slice(0,10) }; });
 }
 /** 通知の対応済み記録（誰がいつ対応したか） */

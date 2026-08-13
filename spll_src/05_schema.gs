@@ -79,7 +79,8 @@ const SCHEMA_OPS = {
   Legal_Documents:      ['legal_document_id','document_type','version','content_html','content_hash','effective_from','effective_to','status','approved_by','approved_at'],
   Application_Consents: ['consent_id','application_id','document_type','legal_document_id','legal_document_version','content_hash','display_hash','consent_session_id','accepted','accepted_at','consented_at','consent_method','evidence_version'],
   // 通知キュー（§10）：メール非保持方針下の「誰に何を通知すべきか」の記録
-  Notification_Queue:   ['notification_id','contract_id','type','reference_id','payload_json','status','created_at','sent_at','handled_by'],
+  // 自動送信（GUIDE_READY等）：MANUAL_REQUIRED→SENT／SEND_FAILED。attempts で再試行を制御
+  Notification_Queue:   ['notification_id','contract_id','type','reference_id','payload_json','status','created_at','sent_at','handled_by','attempts','last_error','sent_to_domain'],
   // スキーマ移行（V2-003）
   // バッジ発行ジョブ（V2-014）：QUEUED→GENERATING→ISSUED／ERROR→RETRY_WAIT
   Badge_Jobs:           ['badge_job_id','contract_id','status','retry_count','last_error','created_at','finished_at'],
@@ -195,6 +196,10 @@ function setup_bootstrap(opts){
   if(!getConfig_('SUBMIT_FOLDER_MAX_FILES',''))   setConfig_('SUBMIT_FOLDER_MAX_FILES','50');                // 1版あたりの最大ファイル数
   if(!getConfig_('SUBMIT_FOLDER_MAX_GB',''))      setConfig_('SUBMIT_FOLDER_MAX_GB','5');                    // 1版あたりの合計サイズ上限（GB）
   if(!getConfig_('SUBMIT_FOLDER_OPEN_DAYS',''))   setConfig_('SUBMIT_FOLDER_OPEN_DAYS','14');                // 投入用リンクの開放日数（超過で共有解除）
+  // 締結後の案内メール（自動送信）。本文には振込先を書かず、案内ページURLのみを載せる
+  if(!getConfig_('GUIDE_EMAIL_AUTO_SEND','')) setConfig_('GUIDE_EMAIL_AUTO_SEND','true');
+  if(!getConfig_('GUIDE_EMAIL_SUBJECT',''))   setConfig_('GUIDE_EMAIL_SUBJECT', GUIDE_EMAIL_DEFAULT_SUBJECT);
+  if(!getConfig_('GUIDE_EMAIL_BODY',''))      setConfig_('GUIDE_EMAIL_BODY', GUIDE_EMAIL_DEFAULT_BODY);
   // 法人の退避先（窓口は個人専用）。ダミー値を置き、実運用の受け口が決まり次第
   // 管理コンソール「設定→申込導線」で差し替える（Googleフォーム／formrun／メールいずれも可）
   if(!getConfig_('CORPORATE_INQUIRY_EMAIL','')) setConfig_('CORPORATE_INQUIRY_EMAIL','spll-corporate@example.com');
@@ -234,7 +239,7 @@ function setup_seedSamples_(){
 }
 
 // ---- スキーマ移行（修正設計書v2 V2-003）----
-const SCHEMA_VERSION = 8;   // v8: 契約者の連絡先メール（CloudSign送付先）を保持。v7: 大容量提出。v6: Finance領域を管理対象外
+const SCHEMA_VERSION = 9;   // v9: 案内メールの自動送信（通知の送信状態）。v8: 連絡先メール。v7: 大容量提出
 
 /**
  * 既存スプレッドシートへ不足シート・不足列を追加する（既存列の削除・並び替えはしない）。

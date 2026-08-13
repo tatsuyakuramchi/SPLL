@@ -25,6 +25,7 @@ function trigger_every5min(){                     // Webhook再処理＋AI審査
   batchRun_('processWebhookReceipts', processWebhookReceipts_);
   batchRun_('runAiReviews', batch_runAiReviews_);
   batchRun_('retryBadgeJobs', retryBadgeJobs_);
+  batchRun_('sendGuideEmails', batch_sendGuideEmails_);   // 締結後の案内メール自動送信（失敗は再試行→人手へ）
 }
 function trigger_daily(){                         // 期限処理・SLA・データ削除
   batchRun_('expireAccessTokens', expireAccessTokens_);
