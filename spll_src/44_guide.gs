@@ -29,9 +29,15 @@ function paymentConfigured_(){
   return !!(p.bank_name || p.account_number || p.account_holder);
 }
 
-/** 締結時にGUIDEトークンを発行して案内URLを返す（冪等：既存があれば作り直さない） */
+/**
+ * 締結時にGUIDEトークンを発行する。
+ * 作品の完成時期は契約者ごとに大きく異なる（数日〜1年以上）ため、案内ページは
+ * 「契約期間をカバーする長期の入口」として扱い、短命な提出リンクはここから都度発行する。
+ * 既定400日（1年契約＋更新手続きの余裕）。GUIDE_TOKEN_DAYS で変更可能。
+ */
+function guideTokenDays_(){ return num_(getConfig_('GUIDE_TOKEN_DAYS','400')) || 400; }
 function prepareGuideToken_(contractId){
-  return issueToken_(contractId, 'GUIDE', 400, 200);   // 契約期間中は開ける想定（長期・多数回）
+  return issueToken_(contractId, 'GUIDE', guideTokenDays_(), 0);   // 回数制限なし（何度でも開ける）
 }
 
 function serveGuide_(e){
@@ -54,6 +60,7 @@ function web_getGuideContext(token){
   const subs = readRows_(ssOps_(),'Submissions').filter(function(s){ return s.contract_id === contractId; });
 
   return {
+    guide_expires_at: String(tok.expires_at || '').slice(0,10),
     license_id: c.license_id || '',
     party_name: kase.party_display_name || '',
     usage_category: c.usage_category || '',

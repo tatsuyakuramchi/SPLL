@@ -33,5 +33,6 @@ ok(/loadLegalFile/.test(adminHtml)&&/previewLegal/.test(adminHtml),'HTMLファ�
 ok(/id="gc-bank_name"/.test(adminHtml)&&/saveGuideConfig/.test(adminHtml),'管理画面に振込先の設定がある');
 ok(/admin_issueGuideLink/.test(adminHtml),'契約管理から案内リンクを発行できる');
 ok(/gc-guide_email_auto_send/.test(adminHtml)&&/sendMailTest/.test(adminHtml),'管理画面に案内メールの自動送信設定がある');
+ok(/admin_setCertEnabled/.test(adminHtml),'契約管理に認証オン／オフのスイッチがある');
 console.log('\nFORM V4 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

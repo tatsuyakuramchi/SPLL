@@ -7,7 +7,9 @@ function issueToken_(contractId, purpose, days, maxUses){
   const token = Utilities.getUuid() + randCode_(8);
   appendRow_(ssOps_(),'Access_Tokens',{ token_id:Utilities.getUuid(), contract_id:contractId,
     purpose:purpose, token_hash:hash_(token), status:'OPEN', expires_at:addDaysIso_(days||30),
-    max_uses:maxUses||10, used_count:0, last_used_at:'', issued_at:new Date().toISOString(), revoked_at:'' });
+    // maxUses=0 は「回数無制限」（案内ページのように何度でも開くもの）。未指定は10回。
+    max_uses:(maxUses === 0 ? 0 : (maxUses || 10)),
+    used_count:0, last_used_at:'', issued_at:new Date().toISOString(), revoked_at:'' });
   return token;
 }
 /** トークン検証：用途一致・OPEN・期限内・回数内。期限切れは EXPIRED に更新して拒否。 */

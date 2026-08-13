@@ -53,7 +53,7 @@
         <div class="k">利用許諾料</div><div class="v" id="gFee">—</div>
         <div class="k">締結日</div><div class="v mono" id="gSigned">—</div>
       </div>
-      <div class="note">SPLL番号は、お問い合わせ・お振込・作品提出のすべてで使う受付番号です。</div>
+      <div class="note">SPLL番号は、お問い合わせ・お振込・作品提出のすべてで使う受付番号です。<span id="gExp"></span></div>
     </div>
 
     <div class="card" id="payCard" style="display:none;">
@@ -67,7 +67,7 @@
       <h2 id="submitHead">2. 作品のご提出</h2>
       <p style="font-size:13.5px;margin:0 0 12px;">完成した二次創作作品をご提出ください。提出作品はAIによる一次確認と事務局の確認に付されます。<b>20MBを超える動画・音源・入稿データ等も、専用フォルダからご提出いただけます。</b></p>
       <button class="btn" id="toSubmit">作品提出ページを開く →</button>
-      <div class="note" id="submitNote">ボタンを押すと、この契約専用の提出ページが開きます（リンクは都度発行されます）。</div>
+      <div class="note" id="submitNote">ボタンを押すと、この契約専用の提出ページが開きます。<b>提出リンクは押すたびに新しく発行される</b>ため、作品の完成が数ヶ月先でもこのページから開き直せます。</div>
     </div>
 
     <div class="card">
@@ -108,6 +108,8 @@ function render(c){
   $("gUsage").textContent=c.usage_category||"—";
   $("gFee").textContent=c.fee_label||"—";
   $("gSigned").textContent=c.signed_at||"—";
+  $("gExp").textContent=c.guide_expires_at
+    ? ("　このページのご利用期限："+c.guide_expires_at+"（作品のご提出はこの期間内であればいつでも可能です。期限後は事務局へご連絡ください）") : "";
 
   if(c.payment){
     $("payCard").style.display="";

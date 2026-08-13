@@ -653,7 +653,34 @@ function applyCertStatus_(contractId, status, reasonCode, reasonText, legalCaseI
     requested_by:actorEmail, approved_by:actorEmail, legal_case_id:legalCaseId||'',
     effective_at:new Date().toISOString() });
   logEvent_('certificate', cert.cert_id, actorEmail, {status:before}, {status:status, reason_code:reasonCode||''});
+  // ライセンス台帳の認証状態も追随させる（一覧・検証の表示が実体とずれないように）
+  const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === contractId; });
+  if(c && c.license_id) updateLicenseCase_(c.license_id, { certification_status: status });
   return true;
+}
+
+/**
+ * 認証の有効／無効スイッチ（未入金対応）。
+ * 既定は有効（締結時にACTIVE）。未入金が判明したらオフにして PAYMENT_HOLD にし、
+ * 入金確認後にオンへ戻す。ACTIVE ⇄ PAYMENT_HOLD の往復のみを担当者1名で操作できる。
+ * 失効（REVOKED）・契約終了（TERMINATED）や、それらからの復帰は従来どおり申請→別担当者の承認が必要。
+ */
+function admin_setCertEnabled(contractId, enabled, reason){
+  const actor = requireRole_(['OPERATIONS','ACCOUNTING','LEGAL_ADMIN']);
+  const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.contract_id === String(contractId||''); });
+  if(!cert) throw new Error('DATA_NOT_FOUND: 認証が見つかりません: ' + contractId);
+  if(['ACTIVE','PAYMENT_HOLD'].indexOf(String(cert.status)) < 0)
+    throw new Error('DATA_CONFLICT: このスイッチは有効／入金保留の切替のみです（現在: ' + cert.status +
+      '）。失効・再有効化は申請→別担当者の承認で行ってください。');
+  const on = enabled === true || String(enabled) === 'true';
+  if(!on && !String(reason||'').trim())
+    throw new Error('VALIDATION_ERROR: 認証を無効にする理由（未入金の状況など）は必須です');
+  if(on && String(cert.status) === 'ACTIVE') return { status:'ACTIVE', changed:false };
+  if(!on && String(cert.status) === 'PAYMENT_HOLD') return { status:'PAYMENT_HOLD', changed:false };
+  const status = on ? 'ACTIVE' : 'PAYMENT_HOLD';
+  applyCertStatus_(contractId, status, on ? 'PAYMENT_CLEARED' : 'PAYMENT_HOLD',
+    sanitizeCell_(String(reason || (on ? '入金確認により再有効化' : ''))).slice(0,300), '', actor.email);
+  return { status:status, changed:true };
 }
 
 // ---- 認証状態変更の申請・承認（V2-018）----

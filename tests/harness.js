@@ -1135,5 +1135,57 @@ const ms=G.admin_getMailStatus();
 ok(ms.enabled===true&&ms.sent>=1&&typeof ms.failed==='number','送信状況（有効・送信済・失敗数）を表示');
 
 
+// ============ 認証のオン／オフスイッチ（未入金対応） ============
+// 106. 締結時はオン。担当者1名でオフ→オンへ戻せる（ACTIVE ⇄ PAYMENT_HOLD のみ）
+const swApp=mkApp(['WRK-BKK00019'],'書籍',docExtra2);
+scriptProps.FORMRUN_FIELD_MAP=JSON.stringify({'handoff':'handoff_token'});
+G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:swApp.application_ref,
+  submission_id:'FR-SW',columns:[{name:'handoff',value:swApp.handoff_token}]})}});
+G.doPost({parameter:{},postData:{contents:JSON.stringify({ document_id:'DOC-SW', status:'COMPLETED', application_ref:swApp.application_ref })}});
+delete scriptProps.FORMRUN_FIELD_MAP;
+const cSw=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-SW');
+const certSw=()=>rows(OPS,'Certificates').find(x=>x.contract_id===cSw.contract_id);
+ok(certSw().status==='ACTIVE','締結時の認証は既定オン（ACTIVE）');
+let noReason=false; try{ G.admin_setCertEnabled(cSw.contract_id,false,''); }catch(e){ noReason=/理由/.test(String(e.message)); }
+ok(noReason,'オフにする理由は必須');
+G.admin_setCertEnabled(cSw.contract_id,false,'利用許諾料が未入金のため');
+ok(certSw().status==='PAYMENT_HOLD'&&certSw().reason_code==='PAYMENT_HOLD','オフでPAYMENT_HOLD（理由つき）');
+ok(rows(OPS,'License_Cases').find(k=>k.license_id===swApp.license_id).certification_status==='PAYMENT_HOLD',
+  'ライセンス台帳の認証状態も追随（一覧表示が実体とずれない）');
+// 検証ポータルは「無効」を返す＝バッジQRから未入金が判別できる
+const rotSw=G.admin_rotateCertCode(cSw.contract_id);
+ok(G.serveVerify_({parameter:{page:'verify',id:rotSw.cert_id,c:rotSw.check_code}})._h.indexOf('無効')>=0,
+  'オフの間はバッジQRの検証が「無効」になる');
+G.admin_setCertEnabled(cSw.contract_id,true,'入金確認');
+ok(certSw().status==='ACTIVE'&&certSw().reason_code==='PAYMENT_CLEARED','入金確認でオンへ戻せる（承認不要）');
+ok(G.serveVerify_({parameter:{page:'verify',id:rotSw.cert_id,c:rotSw.check_code}})._h.indexOf('確認済み')>=0,'戻すと検証も有効に');
+ok(G.admin_setCertEnabled(cSw.contract_id,true,'').changed===false,'既にオンなら何もしない（冪等）');
+// 失効・契約終了はこのスイッチの対象外（従来どおり申請→別担当者の承認）
+G.setup_setInitialAdmin('legal2@example.com','LEGAL_ADMIN');   // 承認者（申請者とは別担当）
+const reqSw=G.admin_requestCertChange(cSw.contract_id,'REVOKED','MANUAL_REVOKE','テスト失効','');
+G.Session={ getActiveUser:()=>({ getEmail:()=>'legal2@example.com' }) };
+G.admin_approveCertChange(reqSw.request_id,true,'');
+G.Session=SessRef;
+let notSwitchable=false; try{ G.admin_setCertEnabled(cSw.contract_id,true,'x'); }catch(e){ notSwitchable=/有効／入金保留の切替のみ/.test(String(e.message)); }
+ok(notSwitchable,'失効中の契約はスイッチで復活できない（職務分離を迂回しない）');
+
+// 107. 案内ページの有効期間：作品完成が先でも提出リンクを取り直せる
+ok(G.guideTokenDays_()===400,'案内ページの既定有効期間は400日（1年契約＋更新の余裕）');
+G.setConfig_('GUIDE_TOKEN_DAYS','730');
+ok(G.guideTokenDays_()===730,'有効期間はConfigで変更できる');
+G.setConfig_('GUIDE_TOKEN_DAYS','400');
+const glExp=G.admin_issueGuideLink(contract.contract_id);
+const gctxExp=G.web_getGuideContext(decodeURIComponent(glExp.url.split('t=')[1]));
+ok(/^\d{4}-\d{2}-\d{2}$/.test(gctxExp.guide_expires_at),'案内ページに利用期限を表示: '+gctxExp.guide_expires_at);
+// 提出トークンは短命（30日）だが、案内ページから何度でも再発行できる
+const tokGuide=decodeURIComponent(glExp.url.split('t=')[1]);
+const l1=G.web_getSubmitLinkFromGuide(tokGuide), l2=G.web_getSubmitLinkFromGuide(tokGuide);
+ok(l1.url!==l2.url,'提出リンクは呼ぶたびに新しく発行される（数ヶ月後の完成でも取り直せる）');
+ok(G.resolveToken_(decodeURIComponent(l1.url.split('t=')[1]),'SUBMISSION')===null,'古い提出リンクは失効する');
+ok(G.web_getSubmitContext(decodeURIComponent(l2.url.split('t=')[1])).contract_id===contract.contract_id,'最新の提出リンクは有効');
+const gTok=rows(OPS,'Access_Tokens').filter(t=>t.contract_id===contract.contract_id&&t.purpose==='GUIDE'&&t.status==='OPEN')[0];
+ok(String(gTok.max_uses)==='0','案内ページは閲覧回数の上限なし（何度でも開ける）');
+
+
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

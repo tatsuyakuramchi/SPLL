@@ -193,6 +193,7 @@
       <table><thead><tr><th>契約</th><th>書類タイトル</th><th>不達種別</th><th>発生</th><th>操作</th></tr></thead><tbody id="acc-cs-delivery-tbody"></tbody></table>
     </div>
     <div class="note">申込の訂正（原作・利用目的・名義等）は上書きせず「再申込」で新しい申込番号を発行します（旧申込はSUPERSEDED・再同意/再送信が必要）。CloudSignテンプレート・経路別フォームURLの版管理は admin_saveContractTemplates で設定します（STANDARD_FIXED／STANDARD_RATE／MANUAL_REVIEW）。</div>
+    <div class="note"><b>認証のオン／オフ：</b>締結時は<b>オン（有効）</b>で発行されます。未入金が判明したら「認証をオフ」にすると、バッジのQRから検証したときに「無効」と表示されます（担当者1名で切替可能・理由必須）。入金確認後は「認証をオン」で戻せます。<b>失効（REVOKED）・契約終了は別扱い</b>で、申請→別担当者の承認が必要です。</div>
     <div class="note">締結の書き戻しはCloudSign Webhook（status=2 締結完了）のみが行います。自動突合できない締結は「未紐付け」として記録され、上のパネルから手動で申込に紐付けます（誤って別申込の原作を固定しないため、紐付けまで認証等の発行は保留されます）。</div>
   </section>
 
@@ -623,6 +624,7 @@ var MOCK = {
   admin_getIntegrationConfig:function(){ return _mInt; },
   admin_saveCloudSignConfig:function(c){ _mInt.cloudsign.client_id=c.client_id; _mInt.cloudsign.template_id=c.template_id; _mInt.cloudsign.callback_url=c.callback_url; _mInt.cloudsign.sandbox=c.sandbox; if(c.secret) _mInt.cloudsign.secret_set=true; return true; },
   admin_saveFormRunConfig:function(c){ _mInt.formrun.form_url=c.form_url; _mInt.formrun.field_map=c.field_map; _mInt.formrun.ref_param=c.ref_param; _mInt.formrun.hidden_map=c.hidden_map; _mInt.formrun.max_works=c.max_works; if(c.webhook_secret) _mInt.formrun.webhook_secret_set=true; return true; },
+  admin_setCertEnabled:function(id,on){ _mContracts&&0; return { status:on?"ACTIVE":"PAYMENT_HOLD", changed:true }; },
   admin_getMailStatus:function(){ return {enabled:_mGuide.guide_email_auto_send!=="false",sent:12,pending:1,failed:0,remaining_quota:1487,from_name:_mGuide.mail_from_name,reply_to:_mGuide.mail_reply_to}; },
   admin_sendGuideEmailTest:function(to){ return {sent:true,to:to}; },
   admin_getGuideConfig:function(){ return Object.assign({}, _mGuide, {configured:!!(_mGuide.bank_name||_mGuide.account_number), workflow_url_effective:_mGuide.workflow_url||"https://script.google.com/macros/s/WORKFLOW/exec"}); },
@@ -1147,7 +1149,7 @@ function loadLicense(){
     var tb=$("license-tbody"); tb.innerHTML=""; rows=rows||[];
     if(!rows.length){ emptyRow(tb,11,"ライセンス案件がありません"); return; }
     var caseM={APPLIED:{cls:"wait",label:"申込受付"},CONTRACTING:{cls:"review",label:"契約手続中"},SIGNED:{cls:"pass",label:"締結済"},HOLD:{cls:"fail",label:"要確認"},CLOSED:{cls:"wait",label:"終了"}};
-    var certM={NOT_ISSUED:{cls:"wait",label:"—"},ACTIVE:{cls:"pass",label:"有効"},SUSPENDED:{cls:"review",label:"停止"},REVOKED:{cls:"fail",label:"失効"}};
+    var certM={NOT_ISSUED:{cls:"wait",label:"—"},ACTIVE:{cls:"pass",label:"有効"},PAYMENT_HOLD:{cls:"review",label:"未入金で停止"},SUSPENDED:{cls:"review",label:"停止"},REVOKED:{cls:"fail",label:"失効"}};
     var hoM={NOT_REQUIRED:{cls:"wait",label:"—"},READY:{cls:"review",label:"引渡待ち"},SENT:{cls:"review",label:"送信済"},ACCEPTED:{cls:"pass",label:"受領済"},ERROR:{cls:"fail",label:"エラー"}};
     rows.forEach(function(k){
       var tr=document.createElement("tr");
@@ -1189,7 +1191,9 @@ function loadContract(){
       tr.appendChild(td(esc(c.applicant)));
       tr.appendChild(td(pill(cp)));
       var cs=String(c.cert_status||"NONE");
-      var certPill = cs==="ACTIVE"?{cls:"pass",label:"有効"}:(cs==="REVOKED"?{cls:"fail",label:"失効"}:{cls:"wait",label:"—"});
+      var certPill = cs==="ACTIVE"?{cls:"pass",label:"有効"}
+        :(cs==="PAYMENT_HOLD"?{cls:"review",label:"未入金で停止"}
+        :(cs==="REVOKED"?{cls:"fail",label:"失効"}:{cls:"wait",label:"—"}));
       tr.appendChild(td(pill(certPill)));
       tr.appendChild(td('<span class="id">'+esc(c.signed_at||"—")+'</span>'));
       var act=document.createElement("td"); act.className="actions";
@@ -1200,6 +1204,19 @@ function loadContract(){
           call("admin_issueGuideLink",[c.contract_id],function(res){ showGuideLink(c.contract_id,res); });
         }));
         act.appendChild(mkBtn("提出リンク発行","btn",function(){ call("admin_sendUploadLink",[c.contract_id],function(res){ showUploadLink(c.contract_id, res); }); }));
+      }
+      if(cs==="ACTIVE"||cs==="PAYMENT_HOLD"){
+        // 未入金対応のスイッチ（担当者1名で切替可能・既定はオン）
+        act.appendChild(mkBtn(cs==="ACTIVE"?"認証をオフ（未入金）":"認証をオン（入金確認）", cs==="ACTIVE"?"btn d":"btn p", function(){
+          if(cs==="ACTIVE"){
+            var r=prompt("認証を無効にします。理由（未入金の状況など・必須）：","利用許諾料が未入金のため");
+            if(r===null) return; if(!r.trim()){ toast("理由は必須です",true); return; }
+            call("admin_setCertEnabled",[c.contract_id,false,r],function(){ toast("認証をオフにしました（検証は「無効」と表示されます）"); loadContract(); loadLicense(); });
+          }else{
+            if(!confirm("入金を確認できたものとして認証をオンに戻します。よろしいですか？")) return;
+            call("admin_setCertEnabled",[c.contract_id,true,"入金確認により再有効化"],function(){ toast("認証をオンに戻しました"); loadContract(); loadLicense(); });
+          }
+        }));
       }
       if(cs==="ACTIVE"){
         act.appendChild(mkBtn("失効を申請","btn d",function(){ var reason=prompt("失効理由（必須）：",""); if(reason===null) return; if(!reason.trim()){ toast("理由は必須です", true); return; } call("admin_requestCertChange",[c.contract_id,"REVOKED","MANUAL_REVOKE",reason,""],function(){ toast("失効を申請しました（別の担当者の承認待ち）"); loadContract(); }); }));
