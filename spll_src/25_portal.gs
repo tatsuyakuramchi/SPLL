@@ -31,16 +31,18 @@ function api_getApplyConfig(){
   };
 }
 
+const CORPORATE_INQUIRY_DEFAULT_NOTE =
+  '法人によるご利用は、本窓口の標準契約とは別に個別契約でのご対応となります。下記よりお問い合わせください。';
 /**
  * 法人向け問い合わせ窓口（CloudSign FORMの対象外）。
  * 本窓口は個人（個人事業主を含む）専用のため、法人は個別契約ルートへ案内する。
+ * 受け口はGoogleフォーム・formrun・メールのいずれでもよく、管理コンソールから差し替える。
  */
 function corporateInquiry_(){
   return {
     url:   getConfig_('CORPORATE_INQUIRY_URL',''),
     email: getConfig_('CORPORATE_INQUIRY_EMAIL',''),
-    note:  getConfig_('CORPORATE_INQUIRY_NOTE',
-      '法人によるご利用は、本窓口の標準契約とは別に個別契約でのご対応となります。下記よりお問い合わせください。')
+    note:  getConfig_('CORPORATE_INQUIRY_NOTE','') || CORPORATE_INQUIRY_DEFAULT_NOTE
   };
 }
 

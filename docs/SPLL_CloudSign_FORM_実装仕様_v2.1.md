@@ -201,9 +201,18 @@ CloudSign上の受信者用フリーテキスト・押印欄・署名欄・チ�
 
 | Config | 内容 |
 |---|---|
-| `CORPORATE_INQUIRY_URL` | 法人向け問い合わせフォームのURL |
+| `CORPORATE_INQUIRY_URL` | 法人向け問い合わせフォームのURL（Googleフォーム／formrun／自社フォームいずれも可） |
 | `CORPORATE_INQUIRY_EMAIL` | 法人向け問い合わせ先メールアドレス |
 | `CORPORATE_INQUIRY_NOTE` | 案内文（未設定時は既定文言） |
+
+いずれも**管理コンソール「設定 → FormRun／クラウドサインフォーム → 申込導線」**から編集する
+（`admin_getPortalRoutingConfig` / `admin_savePortalRoutingConfig`）。URLとメールの両方を設定した場合は
+URLを優先して案内し、どちらも未設定の場合は「事務局までご確認ください」と表示する。
+受け口が未定の間は `setup_bootstrap` が置くダミー（`spll-corporate@example.com`）のままでも
+導線は成立するが、**本番切替前に必ず実アドレス又はフォームURLへ差し替えること**。
+
+同画面から経路別フォームURL（`FORM_URL_STANDARD_FIXED` / `FORM_URL_STANDARD_RATE` /
+`FORM_URL_INDIVIDUAL` / `FORM_URL_MANUAL_REVIEW`）も設定できる。
 
 `decideContractRouteV4_` も法人をMANUAL_REVIEWとするが、これは旧データの再申込など
 後段経路での保険であり、通常フローでは到達しない。
@@ -301,7 +310,8 @@ FormRun v4改変検知は `v4:` 申込だけに適用し、既存申込・既締
 8. `FORMRUN_FIELD_MAP` を設定
 9. `FORM_URL_STANDARD_FIXED` / `FORM_URL_STANDARD_RATE`（テンプレートが1種類なら `FORM_URL_INDIVIDUAL`）を設定
 10. 個別確認（未成年・イベント等）を使う場合のみ `FORM_URL_MANUAL_REVIEW` を設定
-10.5. `CORPORATE_INQUIRY_URL`（又は `CORPORATE_INQUIRY_EMAIL`）を設定＝法人の退避先
+10.5. 管理コンソール「設定→申込導線」で `CORPORATE_INQUIRY_URL`（又は `CORPORATE_INQUIRY_EMAIL`）を
+    実運用の受け口へ差し替える＝法人の退避先（初期値はダミーアドレス）
 11. stagingでFORM→CloudSign→Webhookの一連テストを行う
 12. 締結後に `Contracts.terms_snapshot` の `terms_snapshot_hash_verified` が `true` であることを確認する
     （`false` の場合は個別条件を受信証跡から復元できておらず、TERMS_MISMATCHで自動有効化が止まる）

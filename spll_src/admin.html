@@ -335,6 +335,28 @@
     <!-- FORMRUN / クラウドサインフォーム -->
     <div class="setpane" id="p-formrun">
       <div class="panel">
+        <div class="ph"><h3>申込導線（経路別フォームURL・法人の案内先）</h3><span class="hint">Config（台帳）／即時反映</span></div>
+        <div class="pbody">
+          <p class="setnote">申込窓口は<b>個人（個人事業主を含む）専用</b>です。契約形態でCloudSignテンプレートが異なるため、フォームURLは経路別に設定できます（未設定なら「個人共通」を使用）。</p>
+          <div class="grid2">
+            <div class="fld"><label>定額契約のフォームURL <span class="h">FORM_URL_STANDARD_FIXED</span></label><input id="pr-form_url_standard_fixed" placeholder="https://form.run/@… （定額用テンプレート）"></div>
+            <div class="fld"><label>売上連動契約のフォームURL <span class="h">FORM_URL_STANDARD_RATE</span></label><input id="pr-form_url_standard_rate" placeholder="https://form.run/@… （売上連動用テンプレート）"></div>
+          </div>
+          <div class="grid2">
+            <div class="fld"><label>個人共通フォームURL <span class="h">FORM_URL_INDIVIDUAL（経路別未設定時に使用）</span></label><input id="pr-form_url_individual" placeholder="https://form.run/@…"></div>
+            <div class="fld"><label>個別確認フォームURL <span class="h">FORM_URL_MANUAL_REVIEW（未成年・イベント等・任意）</span></label><input id="pr-form_url_manual_review" placeholder="未設定なら「事務局から連絡」と案内"></div>
+          </div>
+          <p class="setnote" style="margin-top:14px;"><b>法人の案内先</b>：法人は標準契約の対象外のため、ポータルで「法人」を選ぶと申込へ進めず、下記の窓口を案内します。<b>Googleフォーム・formrun・自社フォームなどURLでも、メールアドレスでも設定できます</b>（両方あればURLを優先／どちらも未設定なら「事務局までご確認ください」と表示）。</p>
+          <div class="grid2">
+            <div class="fld"><label>法人向け問い合わせURL <span class="h">CORPORATE_INQUIRY_URL</span></label><input id="pr-corporate_inquiry_url" placeholder="https://docs.google.com/forms/… / https://form.run/@…"></div>
+            <div class="fld"><label>法人向け問い合わせメール <span class="h">CORPORATE_INQUIRY_EMAIL</span></label><input id="pr-corporate_inquiry_email" placeholder="corporate@example.com"></div>
+          </div>
+          <div class="fld"><label>法人向け案内文 <span class="h">CORPORATE_INQUIRY_NOTE（空欄で既定文言）</span></label><textarea id="pr-corporate_inquiry_note" style="min-height:64px"></textarea></div>
+          <div id="pr-preview" class="note" style="margin:0"></div>
+        </div>
+        <div class="pfoot"><button class="btn" onclick="previewCorporateNotice()">案内表示をプレビュー</button><button class="save" onclick="savePortalRouting()">申込導線を保存</button></div>
+      </div>
+      <div class="panel">
         <div class="ph"><h3>クラウドサインフォーム（powered by formrun）連携</h3><span class="hint">ScriptProperties（secretはマスク）</span></div>
         <div class="pbody">
           <p class="setnote">公開ポータルで発行した <b>application_ref</b> を、クラウドサインフォームの<b>hidden項目</b>に引き継ぎ、申込→締結を突合します。Webhook Secret は保存時のみ入力してください。</p>
@@ -486,6 +508,10 @@ var _mFee = [
 ];
 var _mDS = {SS_MASTER:"",SS_OPS:"",DRIVE_ROOT:"",GCP_PROJECT:"",GCP_REGION:"",GEMINI_MODEL:"",
   defaults:{SS_MASTER:"PUT_WORKS_MASTER_SPREADSHEET_ID",SS_OPS:"PUT_OPS_SPREADSHEET_ID",DRIVE_ROOT:"PUT_SHARED_DRIVE_FOLDER_ID",GCP_PROJECT:"PUT_GCP_PROJECT_ID",GCP_REGION:"us-central1",GEMINI_MODEL:"gemini-2.5-flash"}};
+var _mRouting = {form_url_standard_fixed:"",form_url_standard_rate:"",form_url_individual:"https://form.run/@spll-individual",
+  form_url_manual_review:"",corporate_inquiry_url:"",corporate_inquiry_email:"spll-corporate@example.com",
+  corporate_inquiry_note:"",
+  corporate_default_note:"法人によるご利用は、本窓口の標準契約とは別に個別契約でのご対応となります。下記よりお問い合わせください。"};
 var _mInt = {cloudsign:{client_id:"",secret_set:false,template_id:"",callback_url:"",sandbox:true},
   formrun:{form_url:"",webhook_secret_set:false,field_map:"",ref_param:"",hidden_map:"",max_works:"5"}};
 var MOCK = {
@@ -500,7 +526,9 @@ var MOCK = {
   admin_saveDataSourceConfig:function(c){ for(var k in c) _mDS[k]=c[k]; return true; },
   admin_getIntegrationConfig:function(){ return _mInt; },
   admin_saveCloudSignConfig:function(c){ _mInt.cloudsign.client_id=c.client_id; _mInt.cloudsign.template_id=c.template_id; _mInt.cloudsign.callback_url=c.callback_url; _mInt.cloudsign.sandbox=c.sandbox; if(c.secret) _mInt.cloudsign.secret_set=true; return true; },
-  admin_saveFormRunConfig:function(c){ _mInt.formrun.form_url=c.form_url; _mInt.formrun.field_map=c.field_map; _mInt.formrun.ref_param=c.ref_param; _mInt.formrun.hidden_map=c.hidden_map; _mInt.formrun.max_works=c.max_works; if(c.webhook_secret) _mInt.formrun.webhook_secret_set=true; return true; }
+  admin_saveFormRunConfig:function(c){ _mInt.formrun.form_url=c.form_url; _mInt.formrun.field_map=c.field_map; _mInt.formrun.ref_param=c.ref_param; _mInt.formrun.hidden_map=c.hidden_map; _mInt.formrun.max_works=c.max_works; if(c.webhook_secret) _mInt.formrun.webhook_secret_set=true; return true; },
+  admin_getPortalRoutingConfig:function(){ return _mRouting; },
+  admin_savePortalRoutingConfig:function(c){ Object.keys(c||{}).forEach(function(k){ _mRouting[k]=c[k]; }); return true; }
 };
 
 // ===== 設定ロード =====
@@ -618,6 +646,34 @@ function loadIntegration(){
     $("fr-hidden_map").value=fr.hidden_map||""; $("fr-max_works").value=fr.max_works||"5";
     $("fr-webhook_secret").value=""; $("fr-webhook_secret").placeholder=fr.webhook_secret_set?"設定済み（変更時のみ入力）":"未設定";
   });
+  loadPortalRouting();
+}
+// ---- 申込導線（経路別フォームURL・法人の案内先）----
+var PR_FIELDS=["form_url_standard_fixed","form_url_standard_rate","form_url_individual","form_url_manual_review",
+  "corporate_inquiry_url","corporate_inquiry_email","corporate_inquiry_note"];
+var _prDefaultNote="";
+function loadPortalRouting(){
+  call("admin_getPortalRoutingConfig",[],function(c){
+    if(!c) return;
+    _prDefaultNote=c.corporate_default_note||"";
+    PR_FIELDS.forEach(function(k){ var el=$("pr-"+k); if(el) el.value=c[k]||""; });
+    var note=$("pr-corporate_inquiry_note"); if(note) note.placeholder=_prDefaultNote;
+    previewCorporateNotice();
+  });
+}
+function previewCorporateNotice(){
+  var box=$("pr-preview"); if(!box) return;
+  var url=($("pr-corporate_inquiry_url")||{}).value||"", mail=($("pr-corporate_inquiry_email")||{}).value||"";
+  var note=(($("pr-corporate_inquiry_note")||{}).value||"")||_prDefaultNote;
+  var links=[];
+  if(url) links.push("法人向けお問い合わせフォーム（"+esc(url)+"）");
+  if(mail) links.push(esc(mail));
+  box.innerHTML="<b>ポータルでの表示：</b><br><b>法人のお客様へ</b><br>"+esc(note)+"<br>"+
+    (links.length?links.join("　／　"):'<span style="color:var(--fail)">お問い合わせ先は事務局までご確認ください（案内先が未設定です）</span>');
+}
+function savePortalRouting(){
+  var c={}; PR_FIELDS.forEach(function(k){ var el=$("pr-"+k); if(el) c[k]=el.value; });
+  call("admin_savePortalRoutingConfig",[c],function(){ toast("申込導線を保存しました（ポータルへ即時反映）"); loadPortalRouting(); });
 }
 function saveCloudSign(){
   var c={client_id:$("cs-client_id").value, template_id:$("cs-template_id").value, callback_url:$("cs-callback_url").value, sandbox:$("cs-sandbox").checked};

@@ -783,6 +783,22 @@ try{ mkAppV4(['WRK-BKK00019'],'書籍',{partyType:'CORPORATION'}); }catch(e){}
 ok(rows(OPS,'Applications').length===corpBefore,'法人申込は申込レコードを作らない');
 ok(G.api_getApplyConfig().corporate.url==='https://example.com/corp-inquiry','ポータル設定APIが法人問い合わせ窓口を配信');
 ok(G.decideContractRouteV4_({usageCategory:'書籍',workIds:['WRK-BKK00019'],partyType:'CORPORATION'}).route==='MANUAL_REVIEW','経路判定でも法人はMANUAL_REVIEW（後段の保険）');
+// 案内先は管理コンソールから差し替え可能（Googleフォーム／formrun／メールのいずれでも可）
+const pr0=G.admin_getPortalRoutingConfig();
+ok(pr0.corporate_inquiry_url==='https://example.com/corp-inquiry'&&pr0.corporate_default_note,'申込導線設定を取得（既定案内文つき）');
+G.admin_savePortalRoutingConfig({ corporate_inquiry_url:'https://docs.google.com/forms/d/e/TEST/viewform',
+  corporate_inquiry_email:'corp@example.com', corporate_inquiry_note:'法人は個別契約でご対応します。',
+  form_url_standard_rate:'https://form.run/@rate-v41' });
+ok(G.api_getApplyConfig().corporate.url==='https://docs.google.com/forms/d/e/TEST/viewform','Googleフォームのリンクへ差し替えられる');
+ok(G.api_getApplyConfig().corporate.note==='法人は個別契約でご対応します。','案内文も差し替えられる');
+ok(G.partyFormUrlV4_('INDIVIDUAL','STANDARD_RATE')==='https://form.run/@rate-v41','経路別フォームURLも同じ画面から設定できる');
+let badUrl=false; try{ G.admin_savePortalRoutingConfig({ corporate_inquiry_url:'javascript:alert(1)' }); }catch(e){ badUrl=/http\(s\)/.test(String(e.message)); }
+ok(badUrl,'http(s)以外の問い合わせURLは拒否');
+let badMail=false; try{ G.admin_savePortalRoutingConfig({ corporate_inquiry_email:'not-an-email' }); }catch(e){ badMail=/メールアドレス/.test(String(e.message)); }
+ok(badMail,'不正なメールアドレスは拒否');
+G.admin_savePortalRoutingConfig({ corporate_inquiry_url:'', corporate_inquiry_email:'', corporate_inquiry_note:'' });
+ok(/個別契約でのご対応となります/.test(G.api_getApplyConfig().corporate.note),'未設定時は既定の案内文にフォールバック');
+G.setConfig_('CORPORATE_INQUIRY_URL','https://example.com/corp-inquiry');
 
 // 80. 経路別CloudSignテンプレートURLの優先（定額と売上連動でテンプレートが異なる）
 G.setConfig_('FORM_URL_INDIVIDUAL','https://form.run/v4-individual');

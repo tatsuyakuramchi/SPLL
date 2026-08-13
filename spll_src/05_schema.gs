@@ -187,6 +187,9 @@ function setup_bootstrap(opts){
   if(!getConfig_('DEFAULT_ALLOCATION_SCHEME','')) setConfig_('DEFAULT_ALLOCATION_SCHEME','BY_WORK_EQUAL');  // 配分方式（FLOW-04）
   if(!getConfig_('APPLICATION_RETENTION_DAYS','')) setConfig_('APPLICATION_RETENTION_DAYS','365');           // 未成立申込の保有期間
   if(!getConfig_('REVIEW_SLA_DAYS',''))           setConfig_('REVIEW_SLA_DAYS','5');                         // 人手審査SLA（営業日相当・暦日）
+  // 法人の退避先（窓口は個人専用）。ダミー値を置き、実運用の受け口が決まり次第
+  // 管理コンソール「設定→申込導線」で差し替える（Googleフォーム／formrun／メールいずれも可）
+  if(!getConfig_('CORPORATE_INQUIRY_EMAIL','')) setConfig_('CORPORATE_INQUIRY_EMAIL','spll-corporate@example.com');
 
   // 5) サンプル投入（既定ON・既存があればスキップ）
   if(opts.seed !== false) setup_seedSamples_();

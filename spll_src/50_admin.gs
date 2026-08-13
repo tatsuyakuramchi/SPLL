@@ -368,6 +368,43 @@ function admin_saveFormRunConfig(c){ requireRole_(['SYSTEM_ADMIN']);
   return true;
 }
 
+// ---- 申込窓口の案内先（Config・環境ごとに切替可能） ----
+/**
+ * 申込窓口の経路別フォームURLと、法人の退避先（個別契約の問い合わせ窓口）。
+ * 問い合わせ先はGoogleフォーム・formrun・メールのいずれでも設定できるよう
+ * URLとメールアドレスを別々に保持し、両方あればURLを優先して案内する。
+ */
+function admin_getPortalRoutingConfig(){ requireRole_([]);
+  return {
+    form_url_standard_fixed: getConfig_('FORM_URL_STANDARD_FIXED',''),
+    form_url_standard_rate:  getConfig_('FORM_URL_STANDARD_RATE',''),
+    form_url_individual:     getConfig_('FORM_URL_INDIVIDUAL',''),
+    form_url_manual_review:  getConfig_('FORM_URL_MANUAL_REVIEW',''),
+    corporate_inquiry_url:   getConfig_('CORPORATE_INQUIRY_URL',''),
+    corporate_inquiry_email: getConfig_('CORPORATE_INQUIRY_EMAIL',''),
+    corporate_inquiry_note:  getConfig_('CORPORATE_INQUIRY_NOTE',''),
+    corporate_default_note:  CORPORATE_INQUIRY_DEFAULT_NOTE
+  };
+}
+function admin_savePortalRoutingConfig(c){ requireRole_(['SYSTEM_ADMIN','OPERATIONS']);
+  c = c || {};
+  const url = String(c.corporate_inquiry_url || '').trim();
+  if(url && !/^https?:\/\//i.test(url))
+    throw new Error('VALIDATION_ERROR: 問い合わせURLは http(s):// で始まる必要があります');
+  const mail = String(c.corporate_inquiry_email || '').trim();
+  if(mail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail))
+    throw new Error('VALIDATION_ERROR: 問い合わせメールアドレスの形式が正しくありません');
+  [['form_url_standard_fixed','FORM_URL_STANDARD_FIXED'], ['form_url_standard_rate','FORM_URL_STANDARD_RATE'],
+   ['form_url_individual','FORM_URL_INDIVIDUAL'], ['form_url_manual_review','FORM_URL_MANUAL_REVIEW'],
+   ['corporate_inquiry_url','CORPORATE_INQUIRY_URL'], ['corporate_inquiry_email','CORPORATE_INQUIRY_EMAIL'],
+   ['corporate_inquiry_note','CORPORATE_INQUIRY_NOTE']].forEach(function(x){
+    if(c[x[0]] !== undefined) setConfig_(x[1], String(c[x[0]]).trim());
+  });
+  logEvent_('config', 'PORTAL_ROUTING', actor_(), null,
+    { corporate_inquiry: url || mail || '(未設定)', saved: true });
+  return true;
+}
+
 // ============================================================
 // 11. X（Twitter）連携：作品公開時の告知投稿
 //     資格情報は ScriptProperties（X_API_KEY 等）。投稿は X API v2 /2/tweets（OAuth1.0a）。
