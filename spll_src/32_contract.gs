@@ -151,6 +151,42 @@ function createFinanceHandoff_(contractId){
   logEvent_('finance_handoff', handoffId, 'system', null, { license_id:licenseId, version:version, contract_id:contractId });
   return handoffId;
 }
+/** メールアドレスの正規化・妥当性検査（不正値は空を返す＝台帳に汚れを入れない） */
+function normalizeEmail_(v){
+  const m = String(v == null ? '' : v).trim().replace(/^<|>$/g, '');
+  if(!/^[^@\s"'<>]+@[^@\s"'<>]+\.[^@\s"'<>]+$/.test(m)) return '';
+  return m.slice(0, 254);
+}
+
+/**
+ * 契約者の連絡先メールを確定して台帳へ保存する（RP-001：案内・通知の宛先）。
+ * 優先順位：
+ *   1. CLOUDSIGN … CloudSign書類APIのparticipants＝実際に契約書が届いた宛先（最も確実）
+ *   2. FORM      … 申込フォームの入力値（License_Casesへ暫定保存済みのもの）
+ * 締結Webhookのpayload.emailは送信側アカウントを指すため採用しない。
+ */
+function captureContactEmail_(contractId, verifiedDoc, app){
+  let email = '', source = '';
+  try{ email = normalizeEmail_(cs_recipientEmail_(verifiedDoc)); }catch(e){ email = ''; }
+  if(email){ source = 'CLOUDSIGN'; }
+  else if(app && app.license_id){
+    const kase = readRows_(ssOps_(),'License_Cases').find(function(k){ return k.license_id === app.license_id; });
+    email = normalizeEmail_(kase && kase.contact_email);
+    if(email) source = 'FORM';
+  }
+  if(!email){
+    logEvent_('contract', contractId, 'system', null, { contact_email:'（取得できず）' });
+    return '';
+  }
+  updateRow_(ssOps_(),'Contracts','contract_id',contractId,
+    { contact_email: sanitizeCell_(email), contact_email_source: source });
+  if(app && app.license_id) updateLicenseCase_(app.license_id, { contact_email: sanitizeCell_(email) });
+  // 監査ログにはドメインのみ残す（本文へアドレスを平文で積み上げない）
+  logEvent_('contract', contractId, 'system', null,
+    { contact_email_source: source, contact_email_domain: email.split('@')[1] || '' });
+  return email;
+}
+
 /** 締結情報をライセンス台帳へ同期（契約書履歴の追記含む）。webhook／手動紐付けの両方から使用。 */
 function syncLicenseOnSigning_(contractId, licenseId, caseStatus){
   if(!licenseId) return false;

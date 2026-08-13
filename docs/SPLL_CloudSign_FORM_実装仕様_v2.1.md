@@ -333,3 +333,27 @@ CloudSign公式案内では、CloudSign FORM powered by formrunは、Webフォ�
 またCloudSignでは、契約内容が完成したPDFであれば、受信者用のフリーテキスト、押印、チェックボックス等を設けず、受信者が書類内容へ同意することで締結できる。
 
 この仕様を前提として、SPLLでは「ユーザー入力は最小」「契約個別条件はシステム引継ぎ」「最終同意はCloudSign」とする。
+
+---
+
+## 12. 契約者の連絡先メール
+
+締結後の案内送付・不達対応に使う連絡先は、**CloudSignが実際に契約書を送付した宛先**を正とする。
+
+| 優先 | 出所 | 取得方法 | `contact_email_source` |
+|---:|---|---|---|
+| 1 | CloudSign | 締結時の書類照会 `GET /documents/{id}` の `participants[].email` | `CLOUDSIGN` |
+| 2 | 申込フォーム | formrunの入力値（`FORMRUN_FIELD_MAP` で `contact_email` に割当） | `FORM` |
+
+**締結Webhookの `email` は使わない。** これはイベントを起こしたCloudSignアカウント（＝送信側）を指し、
+契約者の宛先ではない（`text` の "sent by …" も送信側を示す）。誤って自社宛に案内を送らないため、
+`OFFICE_EMAIL_DOMAIN`（自社メールドメイン）に一致するアドレスは候補から除外する。
+
+- 保存先：`Contracts.contact_email` / `contact_email_source`、`License_Cases.contact_email`
+- 手動紐付け（`admin_linkContract`）でも同じ順序で確定する（資格情報があれば書類を照会）
+- 監査ログ（`Events`）にはドメインのみ記録し、アドレス平文を積み上げない
+- 管理コンソール：ライセンス一覧に連絡先を併記、案内リンク発行時に送付先と出所を表示
+
+`participants` のフィールド名は版・プランで揺れる可能性があるため、`email` / `mail` /
+`email_address` / `user.email` を許容し、いずれも取れない場合はレスポンス全体からの抽出へフォールバックする。
+本番切替前に、サンドボックスで1件締結し `contact_email_source` が `CLOUDSIGN` になることを確認すること。

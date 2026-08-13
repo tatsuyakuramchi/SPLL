@@ -51,6 +51,37 @@ function cs_attachFromTemplate_(docId, templateId){ return cs_fetch_('POST', '/d
 function cs_addParticipant_(docId, email, name){ return cs_fetch_('POST', '/documents/' + docId + '/participants', { email: email, name: name || '', organization: '' }); }
 function cs_sendDocument_(docId){ return cs_fetch_('POST', '/documents/' + docId + '/sent', {}); }
 /**
+ * 書類レスポンスから「CloudSignが実際に契約書を送付した宛先」を取り出す。
+ *
+ * 締結Webhookの body.email は、イベントを起こしたCloudSignアカウント（＝送信側）を指すため
+ * 契約者の連絡先としては使えない。宛先は書類取得API（GET /documents/{id}）の participants に入る。
+ * フィールド名・入れ子はプラン／版で揺れる可能性があるため、participants を優先しつつ
+ * レスポンス全体からのメール抽出をフォールバックとして持つ。自社ドメインの宛先は除外する。
+ */
+function cs_recipientEmail_(doc){
+  if(!doc) return '';
+  const own = String(getConfig_('OFFICE_EMAIL_DOMAIN','') || '').toLowerCase();
+  const isOwn = function(m){ return own && String(m).toLowerCase().indexOf('@' + own) >= 0; };
+  const valid = function(m){ return /^[^@\s"'<>]+@[^@\s"'<>]+\.[^@\s"'<>]+$/.test(String(m||'')); };
+
+  const parts = doc.participants || doc.Participants || [];
+  const fromParts = [];
+  (Array.isArray(parts) ? parts : []).forEach(function(p){
+    const m = p && (p.email || p.mail || p.email_address || (p.user && p.user.email));
+    if(valid(m) && !isOwn(m)) fromParts.push(String(m));
+  });
+  if(fromParts.length) return fromParts[0];
+
+  // フォールバック：レスポンス全体から最初の妥当なメールを拾う（participants の形が想定と違う場合）
+  let hit = '';
+  try{
+    const all = String(JSON.stringify(doc)).match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g) || [];
+    for(let i=0;i<all.length;i++){ if(!isOwn(all[i])){ hit = all[i]; break; } }
+  }catch(e){}
+  return hit;
+}
+
+/**
  * CloudSignの「締結完了」イベントか。
  * 公式仕様：Webhookの status は 1=先方確認中 / 2=締結完了 / 3=取消・却下。
  * 締結完了は status===2（または text/イベント名の "COMPLETED"）。※ 3は取消なので締結ではない。

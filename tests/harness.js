@@ -1001,5 +1001,60 @@ let badWfUrl=false; try{ G.admin_saveGuideConfig({ workflow_url:'http://example.
 ok(badWfUrl,'利用者向けページURLはhttps必須');
 
 
+// ============ 契約者の連絡先メール（CloudSign送付先の取得・保存） ============
+// 98. 締結WebhookのemailではなくCloudSign書類APIのparticipantsを採用する
+G.setConfig_('OFFICE_EMAIL_DOMAIN','arclight.example');
+// §79以降で法務文書を公開し直しているため、旧申込APIに渡す文書IDを現行の公開版へ更新
+const lt2=G.api_getLegalTexts();
+const docExtra2={ privacyDocumentId:lt2.privacy_doc_id, termsDocumentId:lt2.terms_doc_id };
+ok(G.cs_recipientEmail_({ participants:[{email:'staff@arclight.example'},{email:'taro@example.com'}] })==='taro@example.com',
+  'participantsから宛先を取得（自社ドメインは除外）');
+ok(G.cs_recipientEmail_({ participants:[{mail:'hanako@example.net'}] })==='hanako@example.net','フィールド名がmailでも拾う');
+ok(G.cs_recipientEmail_({ participants:[], title:'契約書 to jiro@example.org' })==='jiro@example.org','participants不在時は全体から抽出（フォールバック）');
+ok(G.cs_recipientEmail_({ participants:[{email:'not-an-email'}] })==='','不正な値は採用しない');
+ok(G.normalizeEmail_('  <Taro@Example.com> ')==='Taro@Example.com'&&G.normalizeEmail_('x@y')==='','メールの正規化と妥当性検査');
+
+// 99. 締結でCloudSign送付先を台帳へ保存する（Webhookのemail＝送信側は使わない）
+scriptProps.CLOUDSIGN_CLIENT_ID='cs-test-client';
+const mailApp=mkApp(['WRK-BKK00019'],'書籍',docExtra2);
+G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:mailApp.application_ref,submission_id:'FR-MAIL-1',columns:[]})}});
+const csDocMail={ status:2, title:'SPLL利用許諾契約｜'+mailApp.application_ref,
+  participants:[{email:'office@arclight.example',name:'事務局'},{email:'licensee@example.com',name:'山田太郎'}] };
+const prevFetch=G.UrlFetchApp.fetch;
+G.UrlFetchApp.fetch=function(url,params){
+  if(String(url).indexOf('cloudsign.jp')>=0 && String(url).indexOf('/token')<0 && String(params&&params.method||'get').toLowerCase()==='get')
+    return { getResponseCode:()=>200, getContentText:()=>JSON.stringify(csDocMail), getBlob:()=>Blob('pdf','application/pdf','f.pdf') };
+  return prevFetch(url,params);
+};
+G.doPost({parameter:{},postData:{contents:JSON.stringify({ document_id:'DOC-MAIL-1', status:'COMPLETED',
+  application_ref:mailApp.application_ref, email:'sender-account@arclight.example' })}});
+G.UrlFetchApp.fetch=prevFetch;
+delete scriptProps.CLOUDSIGN_CLIENT_ID;
+const cMail=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-MAIL-1');
+ok(cMail&&cMail.contact_email==='licensee@example.com'&&cMail.contact_email_source==='CLOUDSIGN',
+  'CloudSignが送付した宛先を連絡先として保存: '+(cMail&&cMail.contact_email));
+ok(cMail.contact_email!=='sender-account@arclight.example','Webhookのemail（送信側アカウント）は採用しない');
+ok(rows(OPS,'License_Cases').find(k=>k.license_id===mailApp.license_id).contact_email==='licensee@example.com','ライセンス台帳にも反映');
+ok(G.admin_listLicenseCases().find(k=>k.license_id===mailApp.license_id).contact_email==='licensee@example.com','管理画面のライセンス一覧に連絡先を表示');
+ok(G.admin_issueGuideLink(cMail.contract_id).contact_email==='licensee@example.com','案内リンク発行時に送付先を提示');
+// 監査ログにはドメインのみ（アドレス平文を積み上げない）
+const evMail=rows(OPS,'Events').filter(e=>e.entity_id===cMail.contract_id&&/contact_email_source/.test(String(e.after||''))).slice(-1)[0];
+ok(evMail&&/example\.com/.test(String(evMail.after))&&!/licensee@/.test(String(evMail.after)),'監査ログはドメインのみ記録');
+
+// 100. CloudSignから取れない場合はフォーム入力値へフォールバック
+scriptProps.FORMRUN_FIELD_MAP=JSON.stringify({'メールアドレス':'contact_email','handoff':'handoff_token'});
+const mailApp2=mkApp(['WRK-BKK00019'],'書籍',docExtra2);
+G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:mailApp2.application_ref,
+  submission_id:'FR-MAIL-2',columns:[{name:'メールアドレス',value:'form-input@example.jp'},
+    {name:'handoff',value:mailApp2.handoff_token}]})}});
+delete scriptProps.FORMRUN_FIELD_MAP;
+ok(rows(OPS,'License_Cases').find(k=>k.license_id===mailApp2.license_id).contact_email==='form-input@example.jp',
+  'フォーム入力のメールを暫定連絡先として保存');
+G.doPost({parameter:{},postData:{contents:JSON.stringify({ document_id:'DOC-MAIL-2', status:'COMPLETED', application_ref:mailApp2.application_ref })}});
+const cMail2=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-MAIL-2');
+ok(cMail2&&cMail2.contact_email==='form-input@example.jp'&&cMail2.contact_email_source==='FORM',
+  'CloudSign照会できない場合はフォーム入力値を採用（source=FORM）');
+
+
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

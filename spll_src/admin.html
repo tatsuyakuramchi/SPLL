@@ -391,6 +391,7 @@
           <div class="fld"><label>お支払いに関する注記 <span class="h">PAYMENT_NOTE（振込手数料の負担、振込名義の指定など）</span></label><input id="gc-note" placeholder="振込手数料はご負担ください。振込名義にSPLL番号を添えてください。"></div>
           <div class="fld"><label>事務局の問い合わせ先 <span class="h">OFFICE_CONTACT（案内ページ末尾に表示）</span></label><input id="gc-office_contact" placeholder="spll@example.com"></div>
           <div class="fld"><label>利用者向けページのURL <span class="h">WORKFLOW_URL（GAS②のウェブアプリURL /exec）</span></label><input id="gc-workflow_url" placeholder="https://script.google.com/macros/s/.../exec"></div>
+          <div class="fld"><label>自社メールドメイン <span class="h">OFFICE_EMAIL_DOMAIN（CloudSignの送付先から自社アカウントを除外するため）</span></label><input id="gc-office_email_domain" placeholder="example.co.jp"></div>
           <div class="note" id="gc-status" style="margin:0"></div>
         </div>
         <div class="pfoot"><button class="save" onclick="saveGuideConfig()">振込先・案内設定を保存</button></div>
@@ -600,7 +601,7 @@ var MOCK = {
   admin_saveFormRunConfig:function(c){ _mInt.formrun.form_url=c.form_url; _mInt.formrun.field_map=c.field_map; _mInt.formrun.ref_param=c.ref_param; _mInt.formrun.hidden_map=c.hidden_map; _mInt.formrun.max_works=c.max_works; if(c.webhook_secret) _mInt.formrun.webhook_secret_set=true; return true; },
   admin_getGuideConfig:function(){ return Object.assign({}, _mGuide, {configured:!!(_mGuide.bank_name||_mGuide.account_number), workflow_url_effective:_mGuide.workflow_url||"https://script.google.com/macros/s/WORKFLOW/exec"}); },
   admin_saveGuideConfig:function(c){ Object.keys(c||{}).forEach(function(k){ _mGuide[k]=c[k]; }); return true; },
-  admin_issueGuideLink:function(id){ return { url:"https://script.google.com/macros/s/WORKFLOW/exec?page=guide&t=mock-guide-token", license_id:"SPLL-202608-0001", payment_configured:!!_mGuide.bank_name }; },
+  admin_issueGuideLink:function(id){ return { url:"https://script.google.com/macros/s/WORKFLOW/exec?page=guide&t=mock-guide-token", license_id:"SPLL-202608-0001", payment_configured:!!_mGuide.bank_name, contact_email:"taro.yamada@example.com", contact_email_source:"CLOUDSIGN" }; },
   admin_getPortalRoutingConfig:function(){ return _mRouting; },
   admin_savePortalRoutingConfig:function(c){ Object.keys(c||{}).forEach(function(k){ _mRouting[k]=c[k]; }); return true; }
 };
@@ -765,7 +766,7 @@ function loadIntegration(){
   loadPortalRouting();
 }
 // ---- 締結後の手続き案内・振込先 ----
-var GC_FIELDS=["bank_name","branch","account_type","account_number","account_holder","holder_kana","note","office_contact","workflow_url"];
+var GC_FIELDS=["bank_name","branch","account_type","account_number","account_holder","holder_kana","note","office_contact","workflow_url","office_email_domain"];
 function loadGuideConfig(){
   call("admin_getGuideConfig",[],function(c){
     if(!c) return;
@@ -1019,7 +1020,11 @@ function showGuideLink(contractId, res){
   var url=(res&&res.url)||"";
   if(!url){ toast("案内リンクの発行に失敗しました"); return; }
   if(res && res.payment_configured===false) toast("振込先が未設定のため、案内ページにお支払い欄が出ません（設定→手続き案内・振込先）", true);
-  window.prompt("SPLL番号 "+((res&&res.license_id)||contractId)+" の「今後のお手続き」案内リンク\n（振込先・作品提出・認証バッジをまとめたページ。利用者へ共有してください）：", url);
+  var to=(res&&res.contact_email)||"";
+  var srcLabel={CLOUDSIGN:"CloudSign送付先",FORM:"申込フォーム入力"}[res&&res.contact_email_source]||"";
+  window.prompt("SPLL番号 "+((res&&res.license_id)||contractId)+" の「今後のお手続き」案内リンク\n"+
+    (to?("送付先："+to+(srcLabel?("（"+srcLabel+"）"):"")+"\n"):"送付先：未取得（CloudSign照会・フォーム入力とも取得できていません）\n")+
+    "（振込先・作品提出・認証バッジをまとめたページ。利用者へ共有してください）：", url);
 }
 
 // ---- 未紐付け締結の手動紐付け ----
@@ -1102,7 +1107,9 @@ function loadLicense(){
     rows.forEach(function(k){
       var tr=document.createElement("tr");
       tr.appendChild(td('<span class="id"><b>'+esc(k.license_id)+'</b></span>'));
-      tr.appendChild(td(esc(k.party_display_name||"—")+(k.party_type?'<br><span style="font-size:10px;color:var(--soft)">'+esc(k.party_type)+'</span>':"")));
+      tr.appendChild(td(esc(k.party_display_name||"—")+
+        (k.party_type?'<br><span style="font-size:10px;color:var(--soft)">'+esc(k.party_type)+'</span>':"")+
+        (k.contact_email?'<br><span class="id" style="font-size:10px">'+esc(k.contact_email)+'</span>':"")));
       tr.appendChild(td(esc(k.usage_category)));
       tr.appendChild(td(esc(k.fee||"—")));
       tr.appendChild(td(esc(k.works)));
@@ -1275,7 +1282,7 @@ MOCK.admin_revokeCert=function(c){ return MOCK.admin_requestCertChange(c,"REVOKE
 MOCK.admin_reactivateCert=function(c){ return MOCK.admin_requestCertChange(c,"ACTIVE","REACTIVATE","再有効化の申請"); };
 var _mCsSend=[{application_id:"APP-202607-0071",application_ref:"REF-202607-0071",usage_category:"書籍",form_submitted_at:"2026-07-10 14:22",cloudsign_send_status:"CLOUDSIGN_SEND_FAILED",cloudsign_send_error:"formrun→CloudSign連携エラー",manual_review_reason:""}];
 MOCK.admin_listLicenseCases=function(){ return [
-  {license_id:"SPLL-202608-0001",party_display_name:"山田太郎",party_type:"INDIVIDUAL",usage_category:"書籍",fee:"16,500円／契約（複数原作は権利者へ均等分配）",works:"新クトゥルフ神話TRPG ルールブック",case_status:"SIGNED",contract_status:"SIGNED",review_status:"PENDING",certification_status:"ACTIVE",finance_handoff_status:"ACCEPTED",signed_at:"2026-08-10",legacy_contract_id:"CTR-202608-0001"},
+  {license_id:"SPLL-202608-0001",party_display_name:"山田太郎",party_type:"INDIVIDUAL",contact_email:"taro.yamada@example.com",usage_category:"書籍",fee:"16,500円／契約（複数原作は権利者へ均等分配）",works:"新クトゥルフ神話TRPG ルールブック",case_status:"SIGNED",contract_status:"SIGNED",review_status:"PENDING",certification_status:"ACTIVE",finance_handoff_status:"ACCEPTED",signed_at:"2026-08-10",legacy_contract_id:"CTR-202608-0001"},
   {license_id:"SPLL-202608-0002",party_display_name:"株式会社サンプル",party_type:"CORPORATION",usage_category:"電子出版物",fee:"売上の10％",works:"インセイン",case_status:"CONTRACTING",contract_status:"NOT_STARTED",review_status:"NOT_REQUIRED",certification_status:"NOT_ISSUED",finance_handoff_status:"NOT_REQUIRED",signed_at:"",legacy_contract_id:""}
 ]; };
 MOCK.admin_listCloudSignSendFailures=function(){ return _mCsSend; };

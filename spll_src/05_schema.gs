@@ -36,7 +36,8 @@ const SCHEMA_OPS = {
   // 契約：締結時に対象原作を Contract_Works へスナップショット（法務証跡）
   //   link_status: LINKED（申込突合済）/ UNLINKED（未突合＝手動紐付け待ち）
   //   contract_file_id/hash：締結済原本PDF（FUN-04）
-  Contracts:            ['contract_id','cloudsign_document_id','cloudsign_title','application_id','application_ref','usage_category','terms_snapshot','status','link_status','signed_at','contract_file_id','contract_file_hash','folder_id','form_submission_id','route_type','terms_verification_status','terms_verification_detail','delivery_status','last_delivery_event_at','license_id'],
+  //   contact_email/source：CloudSignが実際に契約書を送付した宛先（案内送付・不達対応の連絡先）
+  Contracts:            ['contract_id','cloudsign_document_id','cloudsign_title','application_id','application_ref','usage_category','terms_snapshot','status','link_status','signed_at','contract_file_id','contract_file_hash','folder_id','form_submission_id','route_type','terms_verification_status','terms_verification_detail','delivery_status','last_delivery_event_at','license_id','contact_email','contact_email_source'],
   // 清算は契約時スナップショットを正本とする（V2-011）：権利者・登録番号・料率・配分方式まで固定
   Contract_Works:       ['contract_work_id','contract_id','work_id','work_name_snapshot','publisher_snapshot','credit_snapshot','partner_id_snapshot','partner_name_snapshot','invoice_reg_number_snapshot','allocation_scheme_snapshot','royalty_rate_snapshot','handling_fee_rate_snapshot'],
   // 用途別アクセストークン（SEC-06/§9.1）：SUBMISSION / BADGE_DOWNLOAD
@@ -67,7 +68,7 @@ const SCHEMA_OPS = {
   X_Posts:              ['x_post_id','work_id','tweet_id','text','posted_by','posted_at'],
   // ---- SPLLライセンス台帳（分断・簡素化計画 SPLL-SYS-RP-001 §6）----
   // 主台帳：1案件（SPLL番号）1行。申込〜契約〜審査〜認証を1つの状態遷移として扱う
-  License_Cases:        ['license_id','application_ref','party_type','party_display_name','usage_category','case_status','contract_status','cloudsign_document_id','signed_at','signed_pdf_file_id','signed_pdf_hash','review_status','certification_status','finance_handoff_status','created_at','updated_at'],
+  License_Cases:        ['license_id','application_ref','party_type','party_display_name','contact_email','usage_category','case_status','contract_status','cloudsign_document_id','signed_at','signed_pdf_file_id','signed_pdf_hash','review_status','certification_status','finance_handoff_status','created_at','updated_at'],
   // 対象原作（1:N）：契約条件は申込時点でスナップショット（費用＝契約形態×原作構造で自動確定）
   License_Works:        ['license_work_id','license_id','work_id','work_name_snapshot','credit_snapshot','fee_model_snapshot','fee_value_snapshot','reporting_requirement_snapshot','active'],
   // 契約書履歴（1:N）：原本は締結済PDF＋ハッシュ（台帳に契約全文を再現しない）
@@ -233,7 +234,7 @@ function setup_seedSamples_(){
 }
 
 // ---- スキーマ移行（修正設計書v2 V2-003）----
-const SCHEMA_VERSION = 7;   // v7: 大容量提出（DRIVE_FOLDER方式）の列追加。v6: Finance領域を管理対象外。v5: SPLLライセンス台帳
+const SCHEMA_VERSION = 8;   // v8: 契約者の連絡先メール（CloudSign送付先）を保持。v7: 大容量提出。v6: Finance領域を管理対象外
 
 /**
  * 既存スプレッドシートへ不足シート・不足列を追加する（既存列の削除・並び替えはしない）。

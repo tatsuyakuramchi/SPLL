@@ -231,6 +231,13 @@ function admin_linkContract(contractId, applicationId){ requireRole_(['OPERATION
   snapshotContractWorks_(contractId, applicationId);
   snapshotContractTerms_(contractId, app);
   updateRow_(ssOps_(),'Applications','application_id',applicationId,{ status:'SIGNED' });
+  // 連絡先メール：手動紐付けでもCloudSign送付先を優先して確定させる（照会できなければフォーム入力値）
+  let doc = null;
+  if(c.cloudsign_document_id && prop_('CLOUDSIGN_CLIENT_ID')){
+    try{ doc = cs_fetch_('GET', '/documents/' + encodeURIComponent(c.cloudsign_document_id), null, {}); }
+    catch(e){ logError_('EXTERNAL_API_ERROR','linkContract:fetchDoc', e, { contract_id:contractId }); }
+  }
+  captureContactEmail_(contractId, doc, app);
   syncLicenseOnSigning_(contractId, app.license_id, 'SIGNED');
   finishContractLinkage_(contractId);
   // 手動確認キューの解消（V2-008）：該当書類の受信を PROCESSED に更新
@@ -372,7 +379,7 @@ const PAYMENT_CONFIG_KEYS = [
   ['bank_name','PAYMENT_BANK_NAME'], ['branch','PAYMENT_BRANCH'], ['account_type','PAYMENT_ACCOUNT_TYPE'],
   ['account_number','PAYMENT_ACCOUNT_NUMBER'], ['account_holder','PAYMENT_ACCOUNT_HOLDER'],
   ['holder_kana','PAYMENT_HOLDER_KANA'], ['note','PAYMENT_NOTE'], ['office_contact','OFFICE_CONTACT'],
-  ['workflow_url','WORKFLOW_URL']
+  ['workflow_url','WORKFLOW_URL'], ['office_email_domain','OFFICE_EMAIL_DOMAIN']
 ];
 /** 振込先・案内ページ設定の取得（振込先は口座情報のため SYSTEM_ADMIN/ACCOUNTING/OPERATIONS のみ） */
 function admin_getGuideConfig(){ requireRole_(['SYSTEM_ADMIN','OPERATIONS','LEGAL_ADMIN']);
@@ -409,7 +416,8 @@ function admin_issueGuideLink(contractId){ const actor = requireRole_(['OPERATIO
   revokeTokens_(c.contract_id, 'GUIDE');
   const token = prepareGuideToken_(c.contract_id);
   logEvent_('contract', c.contract_id, actor.email, null, { guide_link_issued:true });
-  return { url: userPageUrl_('guide','t',token), license_id: c.license_id || '', payment_configured: paymentConfigured_() };
+  return { url: userPageUrl_('guide','t',token), license_id: c.license_id || '', payment_configured: paymentConfigured_(),
+    contact_email: c.contact_email || '', contact_email_source: c.contact_email_source || '' };
 }
 
 // ---- 申込窓口の案内先（Config・環境ごとに切替可能） ----
@@ -910,6 +918,7 @@ function admin_listLicenseCases(){ requireRole_([]);
     license_id: k.license_id, application_ref: k.application_ref,
     party_type: k.party_type, party_display_name: k.party_display_name,
     usage_category: k.usage_category, works: (worksBy[k.license_id] || []).join('、'),
+    contact_email: k.contact_email || '',
     fee: feeSnapBy[k.license_id] || feeBy[k.license_id] || '',   // 締結済は契約スナップショット、未締結は申込時スナップショット
     case_status: k.case_status, contract_status: k.contract_status,
     review_status: k.review_status, certification_status: k.certification_status,

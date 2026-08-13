@@ -177,6 +177,10 @@ function processCloudSignEvent_(body, e){
   try{ saveSignedPdf_(contractId, docId, verifiedDoc); }
   catch(err){ logError_('EXTERNAL_API_ERROR','saveSignedPdf', err, { contract_id:contractId, document_id:docId }); }
 
+  // 契約者の連絡先：CloudSignが実際に契約書を送付した宛先を採用する（案内送付・不達対応の連絡先）。
+  // 取れない場合はフォーム入力値（申込時）へフォールバックする。
+  captureContactEmail_(contractId, verifiedDoc, app);
+
   if(linked){
     snapshotContractWorks_(contractId, app.application_id);
     snapshotContractTerms_(contractId, app);
@@ -270,6 +274,9 @@ function processFormrunEvent_(body){
     const rawType = String(canon.party_type || '');
     const casePatch = { case_status: 'CONTRACTING' };
     if(partyName) casePatch.party_display_name = sanitizeCell_(String(partyName).slice(0, 100));
+    // フォームで取得したメールは暫定の連絡先（正は締結時のCloudSign送付先）
+    const formMail = normalizeEmail_(canon.contact_email || canon.email || canon.mail || '');
+    if(formMail) casePatch.contact_email = formMail;
     if(rawType) casePatch.party_type = /法人/.test(rawType) ? 'CORPORATION'
       : (/個人事業/.test(rawType) ? 'SOLE_PROPRIETOR' : (/個人/.test(rawType) ? 'INDIVIDUAL' : sanitizeCell_(rawType).slice(0, 20)));
     updateLicenseCase_(app.license_id, casePatch);

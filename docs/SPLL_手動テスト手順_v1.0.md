@@ -90,6 +90,17 @@ curl -L -H "Content-Type: application/json" -d "{\"document_id\":\"DOC-TEST-1\",
 - [ ] Certificates・Badges（またはBadge_Jobs）・Access_Tokens（SUBMISSION）が発行
 - [ ] License_Cases が SIGNED／Finance_Handoffs に READY の引渡行（経理側が参照するスナップショット）
 
+### 2.3.0 連絡先メールの取得
+
+締結後、`Contracts` の `contact_email` / `contact_email_source` を確認する。
+
+- [ ] `contact_email_source = CLOUDSIGN`（CloudSign照会が効いている＝実際に契約書が届いた宛先）
+- [ ] 自社アカウントのアドレスになっていない（`OFFICE_EMAIL_DOMAIN` を設定しておく）
+- [ ] admin「ライセンス」タブの契約者欄に連絡先が併記される
+
+> CloudSign資格情報が未設定の開発環境では `FORM`（フォーム入力値）にフォールバックします。
+> その場合は `FORMRUN_FIELD_MAP` に `"メールアドレス":"contact_email"` を追加してください。
+
 ### 2.3.1 「今後のお手続き」案内ページ
 
 締結すると、ダッシュボードの「要対応の通知」に <span class="mono">GUIDE_READY</span> が起票され、案内ページURLが入ります。
