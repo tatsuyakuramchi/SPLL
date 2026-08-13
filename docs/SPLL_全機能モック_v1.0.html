@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPLL 全機能モック</title>
+<style>
+:root{
+  --ink:#14201D; --paper:#ECEFEE; --surface:#FFFFFF; --surface2:#F5F7F6;
+  --line:#D2D9D6; --line2:#E6EBEA; --soft:#5C6663; --faint:#8A9491;
+  --teal:#0E6E63; --teal-bg:#E2F0ED; --teal-ink:#0E6E63;
+  --pass:#2F7D5B; --pass-bg:#E2F0E9; --review:#B6661E; --review-bg:#F6E7D6;
+  --fail:#A6342F; --fail-bg:#F3DEDC; --sign:#2C5E8F; --sign-bg:#E2EBF3;
+  --pay:#5B4B8A; --pay-bg:#EFEAF6;
+  --chrome:#20302C; --chrome-ink:#C9D6D2;
+  --sans:"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic Medium","Yu Gothic",system-ui,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Noto Sans Mono",monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ink:#DFE7E4; --paper:#0E1614; --surface:#16211E; --surface2:#1C2825;
+    --line:#2A3835; --line2:#233330; --soft:#93A19D; --faint:#6E7C79;
+    --teal:#5CB8A8; --teal-bg:#12332E; --teal-ink:#7ED0C0;
+    --pass:#6BC095; --pass-bg:#123026; --review:#E0A063; --review-bg:#33240F;
+    --fail:#E38A83; --fail-bg:#361A18; --sign:#7FB0DE; --sign-bg:#122536;
+    --pay:#A996D8; --pay-bg:#231D38;
+    --chrome:#0A1210; --chrome-ink:#93A19D;
+  }
+}
+:root[data-theme="dark"]{
+  --ink:#DFE7E4; --paper:#0E1614; --surface:#16211E; --surface2:#1C2825;
+  --line:#2A3835; --line2:#233330; --soft:#93A19D; --faint:#6E7C79;
+  --teal:#5CB8A8; --teal-bg:#12332E; --teal-ink:#7ED0C0;
+  --pass:#6BC095; --pass-bg:#123026; --review:#E0A063; --review-bg:#33240F;
+  --fail:#E38A83; --fail-bg:#361A18; --sign:#7FB0DE; --sign-bg:#122536;
+  --pay:#A996D8; --pay-bg:#231D38;
+  --chrome:#0A1210; --chrome-ink:#93A19D;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:13.5px;line-height:1.6;-webkit-font-smoothing:antialiased}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+h1,h2,h3,h4{text-wrap:balance;margin:0}
+
+/* ---- ページヘッダ ---- */
+.top{background:var(--chrome);color:var(--chrome-ink);border-bottom:1px solid var(--line)}
+.top .in{max-width:1240px;margin:0 auto;padding:18px 24px;display:flex;flex-wrap:wrap;gap:18px;align-items:flex-end;justify-content:space-between}
+.top h1{font-size:19px;color:#fff;letter-spacing:.01em}
+.top .lede{font-size:12px;margin-top:5px;max-width:60ch}
+.stamp{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#7FA39C}
+.status{display:flex;gap:8px;flex-wrap:wrap}
+.status b{display:block;font-family:var(--mono);font-size:17px;color:#fff;line-height:1.2}
+.status span{font-size:10.5px}
+.status div{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:8px 12px;min-width:96px}
+
+/* ---- レイアウト ---- */
+.wrap{max-width:1240px;margin:0 auto;padding:22px 24px 70px;display:grid;grid-template-columns:246px minmax(0,1fr);gap:22px;align-items:start}
+nav{position:sticky;top:18px;display:flex;flex-direction:column;gap:2px}
+nav .grp{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);padding:14px 10px 6px}
+nav button{all:unset;cursor:pointer;display:flex;gap:9px;align-items:baseline;padding:8px 11px;border-radius:8px;font-size:12.5px;color:var(--soft);border:1px solid transparent}
+nav button .n{font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+nav button:hover{background:var(--surface2);color:var(--ink)}
+nav button:focus-visible{outline:2px solid var(--teal);outline-offset:1px}
+nav button[aria-current="true"]{background:var(--surface);border-color:var(--line);color:var(--teal-ink);font-weight:600}
+nav button[aria-current="true"] .n{color:var(--teal-ink)}
+
+/* ---- 画面フレーム ---- */
+.screen{display:none}
+.screen.on{display:block}
+.intro{margin-bottom:14px}
+.intro h2{font-size:17px}
+.intro p{color:var(--soft);font-size:12.5px;margin:5px 0 0;max-width:74ch}
+.frame{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.chrome{background:var(--chrome);color:var(--chrome-ink);padding:9px 13px;display:flex;gap:10px;align-items:center;font-family:var(--mono);font-size:11px}
+.dots{display:flex;gap:5px}.dots i{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.18)}
+.url{flex:1;background:rgba(255,255,255,.07);border-radius:5px;padding:3px 9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scope{font-size:9.5px;letter-spacing:.07em;padding:2px 7px;border-radius:20px;border:1px solid rgba(255,255,255,.2)}
+.body{padding:18px}
+.body.pad0{padding:0}
+
+/* ---- 部品 ---- */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(126px,1fr));gap:10px;margin-bottom:16px}
+.kpi{background:var(--surface2);border:1px solid var(--line2);border-radius:9px;padding:12px 13px}
+.kpi b{display:block;font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:24px;line-height:1.1}
+.kpi span{font-size:10.5px;color:var(--soft);display:block;margin-top:4px}
+.kpi.warn b{color:var(--review)} .kpi.bad b{color:var(--fail)} .kpi.good b{color:var(--pass)} .kpi.sgn b{color:var(--sign)}
+.card{border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:14px}
+.card:last-child{margin-bottom:0}
+.ch{padding:10px 14px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center;justify-content:space-between;background:var(--surface2)}
+.ch h3{font-size:13px}
+.ch .hint{font-family:var(--mono);font-size:10.5px;color:var(--soft)}
+.cb{padding:14px}
+.tbl{overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:520px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-family:var(--mono);font-size:10.5px;letter-spacing:.04em;color:var(--soft);border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--line2);font-size:12px;vertical-align:top}
+tr:last-child td{border-bottom:none}
+td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.id{font-family:var(--mono);font-size:11px;color:var(--soft)}
+.sm{font-size:11px;color:var(--soft);display:block;margin-top:2px}
+.pill{display:inline-block;font-family:var(--mono);font-size:10px;font-weight:600;padding:2.5px 8px;border-radius:20px;white-space:nowrap}
+.pill.pass{background:var(--pass-bg);color:var(--pass)} .pill.review{background:var(--review-bg);color:var(--review)}
+.pill.fail{background:var(--fail-bg);color:var(--fail)} .pill.sign{background:var(--sign-bg);color:var(--sign)}
+.pill.pay{background:var(--pay-bg);color:var(--pay)} .pill.wait{background:var(--line2);color:var(--soft)}
+.btn{display:inline-block;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:7px;padding:6px 12px;font-size:11.5px;font-weight:600;font-family:var(--sans)}
+.btn.p{background:var(--teal);border-color:var(--teal);color:#fff}
+.btn.g{opacity:.45}
+.note{background:var(--teal-bg);border:1px solid var(--line);border-left:3px solid var(--teal);border-radius:7px;padding:10px 13px;font-size:11.5px;color:var(--ink);margin-top:12px}
+.note.warn{background:var(--review-bg);border-left-color:var(--review)}
+.note b{color:var(--teal-ink)}
+.note.warn b{color:var(--review)}
+.fld{margin-bottom:11px}
+.fld label{display:block;font-size:11px;font-weight:600;margin-bottom:4px}
+.fld label i{font-style:normal;font-family:var(--mono);font-size:10px;color:var(--faint);font-weight:400;margin-left:6px}
+.inp{border:1px solid var(--line);border-radius:7px;padding:7px 10px;font-size:12px;background:var(--surface2);color:var(--ink);min-height:32px}
+.inp.ro{color:var(--soft)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:11px}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.stepline{display:flex;flex-wrap:wrap;gap:0;margin-bottom:16px;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.stepline div{flex:1;min-width:118px;padding:9px 11px;border-right:1px solid var(--line);background:var(--surface)}
+.stepline div:last-child{border-right:none}
+.stepline b{display:block;font-size:11.5px}
+.stepline span{font-family:var(--mono);font-size:9.5px;color:var(--faint);letter-spacing:.08em}
+.stepline div.hl{background:var(--teal-bg)}
+.stepline div.hl b{color:var(--teal-ink)}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--line)}
+.cal>div{background:var(--surface);min-height:74px;padding:5px 6px}
+.cal .dow{min-height:0;background:var(--surface2);text-align:center;font-size:10px;font-weight:700;color:var(--soft);padding:5px}
+.cal .d{font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+.cal .ev{font-size:9.5px;padding:2px 5px;border-radius:4px;margin-top:3px;line-height:1.35}
+.ev.m{background:var(--sign-bg);color:var(--sign)} .ev.r{background:var(--review-bg);color:var(--review)}
+.ev.s{background:var(--pay-bg);color:var(--pay)} .ev.late{box-shadow:inset 0 0 0 1px var(--fail);font-weight:700}
+.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:10px}
+.flow .n{border:1px solid var(--line);border-radius:9px;padding:12px 13px;background:var(--surface)}
+.flow .n b{font-size:12.5px;display:block}
+.flow .n span{font-size:11px;color:var(--soft);display:block;margin-top:4px}
+.flow .n .who{font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;color:var(--faint);text-transform:uppercase;display:block;margin-bottom:5px}
+ul.tight{margin:6px 0 0;padding-left:18px;font-size:12px;color:var(--soft)}
+ul.tight li{margin-bottom:3px}
+ul.tight b{color:var(--ink)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--soft);margin-top:10px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+@media(max-width:900px){
+  .wrap{grid-template-columns:1fr}
+  nav{position:static;flex-direction:row;flex-wrap:wrap;gap:5px}
+  nav .grp{width:100%;padding:8px 2px 2px}
+  .split,.grid2,.grid3{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<div class="top"><div class="in">
+  <div>
+    <div class="stamp">現況報告 · 2026-08-13</div>
+    <h1>SPLL 全機能モック</h1>
+    <p class="lede">TRPG二次創作ライセンスプラットフォーム。申込から契約締結・利用許諾料・作品提出・AI一次審査・認証バッジ、そして事務局の会議体運営までを、Google Apps Script 3プロジェクト構成で実装しています。以下はダミーデータによる画面モックです。</p>
+  </div>
+  <div class="status">
+    <div><b>3</b><span>GASアプリ</span></div>
+    <div><b>478</b><span>自動テスト</span></div>
+    <div><b>9</b><span>スキーマ版</span></div>
+  </div>
+</div></div>
+
+<div class="wrap">
+<nav>
+  <div class="grp">利用者から見た流れ</div>
+  <button class="nv" data-s="flow" aria-current="true"><span class="n">00</span>全体像</button>
+  <button class="nv" data-s="portal"><span class="n">01</span>公開ポータル（申込）</button>
+  <button class="nv" data-s="form"><span class="n">02</span>クラウドサイン契約</button>
+  <button class="nv" data-s="guide"><span class="n">03</span>締結後の案内ページ</button>
+  <button class="nv" data-s="submit"><span class="n">04</span>作品の提出</button>
+  <button class="nv" data-s="verify"><span class="n">05</span>認証バッジ・検証</button>
+  <div class="grp">管理コンソール</div>
+  <button class="nv" data-s="dash">ダッシュボード</button>
+  <button class="nv" data-s="ledger">ライセンス台帳</button>
+  <button class="nv" data-s="review">作品審査（AI一次）</button>
+  <button class="nv" data-s="contract">契約管理・認証</button>
+  <button class="nv" data-s="gov">事務局運営 <span class="pill pass" style="margin-left:4px">NEW</span></button>
+  <button class="nv" data-s="settings">設定</button>
+  <div class="grp">現況</div>
+  <button class="nv" data-s="state">実装状況と残作業</button>
+</nav>
+
+<main>
+
+<!-- ============ 00 全体像 ============ -->
+<section class="screen on" id="s-flow">
+  <div class="intro"><h2>全体像</h2><p>公開する画面は「申込ポータル」「案内ページ」「検証ページ」の3枚だけ。契約書の署名はクラウドサイン、事務局の作業は管理コンソールに集約しています。権限の異なる処理を混ぜないため、GASプロジェクトを3つに分けています。</p></div>
+
+  <div class="card"><div class="ch"><h3>申込から認証まで</h3><span class="hint">利用者の操作は4回</span></div><div class="cb">
+    <div class="flow">
+      <div class="n"><span class="who">利用者</span><b>1. 申込</b><span>原作を選び、利用目的と個別条件を入力。個人のみ受付。</span></div>
+      <div class="n"><span class="who">利用者</span><b>2. 契約に署名</b><span>クラウドサインの契約書に条件が引き渡され、その場で締結。</span></div>
+      <div class="n"><span class="who">自動</span><b>3. 案内が届く</b><span>締結を検知して案内ページのURLを自動送信。</span></div>
+      <div class="n"><span class="who">利用者</span><b>4. 振込・提出</b><span>案内ページから利用許諾料を振込み、作品を提出。</span></div>
+      <div class="n"><span class="who">自動＋事務局</span><b>5. 審査</b><span>AIが一次審査、事務局が最終判断。</span></div>
+      <div class="n"><span class="who">自動</span><b>6. 認証バッジ</b><span>SPLL番号入りのバッジとQR検証URLを発行。</span></div>
+    </div>
+    <div class="note"><b>設計の要点：</b>契約締結後に利用者へ渡すリンクは<b>案内ページ1枚だけ</b>です。振込先はページ側に持たせ、メール本文には一切書きません。口座変更が過去のメールと食い違わず、当社を騙る振込先メールとも区別できます。</div>
+  </div></div>
+
+  <div class="card"><div class="ch"><h3>3プロジェクト構成</h3><span class="hint">権限分離</span></div><div class="tbl"><table>
+    <thead><tr><th>プロジェクト</th><th>役割</th><th>公開範囲</th><th>持たない権限</th></tr></thead>
+    <tbody>
+      <tr><td><b>① portal</b><span class="sm">公開ポータル</span></td><td>原作検索・申込作成・法務文書の表示</td><td><span class="pill wait">匿名公開</span></td><td>Drive／メール送信／管理関数／トークン発行</td></tr>
+      <tr><td><b>② workflow</b><span class="sm">利用者向け処理</span></td><td>締結Webhook受信・案内ページ・提出・審査・バッジ・検証・定期バッチ</td><td><span class="pill wait">匿名公開</span><span class="sm">トークン／署名で防御</span></td><td>管理関数・初期セットアップ</td></tr>
+      <tr><td><b>③ admin</b><span class="sm">管理コンソール</span></td><td>台帳・審査・契約管理・事務局運営・設定</td><td><span class="pill sign">組織内限定</span></td><td>Webhook受信・匿名提出処理</td></tr>
+    </tbody>
+  </table></div></div>
+
+  <div class="split">
+    <div class="card"><div class="ch"><h3>やらないと決めたこと</h3></div><div class="cb"><ul class="tight">
+      <li><b>経理・請求・入金消込</b>は本システムの外（独自運用）</li>
+      <li><b>法人からの申込</b>は受け付けず、個別契約の問い合わせ窓口へ退避</li>
+      <li><b>メール本文への口座情報</b>は書かない</li>
+      <li><b>メールアドレスの長期保持</b>は契約に必要な範囲に限定</li>
+    </ul></div></div>
+    <div class="card"><div class="ch"><h3>職務分離</h3></div><div class="cb"><ul class="tight">
+      <li>認証の<b>失効・契約終了・復帰</b>は申請と承認を別担当者で</li>
+      <li>未入金による<b>一時停止</b>のみ担当者1名で切替可</li>
+      <li>決議の<b>訂正</b>は理由必須・法務のみ・監査ログに残る</li>
+      <li>すべての管理操作はサーバー側で権限を強制</li>
+    </ul></div></div>
+  </div>
+</section>
+
+<!-- ============ 01 ポータル ============ -->
+<section class="screen" id="s-portal">
+  <div class="intro"><h2>公開ポータル（申込）</h2><p>原作を検索して選び、利用目的と個別条件を入力します。入力内容はそのまま契約書の条件になるため、この画面が実質的な申込書です。</p></div>
+  <div class="frame">
+    <div class="chrome"><div class="dots"><i></i><i></i><i></i></div><div class="url">script.google.com/macros/s/…portal…/exec</div><span class="scope">匿名公開</span></div>
+    <div class="body">
+      <div class="stepline">
+        <div class="hl"><span>STEP 1</span><b>原作を選ぶ</b></div>
+        <div class="hl"><span>STEP 2</span><b>利用目的</b></div>
+        <div class="hl"><span>STEP 3</span><b>個別条件</b></div>
+        <div><span>STEP 4</span><b>同意して契約へ</b></div>
+      </div>
+
+      <div class="card"><div class="ch"><h3>原作の選択</h3><span class="hint">公開中 113作品</span></div><div class="tbl"><table>
+        <thead><tr><th>原作</th><th>権利者</th><th>利用できる要素</th><th>できないこと</th><th></th></tr></thead>
+        <tbody>
+          <tr><td><b>新クトゥルフ神話TRPG</b><span class="sm mono">WRK-ARK00012</span></td><td>アークライト／KADOKAWA</td><td>世界観・神話設定、シナリオ</td><td>公式イラスト流用、ルールデータ転載</td><td><span class="btn p">選択済み</span></td></tr>
+          <tr><td><b>光砕のリヴァルチャー</b><span class="sm mono">WRK-ARK00045</span></td><td>どらこにあん／アークライト</td><td>世界観設定、シナリオ、キャラクター名称</td><td>公式イラスト流用</td><td><span class="btn p">選択済み</span></td></tr>
+          <tr><td><b>インセイン</b><span class="sm mono">WRK-BKK00019</span></td><td>冒険企画局</td><td>世界観設定、ハンドアウト形式</td><td>シナリオデータ転載</td><td><span class="btn">選択する</span></td></tr>
+        </tbody>
+      </table></div></div>
+
+      <div class="split">
+        <div class="card"><div class="ch"><h3>利用目的と利用許諾料</h3></div><div class="cb">
+          <div class="fld"><label>利用目的</label><div class="inp">電子出版物（BOOTH等でのDL販売）</div></div>
+          <div class="tbl"><table><thead><tr><th>区分</th><th>料金</th><th>報告</th></tr></thead><tbody>
+            <tr><td>書籍</td><td class="num">16,500円／契約</td><td>原則不要</td></tr>
+            <tr style="background:var(--teal-bg)"><td><b>電子出版物</b></td><td class="num"><b>売上の10％</b></td><td>半期ごと</td></tr>
+            <tr><td>商品販売</td><td class="num">16,500円／契約</td><td>原則不要</td></tr>
+            <tr><td>イベント</td><td class="num">無償</td><td>事後報告</td></tr>
+          </tbody></table></div>
+          <div class="note"><b>定額は契約単位です。</b>原作を2つ選んでも料金は増えず、権利者へ均等に分配されます。</div>
+        </div></div>
+
+        <div class="card"><div class="ch"><h3>契約者の区分</h3><span class="hint">窓口は個人専用</span></div><div class="cb">
+          <div class="fld"><label>ご契約者</label><div class="inp">個人（個人事業主を含む）</div></div>
+          <div class="fld"><label>お名前 / 連絡先</label><div class="inp">山田 太郎 ／ yamada@example.com</div></div>
+          <div class="note warn"><b>法人を選んだ場合：</b>この窓口では受け付けず、個別契約の問い合わせ先を案内します。申込レコードもSPLL番号も作りません。標準契約と法人契約では条件が異なるため、サーバー側でも拒否します。
+          <div style="margin-top:8px"><span class="btn">法人のお問い合わせはこちら →</span></div></div>
+        </div></div>
+      </div>
+
+      <div class="card"><div class="ch"><h3>同意して契約へ進む</h3></div><div class="cb">
+        <ul class="tight" style="list-style:none;padding:0">
+          <li>☑ <b>個人情報の取得に同意します</b> <span class="id">（HTMLで公開・版を記録）</span></li>
+          <li>☑ <b>SPLL二次創作ガイドラインを読みました</b> <span class="id">v4.1</span></li>
+          <li>☑ <b>利用規約に同意します</b> <span class="id">v1.0</span></li>
+        </ul>
+        <div style="margin-top:12px"><span class="btn p">クラウドサインの契約書へ進む →</span></div>
+        <div class="note">同意した文書の<b>版と表示内容のハッシュ</b>を記録します。「どの文面に同意したか」を後から証明できます。</div>
+      </div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 02 クラウドサイン ============ -->
+<section class="screen" id="s-form">
+  <div class="intro"><h2>クラウドサイン契約（FORM v4.1）</h2><p>申込内容は隠しフィールドで契約書へ引き渡され、利用者はその場で署名します。事務局が契約書を作る作業はありません。</p></div>
+  <div class="frame">
+    <div class="chrome"><div class="dots"><i></i><i></i><i></i></div><div class="url">クラウドサインフォーム（powered by formrun）</div><span class="scope">外部サービス</span></div>
+    <div class="body">
+      <div class="card"><div class="ch"><h3>契約書に差し込まれる個別条件</h3><span class="hint">申込から自動引渡し</span></div><div class="tbl"><table>
+        <thead><tr><th>条項</th><th>内容</th><th>出所</th></tr></thead>
+        <tbody>
+          <tr><td>SPLL番号</td><td class="mono">SPLL-202608-0042</td><td>申込時に採番</td></tr>
+          <tr><td>許諾対象</td><td>新クトゥルフ神話TRPG／光砕のリヴァルチャー</td><td>選択した原作</td></tr>
+          <tr><td>利用態様</td><td>電子出版物（複製・公衆送信）</td><td>利用目的</td></tr>
+          <tr><td>利用許諾料</td><td><b>売上の10％</b>（半期ごとに販売実績を報告）</td><td>料金表（別紙2）</td></tr>
+          <tr><td>許諾期間</td><td>契約成立日から1年間（自動更新）</td><td>設定値</td></tr>
+          <tr><td>許諾地域</td><td>全世界</td><td>設定値</td></tr>
+          <tr><td>クレジット表記</td><td>指定のシリーズ権利表記を記載</td><td>原作マスタ</td></tr>
+        </tbody>
+      </table></div></div>
+      <div class="note"><b>改変検知：</b>引き渡す条件を固定順で並べてハッシュ化し、契約書にも入れています。ブラウザ上で条件を書き換えて送信すると、締結後の照合で <span class="mono">TERMS_MISMATCH</span> となり、認証とバッジの発行が止まります。</div>
+      <div class="note warn"><b>この先が③の作業です。</b>フォーム本体（定額用・売上連動用の2種）とクラウドサインのテンプレートは、これから実際に作成します。システム側の受け口は完成しています。</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 03 案内ページ ============ -->
+<section class="screen" id="s-guide">
+  <div class="intro"><h2>締結後の案内ページ</h2><p>締結を検知すると、クラウドサインが契約書を送った宛先へ案内メールが自動送信されます。本文にはこのページのURLだけを書きます。</p></div>
+  <div class="frame">
+    <div class="chrome"><div class="dots"><i></i><i></i><i></i></div><div class="url">…workflow…/exec?page=guide&amp;t=（有効期限つきトークン）</div><span class="scope">本人のみ</span></div>
+    <div class="body">
+      <div class="kpis">
+        <div class="kpi"><b class="mono" style="font-size:15px">SPLL-202608-0042</b><span>あなたのSPLL番号</span></div>
+        <div class="kpi good"><b>締結済</b><span>2026-08-11</span></div>
+        <div class="kpi"><b class="mono" style="font-size:15px">2027-09-15</b><span>このページの利用期限</span></div>
+      </div>
+
+      <div class="split">
+        <div class="card"><div class="ch"><h3>1. 利用許諾料のお支払い</h3></div><div class="cb">
+          <div class="tbl"><table><tbody>
+            <tr><td style="width:35%">金融機関</td><td><b>○○銀行 ○○支店</b></td></tr>
+            <tr><td>口座</td><td class="mono">普通 1234567</td></tr>
+            <tr><td>口座名義</td><td>カ）ティーアールピージーライツ</td></tr>
+            <tr><td>ご注意</td><td>振込手数料はご負担ください。お振込名義に<b>SPLL番号</b>を添えてください。</td></tr>
+          </tbody></table></div>
+          <div class="note"><b>口座は常に最新が表示されます。</b>設定画面で変更すると、発行済みの案内URLでも更新後の口座が出ます。当事務局がメール本文で口座をお知らせすることはありません。</div>
+        </div></div>
+
+        <div class="card"><div class="ch"><h3>2. 作品のご提出</h3></div><div class="cb">
+          <p style="margin:0 0 10px;font-size:12px;color:var(--soft)">作品が完成したら、下のボタンから提出用のリンクを取得してください。何度でも取り直せます。</p>
+          <div><span class="btn p">提出用リンクを取得する</span></div>
+          <ul class="tight" style="margin-top:12px">
+            <li>提出リンクは<b>30日間</b>有効（このページからいつでも再発行）</li>
+            <li>大容量ファイルは<b>専用のドライブフォルダ</b>で受け取ります（1版あたり50ファイル・5GBまで）</li>
+            <li>提出を確定すると共有は自動で解除されます</li>
+          </ul>
+          <div class="note"><b>作品完成までの時間差に対応：</b>案内ページ自体は<b>400日</b>有効です。契約から数ヶ月後の完成でも、事務局に連絡せず提出まで進めます。</div>
+        </div></div>
+      </div>
+
+      <div class="card"><div class="ch"><h3>3. 認証バッジ</h3><span class="hint">審査通過後に受け取れます</span></div><div class="cb">
+        <p style="margin:0;font-size:12px;color:var(--soft)">作品の審査が通ると、SPLL番号入りのバッジ画像とQRコードをこのページからダウンロードできます。頒布物に掲載すると、読者が正規の許諾を受けた作品であることを確認できます。</p>
+        <div style="margin-top:10px"><span class="btn g">バッジをダウンロード（審査中）</span></div>
+      </div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 04 提出 ============ -->
+<section class="screen" id="s-submit">
+  <div class="intro"><h2>作品の提出</h2><p>Apps Scriptのアップロード上限（20MB）を避けるため、版ごとに空の専用フォルダを作って一時的に共有し、投入が終わったら共有を切ります。</p></div>
+  <div class="frame">
+    <div class="chrome"><div class="dots"><i></i><i></i><i></i></div><div class="url">…workflow…/exec?page=upload&amp;t=（提出トークン）</div><span class="scope">本人のみ・30日</span></div>
+    <div class="body">
+      <div class="stepline">
+        <div class="hl"><span>1</span><b>フォルダを開く</b></div>
+        <div class="hl"><span>2</span><b>ファイルを入れる</b></div>
+        <div class="hl"><span>3</span><b>提出を確定</b></div>
+        <div><span>4</span><b>AI一次審査</b></div>
+      </div>
+      <div class="split">
+        <div class="card"><div class="ch"><h3>提出用フォルダ</h3><span class="hint">第2版</span></div><div class="cb">
+          <div class="fld"><label>作品名</label><div class="inp">深海図書館のクトゥルフ神話シナリオ集</div></div>
+          <div class="fld"><label>投入先<i>あなただけがアクセスできます</i></label><div class="inp mono ro">drive.google.com/drive/folders/1A2b…</div></div>
+          <div class="tbl"><table><thead><tr><th>投入済みファイル</th><th>形式</th><th>サイズ</th></tr></thead><tbody>
+            <tr><td>本編_第2版.pdf</td><td>PDF</td><td class="num">42.6 MB</td></tr>
+            <tr><td>付録マップ.png</td><td>PNG</td><td class="num">8.1 MB</td></tr>
+            <tr><td>紹介動画.mp4</td><td>MP4</td><td class="num">903.4 MB</td></tr>
+          </tbody></table></div>
+          <div style="margin-top:12px"><span class="btn p">提出を確定する</span></div>
+        </div></div>
+        <div class="card"><div class="ch"><h3>確定時に起きること</h3></div><div class="cb"><ul class="tight">
+          <li>ファイル数・合計サイズの上限を検査</li>
+          <li>提出記録（版・ファイル一覧）を台帳へ</li>
+          <li><b>共有を解除</b>して外部から見えなくする</li>
+          <li>AI一次審査のジョブを起票</li>
+        </ul>
+        <div class="note"><b>大きな動画があっても審査は止まりません。</b>AI審査は読み取り可能な形式のうち<b>最小のファイル</b>を選んで送るため、900MBの動画をメモリに読み込もうとして失敗することがありません。</div>
+        <div class="note warn"><b>期限切れの後始末：</b>14日を過ぎた提出フォルダは日次バッチが共有解除します。開きっぱなしのリンクが残りません。</div>
+        </div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 05 検証 ============ -->
+<section class="screen" id="s-verify">
+  <div class="intro"><h2>認証バッジと検証ページ</h2><p>バッジのQRから誰でも開ける公開ページです。掲載されているSPLL番号が本物か、いま有効かを確認できます。</p></div>
+  <div class="split">
+    <div class="frame">
+      <div class="chrome"><div class="dots"><i></i><i></i><i></i></div><div class="url">…workflow…/exec?page=verify&amp;id=…</div><span class="scope">匿名公開</span></div>
+      <div class="body" style="text-align:center;padding:34px 18px">
+        <div style="font-size:34px;line-height:1">✓</div>
+        <h3 style="color:var(--pass);margin:8px 0 4px;font-size:17px">確認済み</h3>
+        <p style="font-size:12px;color:var(--soft);margin:0">この作品はSPLLの利用許諾を受けています</p>
+        <div style="margin-top:16px;display:inline-block;text-align:left;border:1px solid var(--line);border-radius:9px;padding:13px 16px;background:var(--surface2)">
+          <div class="id">SPLL番号</div><div class="mono" style="font-size:15px;font-weight:600">SPLL-202608-0042</div>
+          <div class="id" style="margin-top:8px">許諾対象</div><div style="font-size:12px">新クトゥルフ神話TRPG／光砕のリヴァルチャー</div>
+          <div class="id" style="margin-top:8px">状態</div><div><span class="pill pass">有効</span> <span class="id">2026-08-11 以降</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="frame">
+      <div class="chrome"><div class="dots"><i></i><i></i><i></i></div><div class="url">…workflow…/exec?page=verify&amp;id=…</div><span class="scope">匿名公開</span></div>
+      <div class="body" style="text-align:center;padding:34px 18px">
+        <div style="font-size:34px;line-height:1">！</div>
+        <h3 style="color:var(--review);margin:8px 0 4px;font-size:17px">現在は無効です</h3>
+        <p style="font-size:12px;color:var(--soft);margin:0">事務局にお問い合わせください</p>
+        <div style="margin-top:16px;display:inline-block;text-align:left;border:1px solid var(--line);border-radius:9px;padding:13px 16px;background:var(--surface2);max-width:300px">
+          <p style="font-size:12px;margin:0;color:var(--soft)">未入金による一時停止、条件の不一致、失効などの場合にこの表示になります。<b>理由は公開しません</b>（契約者の不利益になるため）。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note">バッジ画像には SPLL番号・原作名・QRを差し込みます。テンプレートを設定すればスライドから、未設定なら自動組版で生成します。</div>
+</section>
+
+<!-- ============ ダッシュボード ============ -->
+<section class="screen" id="s-dash">
+  <div class="intro"><h2>管理コンソール — ダッシュボード</h2><p>事務局が毎朝見る画面です。人手が必要なものだけを上に出します。</p></div>
+  <div class="frame">
+    <div class="chrome"><div class="dots"><i></i><i></i><i></i></div><div class="url">…admin…/exec</div><span class="scope">組織内限定</span></div>
+    <div class="body">
+      <div class="kpis">
+        <div class="kpi"><b>128</b><span>有効なライセンス</span></div>
+        <div class="kpi warn"><b>7</b><span>審査待ち</span></div>
+        <div class="kpi bad"><b>2</b><span>要対応の警告</span></div>
+        <div class="kpi sgn"><b>3</b><span>未紐付けの締結</span></div>
+        <div class="kpi"><b>1</b><span>認証状態の承認待ち</span></div>
+      </div>
+      <div class="card"><div class="ch"><h3>直近の要対応</h3><span class="hint">Compliance_Alerts / Contracts</span></div><div class="tbl"><table>
+        <thead><tr><th>種別</th><th>対象</th><th>内容</th><th>発生</th><th></th></tr></thead>
+        <tbody>
+          <tr><td><span class="pill fail">条件不一致</span></td><td class="mono">SPLL-202608-0031</td><td>締結内容が台帳のスナップショットと一致しません（利用許諾料）</td><td class="id">08-12 14:02</td><td><span class="btn">確認</span></td></tr>
+          <tr><td><span class="pill review">審査SLA超過</span></td><td class="mono">SPLL-202607-0198</td><td>人手審査の目安5日を超えています</td><td class="id">08-12 09:00</td><td><span class="btn">審査へ</span></td></tr>
+          <tr><td><span class="pill sign">未紐付け</span></td><td class="mono">CS-88213</td><td>締結を申込に突合できませんでした</td><td class="id">08-11 18:41</td><td><span class="btn">手動で紐付け</span></td></tr>
+        </tbody>
+      </table></div></div>
+      <div class="card"><div class="ch"><h3>案内メールの送信状況</h3><span class="hint">5分ごとのバッチ（②workflow）</span></div><div class="tbl"><table>
+        <thead><tr><th>状態</th><th>件数</th><th>備考</th></tr></thead>
+        <tbody>
+          <tr><td><span class="pill pass">送信済</span></td><td class="num">126</td><td>締結から平均3分で到達</td></tr>
+          <tr><td><span class="pill review">人手対応</span></td><td class="num">2</td><td>クラウドサインから宛先を取得できなかった案件</td></tr>
+          <tr><td><span class="pill fail">送信失敗</span></td><td class="num">0</td><td>3回まで自動再試行</td></tr>
+        </tbody>
+      </table></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 台帳 ============ -->
+<section class="screen" id="s-ledger">
+  <div class="intro"><h2>ライセンス台帳</h2><p>SPLL番号を軸にした業務台帳です。1件の申込＝1つのSPLL番号＝1つの契約という対応で、原作が複数でも番号は1つです。</p></div>
+  <div class="frame">
+    <div class="chrome"><div class="dots"><i></i><i></i><i></i></div><div class="url">…admin…/exec</div><span class="scope">組織内限定</span></div>
+    <div class="body pad0"><div class="tbl"><table style="min-width:840px">
+      <thead><tr><th>SPLL番号</th><th>契約者</th><th>原作</th><th>利用目的</th><th>利用許諾料</th><th>締結</th><th>認証</th><th></th></tr></thead>
+      <tbody>
+        <tr><td class="mono">SPLL-202608-0042<span class="sm">2026-08-11</span></td><td>山田 太郎<span class="sm">個人</span></td><td>新クトゥルフ神話TRPG<span class="sm">＋1件</span></td><td>電子出版物</td><td class="num">売上の10％</td><td><span class="pill pass">締結済</span></td><td><span class="pill pass">有効</span></td><td><span class="btn">開く</span></td></tr>
+        <tr><td class="mono">SPLL-202608-0041<span class="sm">2026-08-10</span></td><td>佐藤 花子<span class="sm">個人</span></td><td>光砕のリヴァルチャー</td><td>書籍</td><td class="num">16,500円</td><td><span class="pill pass">締結済</span></td><td><span class="pill review">一時停止</span><span class="sm">未入金</span></td><td><span class="btn">開く</span></td></tr>
+        <tr><td class="mono">SPLL-202608-0040<span class="sm">2026-08-08</span></td><td>鈴木 次郎<span class="sm">個人</span></td><td>インセイン</td><td>イベント</td><td class="num">無償</td><td><span class="pill pass">締結済</span></td><td><span class="pill pass">有効</span></td><td><span class="btn">開く</span></td></tr>
+        <tr><td class="mono">SPLL-202608-0039<span class="sm">2026-08-07</span></td><td>高橋 三郎<span class="sm">個人</span></td><td>新クトゥルフ神話TRPG</td><td>商品販売</td><td class="num">16,500円</td><td><span class="pill sign">送信済</span><span class="sm">署名待ち</span></td><td><span class="pill wait">—</span></td><td><span class="btn">開く</span></td></tr>
+        <tr><td class="mono">SPLL-202608-0031<span class="sm">2026-08-05</span></td><td>田中 四郎<span class="sm">個人</span></td><td>光砕のリヴァルチャー</td><td>電子出版物</td><td class="num">売上の10％</td><td><span class="pill pass">締結済</span></td><td><span class="pill fail">停止中</span><span class="sm">条件不一致</span></td><td><span class="btn">開く</span></td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="note"><b>利用許諾料を台帳に載せています。</b>契約書に記載した条件と、事務局が請求する金額が同じものだと確認できるようにするためです。金額そのものの請求・入金管理は本システムの外です。</div>
+</section>
+
+<!-- ============ 審査 ============ -->
+<section class="screen" id="s-review">
+  <div class="intro"><h2>作品審査（AI一次審査）</h2><p>提出された作品をAIが先に確認し、事務局は指摘のあった箇所を中心に判断します。AIの判定がそのまま結果になることはありません。</p></div>
+  <div class="frame">
+    <div class="chrome"><div class="dots"><i></i><i></i><i></i></div><div class="url">…admin…/exec</div><span class="scope">組織内限定</span></div>
+    <div class="body">
+      <div class="card"><div class="ch"><h3>審査キュー</h3><span class="btn p">QUEUEDを実行</span></div><div class="tbl"><table>
+        <thead><tr><th>SPLL番号</th><th>作品</th><th>版</th><th>AI判定</th><th>指摘</th><th>適用プロンプト</th><th></th></tr></thead>
+        <tbody>
+          <tr><td class="mono">SPLL-202608-0042</td><td>深海図書館のクトゥルフ神話シナリオ集</td><td class="num">2</td><td><span class="pill review">要確認</span></td><td>クレジット表記が見当たりません</td><td class="id">v2:8f3a1c2d</td><td><span class="btn">判断する</span></td></tr>
+          <tr><td class="mono">SPLL-202608-0040</td><td>リヴァルチャー・リプレイ集</td><td class="num">1</td><td><span class="pill pass">問題なし</span></td><td>—</td><td class="id">v2:8f3a1c2d</td><td><span class="btn">承認</span></td></tr>
+          <tr><td class="mono">SPLL-202607-0198</td><td>インセイン同人シナリオ「残響」</td><td class="num">1</td><td><span class="pill fail">要否判断</span></td><td>ルールデータの転載が疑われる箇所（p.14）</td><td class="id">v1:2b7e90aa</td><td><span class="btn">判断する</span></td></tr>
+        </tbody>
+      </table></div></div>
+      <div class="note"><b>どの文面で審査したかを残します。</b>審査ジョブにプロンプトの版（ラベル＋本文のハッシュ）を記録するため、文面を変えた後でも過去の判定がどの基準によるものか追えます。</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 契約管理 ============ -->
+<section class="screen" id="s-contract">
+  <div class="intro"><h2>契約管理・認証の状態</h2><p>締結の紐付け、条件の照合、認証のオン／オフを扱います。取り返しのつかない操作は1人では実行できません。</p></div>
+  <div class="frame">
+    <div class="chrome"><div class="dots"><i></i><i></i><i></i></div><div class="url">…admin…/exec</div><span class="scope">組織内限定</span></div>
+    <div class="body">
+      <div class="split">
+        <div class="card"><div class="ch"><h3>認証のオン／オフ</h3><span class="hint">未入金への対応</span></div><div class="cb">
+          <div class="tbl"><table><thead><tr><th>SPLL番号</th><th>状態</th><th></th></tr></thead><tbody>
+            <tr><td class="mono">SPLL-202608-0042</td><td><span class="pill pass">有効</span></td><td><span class="btn">一時停止にする</span></td></tr>
+            <tr><td class="mono">SPLL-202608-0041</td><td><span class="pill review">一時停止</span><span class="sm">未入金・08-12</span></td><td><span class="btn p">入金確認・戻す</span></td></tr>
+          </tbody></table></div>
+          <div class="note"><b>既定はオンです。</b>未入金が判明したときだけオフにします。この切替は担当者1名で行えますが、<b>失効・契約終了・失効からの復帰は別扱い</b>で、申請と承認を別の担当者が行います。</div>
+        </div></div>
+
+        <div class="card"><div class="ch"><h3>認証状態変更の申請（承認待ち）</h3><span class="hint">職務分離</span></div><div class="cb">
+          <div class="tbl"><table><thead><tr><th>対象</th><th>変更</th><th>申請者</th><th></th></tr></thead><tbody>
+            <tr><td class="mono">SPLL-202606-0117</td><td><span class="pill fail">失効</span><span class="sm">ガイドライン違反</span></td><td class="id">ops@…</td><td><span class="btn">承認 / 却下</span></td></tr>
+          </tbody></table></div>
+          <div class="note warn">申請者本人は承認できません。承認された時点で認証・バッジ・検証ページの表示が変わります。</div>
+        </div></div>
+      </div>
+
+      <div class="card"><div class="ch"><h3>条件不一致（TERMS_MISMATCH）</h3><span class="hint">締結内容と台帳の照合</span></div><div class="tbl"><table>
+        <thead><tr><th>SPLL番号</th><th>項目</th><th>申込時（台帳）</th><th>締結内容</th><th></th></tr></thead>
+        <tbody><tr><td class="mono">SPLL-202608-0031</td><td>利用許諾料</td><td>売上の10％</td><td><b style="color:var(--fail)">売上の1％</b></td><td><span class="btn">調査</span></td></tr></tbody>
+      </table></div></div>
+      <div class="note">不一致が出ている間は<b>認証もバッジも発行されません</b>。フォーム上で条件を書き換えて締結する経路を塞いでいます。</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 事務局運営 ============ -->
+<section class="screen" id="s-gov">
+  <div class="intro"><h2>事務局運営（新機能）</h2><p>パートナーシップ契約に基づく会議体の運営を、メールと個別ファイルの管理から管理コンソール上の証跡へ移しました。会議・議案・決議・報告・四半期清算を1か所で扱います。</p></div>
+  <div class="frame">
+    <div class="chrome"><div class="dots"><i></i><i></i><i></i></div><div class="url">…admin…/exec ▸ 事務局運営</div><span class="scope">組織内限定</span></div>
+    <div class="body">
+      <div class="kpis">
+        <div class="kpi"><b>6</b><span>有効構成員</span></div>
+        <div class="kpi"><b>2</b><span>今後の会議</span></div>
+        <div class="kpi warn"><b>3</b><span>未完了議案</span></div>
+        <div class="kpi bad"><b>1</b><span>期限超過の報告</span></div>
+        <div class="kpi"><b>4</b><span>未完了清算</span></div>
+      </div>
+
+      <div class="card"><div class="ch"><h3>2026年 9月</h3><span class="hint">会議・報告期限・清算期限</span></div><div class="cb" style="padding:0">
+        <div class="cal">
+          <div class="dow">日</div><div class="dow">月</div><div class="dow">火</div><div class="dow">水</div><div class="dow">木</div><div class="dow">金</div><div class="dow">土</div>
+          <div></div><div></div>
+          <div><span class="d">1</span><div class="ev m">第3回定時会議 14:00</div></div>
+          <div><span class="d">2</span></div><div><span class="d">3</span></div><div><span class="d">4</span></div><div><span class="d">5</span></div>
+          <div><span class="d">6</span></div><div><span class="d">7</span></div><div><span class="d">8</span></div><div><span class="d">9</span></div>
+          <div><span class="d">10</span><div class="ev r late">⚠ 報告期限：利用許諾報告</div></div>
+          <div><span class="d">11</span></div><div><span class="d">12</span></div>
+          <div><span class="d">13</span></div><div><span class="d">14</span></div><div><span class="d">15</span></div>
+          <div><span class="d">16</span><div class="ev m">臨時会議（書面）</div></div>
+          <div><span class="d">17</span></div><div><span class="d">18</span></div><div><span class="d">19</span></div>
+          <div><span class="d">20</span></div><div><span class="d">21</span></div><div><span class="d">22</span></div><div><span class="d">23</span></div>
+          <div><span class="d">24</span></div><div><span class="d">25</span></div><div><span class="d">26</span></div>
+          <div><span class="d">27</span></div><div><span class="d">28</span></div><div><span class="d">29</span></div>
+          <div><span class="d">30</span><div class="ev s">清算期限：2026 Q3</div><div class="ev r">報告期限：推奨業者評価</div></div>
+        </div>
+        <div class="legend" style="padding:10px 14px"><span><i style="background:var(--sign-bg)"></i>会議</span><span><i style="background:var(--review-bg)"></i>報告期限</span><span><i style="background:var(--pay-bg)"></i>清算期限</span><span><i style="box-shadow:inset 0 0 0 1px var(--fail)"></i>期限超過</span></div>
+      </div></div>
+
+      <div class="card"><div class="ch"><h3>会議予定</h3><span class="hint">出欠・議長</span></div><div class="tbl"><table>
+        <thead><tr><th>日時</th><th>会議</th><th>議長</th><th>出欠</th><th>状態</th><th></th></tr></thead>
+        <tbody>
+          <tr><td class="id">2026-09-01 14:00</td><td>2026年度 第3回定時会議</td><td>草間 玲<span class="sm">コアパートナー</span></td><td>出席4 / 欠席1<span class="sm">未記録1</span></td><td><span class="pill sign">予定</span></td><td><span class="btn">カレンダーに追加</span> <span class="btn">出欠</span></td></tr>
+          <tr><td class="id">2026-09-16 —</td><td>臨時会議（書面決議）</td><td>草間 玲</td><td><span class="id">未記録</span></td><td><span class="pill wait">下書き</span></td><td><span class="btn">出欠</span></td></tr>
+        </tbody>
+      </table></div></div>
+
+      <div class="card"><div class="ch"><h3>議案・決議</h3><span class="hint">通常＝過半数／特別＝2/3以上＋コア1名以上／解散＝全員同意</span></div><div class="tbl"><table style="min-width:760px">
+        <thead><tr><th>議案</th><th>類型</th><th>決議</th><th>投票</th><th>結果</th><th></th></tr></thead>
+        <tbody>
+          <tr><td><b>ライセンス料改定（電子出版物）</b><span class="sm">第6条1項</span></td><td>ライセンス料改定</td><td><span class="pill pass">SPECIAL</span></td><td>5賛成 / 6名<span class="sm">確定時の集計</span></td><td>可決<span class="sm">コア賛成 1</span></td><td><span class="btn">決議を再開</span></td></tr>
+          <tr><td><b>推奨業者の選定</b><span class="sm">第10条</span></td><td>推奨業者選定・評価</td><td><span class="pill review">ORDINARY</span></td><td>3賛成 / 6名<span class="sm">現在の構成員で判定</span></td><td>審議中</td><td></td></tr>
+          <tr><td><b>パートナー種別の変更</b><span class="sm">第7条</span></td><td>パートナー種別変更</td><td><span class="pill pass">SPECIAL</span></td><td>0賛成 / 6名<span class="sm">現在の構成員で判定</span></td><td>投票前</td><td></td></tr>
+        </tbody>
+      </table></div></div>
+
+      <div class="split">
+        <div class="card"><div class="ch"><h3>決議の記録は後から動かない</h3></div><div class="cb"><ul class="tight">
+          <li>確定後は<b>投票・編集・再確定を受け付けません</b></li>
+          <li>確定時の集計（分母・賛否・コア賛成）を<b>スナップショット</b>。構成員が退任しても過去の決議の可否は変わりません</li>
+          <li>訂正は「決議を再開」から。<b>理由が必須</b>で、旧結果とともに監査ログに残ります</li>
+          <li><b>解散とパートナー種別変更は議長裁量で成立させられません</b></li>
+        </ul></div></div>
+        <div class="card"><div class="ch"><h3>報告・四半期清算</h3></div><div class="tbl"><table>
+          <thead><tr><th>期限</th><th>内容</th><th>状態</th></tr></thead>
+          <tbody>
+            <tr><td class="id" style="color:var(--fail)">2026-09-10</td><td>利用許諾報告（第9条3項）<span class="sm">SPLL-202608-0042</span></td><td><span class="pill fail">期限超過</span></td></tr>
+            <tr><td class="id">2026-09-30</td><td>推奨業者の年次評価（第10条）</td><td><span class="pill wait">下書き</span></td></tr>
+            <tr><td class="id">2026-09-30</td><td>2026 Q3 収益分配・費用負担</td><td><span class="pill review">報告済</span></td></tr>
+          </tbody>
+        </table>
+        <div class="cb" style="padding-top:0"><div class="note">利用許諾報告は<b>締結済み契約から起票</b>できます。対象・利用許諾料・利用目的を契約台帳から写し、期限を締結月の翌月末に自動設定します。</div></div>
+        </div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 設定 ============ -->
+<section class="screen" id="s-settings">
+  <div class="intro"><h2>設定</h2><p>運用中に変わる値は、コードを触らず管理画面から変更できます。保存すると3つのプロジェクトすべてに即時反映されます。</p></div>
+  <div class="frame">
+    <div class="chrome"><div class="dots"><i></i><i></i><i></i></div><div class="url">…admin…/exec ▸ 設定</div><span class="scope">組織内限定</span></div>
+    <div class="body">
+      <div class="split">
+        <div class="card"><div class="ch"><h3>振込先（利用許諾料）</h3><span class="hint">案内ページに即時反映</span></div><div class="cb">
+          <div class="grid2">
+            <div class="fld"><label>金融機関<i>PAYMENT_BANK_NAME</i></label><div class="inp">○○銀行</div></div>
+            <div class="fld"><label>支店<i>PAYMENT_BRANCH</i></label><div class="inp">○○支店</div></div>
+          </div>
+          <div class="grid2">
+            <div class="fld"><label>口座種別<i>PAYMENT_ACCOUNT_TYPE</i></label><div class="inp">普通</div></div>
+            <div class="fld"><label>口座番号<i>PAYMENT_ACCOUNT_NUMBER</i></label><div class="inp mono">1234567</div></div>
+          </div>
+          <div class="fld"><label>利用者向けページURL<i>WORKFLOW_URL</i></label><div class="inp mono ro">…workflow…/exec</div></div>
+          <div><span class="btn p">振込先・案内設定を保存</span></div>
+        </div></div>
+
+        <div class="card"><div class="ch"><h3>案内メールの自動送信</h3><span class="hint">5分バッチ（②workflow）</span></div><div class="cb">
+          <div class="fld"><label>☑ 締結後に案内メールを自動送信する<i>GUIDE_EMAIL_AUTO_SEND</i></label></div>
+          <div class="grid2">
+            <div class="fld"><label>差出人名<i>MAIL_FROM_NAME</i></label><div class="inp">TRPGライツ事務局</div></div>
+            <div class="fld"><label>返信先<i>MAIL_REPLY_TO</i></label><div class="inp">spll@example.com</div></div>
+          </div>
+          <div class="fld"><label>本文<i>差込：{{license_id}} {{party_name}} {{guide_url}} …</i></label><div class="inp" style="min-height:64px;font-size:11px;color:var(--soft)">{{party_name}} 様<br>…SPLL番号：{{license_id}}／ご案内ページ：{{guide_url}}<br>※お振込先はご案内ページに掲載しています。</div></div>
+          <div><span class="btn">テスト送信</span> <span class="btn p">保存</span></div>
+        </div></div>
+      </div>
+
+      <div class="split">
+        <div class="card"><div class="ch"><h3>AI一次審査のプロンプト</h3><span class="hint">保存後の提出から適用</span></div><div class="cb">
+          <div class="fld"><label>審査の指示<i>AI_REVIEW_PROMPT</i></label><div class="inp" style="min-height:74px;font-size:11px;color:var(--soft)">あなたはTRPG二次創作の一次スクリーナーです。特にクレジット表記の欠落を重点確認してください。<br><b class="mono">{{rules}}</b></div></div>
+          <div class="grid2"><div class="fld"><label>版ラベル</label><div class="inp mono">v2</div></div><div class="fld"><label>適用中の版</label><div class="inp mono ro">v2:8f3a1c2d</div></div></div>
+          <div><span class="btn">送信文面をプレビュー</span> <span class="btn p">保存</span></div>
+        </div></div>
+
+        <div class="card"><div class="ch"><h3>申込導線・法人の案内先</h3></div><div class="cb">
+          <div class="fld"><label>定額用フォームURL<i>FORM_URL_STANDARD_FIXED</i></label><div class="inp ro" style="color:var(--review)">③で発行</div></div>
+          <div class="fld"><label>売上連動用フォームURL<i>FORM_URL_STANDARD_RATE</i></label><div class="inp ro" style="color:var(--review)">③で発行</div></div>
+          <div class="fld"><label>法人の問い合わせ先<i>CORPORATE_INQUIRY_EMAIL / URL</i></label><div class="inp">spll-corporate@example.com</div></div>
+          <div><span class="btn p">保存</span></div>
+        </div></div>
+      </div>
+
+      <div class="card"><div class="ch"><h3>同意文・規約</h3><span class="hint">HTMLで公開・版を記録</span></div><div class="tbl"><table>
+        <thead><tr><th>文書</th><th>版</th><th>公開先</th><th></th></tr></thead>
+        <tbody>
+          <tr><td>個人情報の取得同意</td><td class="mono">v1.0</td><td class="id">ポータルの同意リンク</td><td><span class="btn">編集</span></td></tr>
+          <tr><td>SPLL二次創作ガイドライン</td><td class="mono">v4.1</td><td class="id">ポータル／契約書</td><td><span class="btn">編集</span></td></tr>
+          <tr><td>利用規約</td><td class="mono">v1.0</td><td class="id">ポータルの同意リンク</td><td><span class="btn">編集</span></td></tr>
+        </tbody>
+      </table></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 現況 ============ -->
+<section class="screen" id="s-state">
+  <div class="intro"><h2>実装状況と残作業</h2><p>2026-08-13 時点。システム側の実装は完了し、外部サービスの構築と法務確認が残っています。</p></div>
+
+  <div class="card"><div class="ch"><h3>実装済み</h3><span class="hint">全478テスト通過</span></div><div class="tbl"><table>
+    <thead><tr><th>領域</th><th>内容</th><th>状態</th></tr></thead>
+    <tbody>
+      <tr><td>申込・契約</td><td>クラウドサインFORM v4.1への条件引渡し、改変検知、法人の退避、締結Webhook、条件照合</td><td><span class="pill pass">完了</span></td></tr>
+      <tr><td>締結後の導線</td><td>案内ページ、振込先の設定化、宛先の自動取得、案内メールの自動送信</td><td><span class="pill pass">完了</span></td></tr>
+      <tr><td>作品提出</td><td>専用ドライブフォルダでの大容量受渡し、上限検査、共有の自動解除</td><td><span class="pill pass">完了</span></td></tr>
+      <tr><td>審査・認証</td><td>AI一次審査（プロンプトの設定化・版の記録）、認証バッジ、検証ページ、オン／オフ切替</td><td><span class="pill pass">完了</span></td></tr>
+      <tr><td>事務局運営</td><td>会議・出欠・議案・決議判定・報告・四半期清算・カレンダー</td><td><span class="pill pass">完了</span></td></tr>
+      <tr><td>基盤</td><td>3プロジェクト分割、権限分離、監査ログ、職務分離、法務3文書の公開</td><td><span class="pill pass">完了</span></td></tr>
+    </tbody>
+  </table></div></div>
+
+  <div class="card"><div class="ch"><h3>残作業</h3></div><div class="tbl"><table>
+    <thead><tr><th>#</th><th>内容</th><th>担当</th><th>状態</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">②</td><td>設定値の投入（振込先・法人問い合わせ先・法務3文書・作品マスタ113件）</td><td>事務局</td><td><span class="pill review">進行中</span></td></tr>
+      <tr><td class="mono">③</td><td>クラウドサインフォームの実構築（定額用・売上連動用の2種）とテンプレート作成</td><td>事務局</td><td><span class="pill wait">未着手</span></td></tr>
+      <tr><td class="mono">④</td><td>法務レビュー（利用規約v1.0は新規作成、ガイドラインv4.1の未決5項目）</td><td>法務</td><td><span class="pill wait">未着手</span></td></tr>
+      <tr><td class="mono">⑤</td><td>ステージングでの通し確認 → 本番切替</td><td>共同</td><td><span class="pill wait">未着手</span></td></tr>
+    </tbody>
+  </table></div></div>
+
+  <div class="split">
+    <div class="card"><div class="ch"><h3>今日ご判断いただきたいこと</h3></div><div class="cb"><ul class="tight">
+      <li><b>振込先の口座</b>を確定（案内ページに即日反映できます）</li>
+      <li><b>法人の問い合わせ窓口</b>をメールにするか、フォームにするか</li>
+      <li><b>利用規約v1.0</b>の法務確認をどなたに依頼するか</li>
+      <li>③のフォーム構築の<b>着手時期</b></li>
+    </ul></div></div>
+    <div class="card"><div class="ch"><h3>本番までの前提</h3></div><div class="cb"><ul class="tight">
+      <li>クラウドサインは現在<b>サンドボックス</b>設定（本番切替は設定1つ）</li>
+      <li>案内メールはGoogle Workspaceの1日あたり送信上限内で運用</li>
+      <li>作品マスタ113件・権利者17件・旧作品コード130件の投入が必要</li>
+      <li>公開URLは変わりません（デプロイIDを固定して更新）</li>
+    </ul></div></div>
+  </div>
+</section>
+
+</main>
+</div>
+
+<script>
+(function(){
+  var btns = document.querySelectorAll('nav .nv');
+  btns.forEach(function(b){
+    b.addEventListener('click', function(){
+      btns.forEach(function(x){ x.setAttribute('aria-current','false'); });
+      b.setAttribute('aria-current','true');
+      document.querySelectorAll('.screen').forEach(function(s){ s.classList.remove('on'); });
+      var el = document.getElementById('s-' + b.dataset.s);
+      if(el) el.classList.add('on');
+      window.scrollTo({top:0, behavior:'instant'});
+    });
+  });
+})();
+</script>
+
+</body>
+</html>
