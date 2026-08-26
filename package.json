@@ -7,7 +7,7 @@
     "login": "clasp login",
     "logout": "clasp logout",
     "build": "node scripts/build.js",
-    "test": "node tests/harness.js && node scripts/build.js && node tests/sec01.js && node tests/form_v4.js && node tests/partnership_governance.js && node tests/public_web.js",
+    "test": "node scripts/test-all.js",
     "push:portal": "npm run build && cd apps/portal && clasp push -f",
     "push:workflow": "npm run build && cd apps/workflow && clasp push -f",
     "push:admin": "npm run build && cd apps/admin && clasp push -f",

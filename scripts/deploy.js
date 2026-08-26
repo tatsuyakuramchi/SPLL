@@ -32,6 +32,17 @@ function run(cmd){
   execSync(cmd, { cwd: appDir, stdio: 'inherit', shell: true });
 }
 
+/**
+ * clasp の起動コマンド。
+ * node_modules に入っていればそれを直接使い、無いときだけ npx へ落とす。
+ * npx は npm のシムを経由するため、npm 側が壊れている環境（Node更新後など）では
+ * 使えなくなることがある。デプロイがそれに巻き込まれないようにする。
+ */
+function claspCmd(){
+  const local = path.join(ROOT, 'node_modules', '.bin', process.platform === 'win32' ? 'clasp.cmd' : 'clasp');
+  return fs.existsSync(local) ? JSON.stringify(local) : 'npx clasp';
+}
+
 // 前提チェック
 if(!fs.existsSync(path.join(appDir, '.clasp.json'))){
   console.error('[' + app + '] apps/' + app + '/.clasp.json がありません。');
@@ -48,7 +59,7 @@ if(!fs.existsSync(deployFile)){
   console.error('       { "deploymentId": "AKfycb..." }');
   try{
     console.error('\n  現在のデプロイ一覧:');
-    execSync('npx clasp deployments', { cwd: appDir, stdio: 'inherit', shell: true });
+    execSync(claspCmd() + ' deployments', { cwd: appDir, stdio: 'inherit', shell: true });
   }catch(e){ /* clasp未ログイン等はメッセージのみ */ }
   process.exit(1);
 }
@@ -71,6 +82,6 @@ if(!desc){
 }
 
 // push → 既存デプロイを新バージョンへ更新（URLは変わらない）
-run('npx clasp push -f');
-run('npx clasp deploy -i ' + deploymentId + ' -d "' + desc.replace(/"/g, '') + '"');
+run(claspCmd() + ' push -f');
+run(claspCmd() + ' deploy -i ' + deploymentId + ' -d "' + desc.replace(/"/g, '') + '"');
 console.log('[' + app + '] デプロイ更新完了（URLは既存のまま・新バージョン反映済み）');
