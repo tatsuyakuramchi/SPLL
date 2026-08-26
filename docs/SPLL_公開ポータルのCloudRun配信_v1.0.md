@@ -119,20 +119,48 @@ openssl rand -hex 24
 
 ### 4.2 Cloud Run側
 
-```bash
-# ビルド（リポジトリのルートで実行）
-gcloud builds submit --tag asia-northeast1-docker.pkg.dev/PROJECT/spll/public-web
+**Dockerfile はリポジトリのルートに置いていない**（`spll_src/*.html` を拾うためコンテキストはルート、
+Dockerfile は `apps/public-web/`）。`gcloud builds submit --tag` はコンテキスト直下の Dockerfile しか
+見ないので、同梱の `cloudbuild.yaml` を指定する。
 
-# デプロイ
+```bash
+# 0. 置き場所と鍵（初回のみ）
+gcloud artifacts repositories create spll \
+  --repository-format=docker --location=asia-northeast1
+
+openssl rand -hex 24 | gcloud secrets create spll-public-web-key --data-file=-
+
+# 1. ビルド（リポジトリのルートで実行）
+gcloud builds submit --config apps/public-web/cloudbuild.yaml \
+  --substitutions _IMAGE=asia-northeast1-docker.pkg.dev/PROJECT/spll/public-web
+
+# 2. デプロイ
 gcloud run deploy spll-public-web \
-  --image asia-northeast1-docker.pkg.dev/PROJECT/spll/public-web \
+  --image asia-northeast1-docker.pkg.dev/PROJECT/spll/public-web:latest \
   --region asia-northeast1 \
   --allow-unauthenticated \
   --set-env-vars GAS_PORTAL_URL=https://script.google.com/macros/s/XXXX/exec \
   --set-secrets PUBLIC_WEB_KEY=spll-public-web-key:latest
+
+# 3. Cloud Run のサービスアカウントに鍵の読み取りを許可（初回のみ）
+gcloud secrets add-iam-policy-binding spll-public-web-key \
+  --member=serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com \
+  --role=roles/secretmanager.secretAccessor
 ```
 
-鍵は環境変数に直書きせず Secret Manager に置く。
+鍵は環境変数に直書きせず Secret Manager に置く。**同じ値を GAS① のスクリプト プロパティ
+`PUBLIC_WEB_KEY` にも入れる**（`gcloud secrets versions access latest --secret=spll-public-web-key` で取り出せる）。
+
+イメージに入るのは次の5ファイルだけ（約100KB）。台帳・鍵・GASの管理コードは入らない。
+
+```text
+apps/public-web/Dockerfile
+apps/public-web/cloudbuild.yaml
+apps/public-web/page.js
+apps/public-web/server.js
+spll_src/index.html
+spll_src/portal_contract_v4_patch.html
+```
 
 ### 4.3 動作確認
 
@@ -180,7 +208,7 @@ GAS①のURLも従来どおり動くので、切り戻しはDNS（またはリ�
 
 ## 7. テスト
 
-`npm test` の `tests/public_web.js`（48件）で次を固定している。
+`npm test` の `tests/public_web.js`（66件）で次を固定している。
 
 - 画面がGASと同じ正本から組み立てられていること（意匠の二重管理をしていないこと）
 - shim が本体スクリプトより先に読み込まれること（`hasGas` 判定に間に合うこと）
@@ -188,4 +216,8 @@ GAS①のURLも従来どおり動くので、切り戻しはDNS（またはリ�
 - 読み取りはキャッシュされ、申込作成はキャッシュされないこと
 - 申込作成がIPごとに制限されること
 - GAS①の受け口が共有鍵を要求し、未設定なら常に拒否すること
-- コンテナにリポジトリ全体を入れていないこと
+- 申込→フォーム引継ぎが成立すること（RPCの応答が `form_url` / `form_fields` /
+  `handoff_token` / `terms_snapshot_hash` / `template_route` を運び、v4パッチの
+  `buildFormUrl` でhidden項目IDに載ったURLが上限内で組み上がること）
+- Webhookの受け口をCloud Runへ移していないこと（締結はGAS②のまま）
+- コンテナにリポジトリ全体を入れていないこと・Cloud Buildの設定が正しいこと

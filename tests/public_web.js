@@ -144,6 +144,10 @@ async function rpc(payload, opts){ return server.handleRpc(payload, opts || {});
   ok(/COPY spll_src\/index\.html/.test(dockerfile), '画面の正本をイメージへ入れる');
   ok(/ENV PORT=8080/.test(dockerfile) && /USER node/.test(dockerfile), 'Cloud RunのPORTを受け、rootで動かさない');
   ok(!/COPY \. /.test(dockerfile), 'リポジトリ全体を入れない（台帳・鍵の混入を避ける）');
+  // Dockerfile がルートに無いため、--tag ではなく設定ファイルでビルドする必要がある
+  const cb = read('apps/public-web/cloudbuild.yaml');
+  ok(/-f[\s\S]{0,40}apps\/public-web\/Dockerfile/.test(cb), 'Cloud Build がDockerfileの場所を明示する');
+  ok(/\n\s+- '\.'/.test(cb), 'ビルドコンテキストはリポジトリのルート（spll_src を拾うため）');
 
   console.log('\nPUBLIC WEB RESULT: ' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

@@ -1,0 +1,31 @@
+# SPLL 公開ポータルのビルド（Cloud Build）
+#
+# Dockerfile がリポジトリのルートに無いため、`gcloud builds submit --tag` は使えない
+# （--tag はコンテキスト直下の Dockerfile しか見ない）。この設定ファイルを指定して実行する。
+#
+#   gcloud builds submit --config apps/public-web/cloudbuild.yaml \
+#     --substitutions _IMAGE=asia-northeast1-docker.pkg.dev/PROJECT/spll/public-web
+#
+# ビルドコンテキストはリポジトリのルート。Dockerfile が spll_src/*.html を拾うため。
+
+substitutions:
+  _IMAGE: 'asia-northeast1-docker.pkg.dev/PROJECT_ID/spll/public-web'
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - '-f'
+      - apps/public-web/Dockerfile
+      - '-t'
+      - '${_IMAGE}:${SHORT_SHA}'
+      - '-t'
+      - '${_IMAGE}:latest'
+      - '.'
+
+images:
+  - '${_IMAGE}:${SHORT_SHA}'
+  - '${_IMAGE}:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
