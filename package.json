@@ -4,8 +4,8 @@
   "private": true,
   "description": "SPLL システム（Google Apps Script + clasp）／ SPLL-SYS-BD-001",
   "scripts": {
-    "login": "clasp login",
-    "logout": "clasp logout",
+    "login": "node scripts/clasp.js login",
+    "logout": "node scripts/clasp.js logout",
     "build": "node scripts/build.js",
     "test": "node scripts/test-all.js",
     "push:portal": "npm run build && cd apps/portal && clasp push -f",

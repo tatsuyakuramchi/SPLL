@@ -23,6 +23,32 @@
 > `npm run push` 等のルート直下pushスクリプトは存在せず、配布は `push:portal/workflow/admin/all` のみです。
 > 旧エントリは `reference/90_main.gs.reference`（参照用・配布対象外）。
 
+## 1.5 npm が使えないとき（Windows）
+
+Node.js を更新したあとなどに、npm のシムが壊れて次のエラーが出ることがある。
+
+```text
+C:\Program Files\nodejs\node.exe:1
+MZ...
+SyntaxError: Invalid or unexpected token
+Could not determine Node.js install directory
+```
+
+node 本体は動いているので、npm を経由しない口から作業できる。
+
+```powershell
+node scripts\test-all.js            # テスト一式
+node scripts\build.js               # ビルド
+node scripts\clasp.js login         # clasp ログイン（invalid_grant のとき）
+node scripts\deploy.js portal       # デプロイ（workflow / admin も同様）
+```
+
+`scripts/deploy.js` と `scripts/clasp.js` は `node_modules/.bin/clasp` を直接起動するため、
+npx（＝npmのシム）が壊れていても動く。npm 自体は、Node.js 公式インストーラで
+上書きインストールすると復旧する。
+
+---
+
 ## 2. 初回セットアップ（ローカルPCで実施）
 
 ```bash
