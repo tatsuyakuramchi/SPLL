@@ -43,5 +43,20 @@ ok(/admin_issueGuideLink/.test(adminHtml),'契約管理から案内リンクを�
 ok(/gc-guide_email_auto_send/.test(adminHtml)&&/sendMailTest/.test(adminHtml),'管理画面に案内メールの自動送信設定がある');
 ok(/admin_setCertEnabled/.test(adminHtml),'契約管理に認証オン／オフのスイッチがある');
 ok(/id="ai-prompt"/.test(adminHtml)&&/saveAiConfig/.test(adminHtml),'管理画面にAI審査プロンプトの設定がある');
+
+// ポータルの見た目を変えても、v4パッチが差し込む先（DOM契約）は壊さない
+const portalHtml=read('spll_src/index.html');
+['ws0','ws1','ws2','ws3','wsDone','partySel','usageSel','selList','privacyText','termsText',
+ 'refBox','doneMsg','toForm','submit','n0','n1','n2','grid','q','detail','toAdd','cartbar','maxHint']
+  .forEach(function(id){ ok(portalHtml.indexOf('id="'+id+'"')>=0, 'ポータルに #'+id+' がある（v4パッチ・スクリプトの差込先）'); });
+['wtitle','wsub','check','ct','must','oath','warnnote','statblock','sbhead','sbrow','sbk','sbv','legaltext']
+  .forEach(function(cls){ ok(portalHtml.indexOf(cls)>=0, 'ポータルに .'+cls+' がある'); });
+// 世界観：明朝の見出しと真鍮の差し色（申込窓口・案内・提出で共通）
+['spll_src/index.html','spll_src/guide.html','spll_src/upload.html'].forEach(function(f){
+  const h=read(f);
+  ok(/Shippori\+Mincho|Shippori Mincho/.test(h), f+' が明朝の見出し書体を読み込む');
+  ok(/--brass:#C09B4A/.test(h), f+' が共通の配色トークンを持つ');
+});
+
 console.log('\nFORM V4 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);
