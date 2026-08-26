@@ -188,6 +188,13 @@ async function rpc(payload, opts){ return server.handleRpc(payload, opts || {});
   ok(/COPY spll_src\/index\.html/.test(dockerfile), '画面の正本をイメージへ入れる');
   ok(/ENV PORT=8080/.test(dockerfile) && /USER node/.test(dockerfile), 'Cloud RunのPORTを受け、rootで動かさない');
   ok(!/COPY \. /.test(dockerfile), 'リポジトリ全体を入れない（台帳・鍵の混入を避ける）');
+  // Cloud Build へ送るコンテキストからローカル専用の設定を外す
+  const gi = read('.gcloudignore');
+  ['apps/*/.clasp.json', 'apps/*/.deploy.json', '.clasprc.json'].forEach((pat) =>
+    ok(gi.indexOf(pat) >= 0, 'ビルドコンテキストから ' + pat + ' を除外する'));
+  // 除外しすぎてDockerfileのCOPY対象を落としていないこと
+  ['spll_src/index.html','spll_src/portal_contract_v4_patch.html','spll_src/guide.html','spll_src/upload.html']
+    .forEach((f) => ok(dockerfile.indexOf(f) >= 0 && gi.indexOf('\n' + f) < 0, f + ' はビルドコンテキストに残る'));
   // Dockerfile がルートに無いため、--tag ではなく設定ファイルでビルドする必要がある
   const cb = read('apps/public-web/cloudbuild.yaml');
   ok(/-f[\s\S]{0,40}apps\/public-web\/Dockerfile/.test(cb), 'Cloud Build がDockerfileの場所を明示する');

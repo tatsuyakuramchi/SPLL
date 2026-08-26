@@ -1,0 +1,29 @@
+# Cloud Build へ送る中身を絞る。
+# .gcloudignore が無いと gcloud は .gitignore を使うため、ローカルにだけある
+# .clasp.json / .deploy.json（実プロジェクトID・デプロイID）まで送られかねない。
+# ここではコンテナに必要なものだけを明示的に残す。
+
+# 既定で除外
+.git/
+.gitignore
+node_modules/
+*.log
+
+# ローカル専用の設定（実IDを含む。イメージにも不要）
+apps/*/.clasp.json
+apps/*/.deploy.json
+.clasprc.json
+.env
+*.local
+secrets.json
+
+# ビルド生成物（Dockerfileは spll_src/*.html を直接読む）
+apps/*/dist/
+
+# コンテナに要らないもの
+docs/
+tests/
+scripts/
+reference/
+spll_src/*.gs
+spll_src/admin*.html
