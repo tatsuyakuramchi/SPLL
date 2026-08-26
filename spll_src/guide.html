@@ -37,70 +37,61 @@
   .err{background:var(--warn-bg);color:var(--warn);border-radius:9px;padding:14px 16px;font-size:13.5px;}
   @media(max-width:520px){.kv{grid-template-columns:96px 1fr;}}
 
-  /* ===== 世界観の統一（申込窓口と同じ装丁）=====
+  /* ===== 意匠の統一（申込窓口と同じ誌面）=====
      既存のクラス名・JSのクラス切替はそのままに、配色と組みだけを上書きする。 */
   :root{
-    --ink:#171310;--paper:#E9E0CE;--surface:#F5EFE2;--surface2:#EFE7D6;
-    --brand:#5B2320;--brand2:#8C3A31;--brass:#C09B4A;--brass-lit:#E0BE72;--brass-bg:#F0E4C8;
-    --ok:#3E6B4F;--ok-bg:#DFE9DD;--warn:#8E2F26;--warn-bg:#F2DFDA;
-    --line:#CFC0A2;--soft:#6E6152;
+    --ink:#1A1714;--ink2:#2B2521;--paper:#F1EEE8;--surface:#FFFFFF;--surface2:#F7F5F1;
+    --brand:#B3121B;--brand2:#8E0D15;--brand-bg:#FBEDED;
+    --brass:#A8873C;--brass-bg:#F6EFDD;
+    --ok:#2F6B4A;--ok-bg:#E4EFE7;--warn:#B3121B;--warn-bg:#FBEDED;
+    --line:#DCD6CC;--line2:#EDE9E2;--soft:#6B6660;
     --serif:"Shippori Mincho B1",'Hiragino Mincho ProN','Yu Mincho',"Noto Serif JP",serif;
     --sans:"Zen Kaku Gothic New",'Hiragino Sans','Yu Gothic',system-ui,sans-serif;
-    --grain:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E");
   }
-  body{
-    font-family:var(--sans);line-height:1.8;color:var(--ink);
-    background-color:var(--paper);
-    background-image:var(--grain),radial-gradient(120% 80% at 50% -10%,#F6F0E3 0%,var(--paper) 55%,#DED2BA 100%);
-    background-blend-mode:multiply,normal;background-attachment:fixed;
-  }
+  body{font-family:var(--sans);line-height:1.8;color:var(--ink);background:var(--paper);}
   .mono{font-family:"IBM Plex Mono",monospace;}
-  header{
-    background-color:var(--ink);color:#EDE3CE;border-bottom:1px solid #000;
-    background-image:var(--grain),linear-gradient(180deg,#241D18,#120F0C);background-blend-mode:overlay,normal;
-    box-shadow:0 1px 0 var(--brass),0 8px 20px rgba(0,0,0,.2);
+  header{background:var(--surface);border-bottom:3px solid var(--brand);box-shadow:0 2px 10px rgba(26,23,20,.07);}
+  header::before{
+    content:"TRPGライツ事務局　二次創作 利用許諾窓口";display:block;background:var(--ink);color:#C9C2B8;
+    font-size:10.5px;letter-spacing:.18em;padding:5px 0;text-align:center;
   }
   .seal{
-    border:1px solid var(--brass);color:var(--brass-lit);font-family:var(--serif);font-weight:800;font-size:12px;
-    box-shadow:inset 0 0 0 3px rgba(192,155,74,.18);background:radial-gradient(circle at 35% 30%,rgba(192,155,74,.22),transparent 70%);
+    border:1.5px solid var(--brass);border-radius:2px;color:var(--brass);background:var(--brass-bg);
+    font-family:var(--serif);font-weight:800;font-size:11.5px;letter-spacing:.04em;
   }
-  header .t,header div[style*="font-weight:800"]{font-family:var(--serif);font-weight:700;letter-spacing:.06em;color:#F2E7D2;}
+  header .t,header .hwrap>div:last-child{font-family:var(--serif);font-weight:800;letter-spacing:.06em;color:var(--ink);}
   h1{font-family:var(--serif);font-weight:800;letter-spacing:.04em;line-height:1.5;}
   .sub{color:var(--soft);line-height:1.9;}
-  .card{
-    background:var(--surface);border:1px solid var(--line);border-radius:3px;padding:22px 24px;
-    box-shadow:0 1px 2px rgba(60,45,25,.09);position:relative;
-  }
-  .card::after{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:linear-gradient(90deg,var(--brass),transparent);}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:2px;padding:22px 24px;}
   .card h2{
-    font-family:var(--serif);font-weight:700;font-size:16px;color:var(--brand);letter-spacing:.05em;
-    border-left:none;padding:0 0 10px;border-bottom:1px solid var(--line);margin:0 0 14px;
+    font-family:var(--serif);font-weight:800;font-size:16px;color:var(--ink);letter-spacing:.05em;
+    border-left:5px solid var(--brand);padding:0 0 0 11px;margin:0 0 14px;
   }
-  .kv .k,.meta .k{background:var(--surface2);color:var(--brand);font-family:var(--serif);font-weight:700;letter-spacing:.05em;}
-  .lic{font-family:"IBM Plex Mono";font-weight:600;color:var(--brand);letter-spacing:.06em;}
-  .btn,.folderbtn{
-    background:var(--brand);color:#F3E7D2;border:1px solid #451917;border-radius:3px;
-    font-family:var(--sans);font-weight:700;letter-spacing:.06em;
-  }
+  .kv .k,.meta .k{background:var(--surface2);color:var(--brand);font-weight:700;letter-spacing:.04em;border-color:var(--line2);}
+  .kv .v,.meta .v{border-color:var(--line2);}
+  .lic{font-family:"IBM Plex Mono";font-weight:600;color:var(--ink);letter-spacing:.06em;}
+  .btn,.folderbtn{background:var(--brand);color:#fff;border:none;border-radius:2px;font-family:var(--sans);font-weight:700;letter-spacing:.05em;}
   .btn:hover,.folderbtn:hover{background:var(--brand2);}
-  .btn.sec{background:var(--brass-bg);color:var(--ink);border:1px solid var(--line);}
-  .btn:disabled{background:#C3B7A4;border-color:#B3A692;color:#6E6152;}
-  .prev{border-radius:3px;border-color:var(--line);}
-  label.f{color:var(--brand);font-family:var(--serif);font-weight:700;letter-spacing:.05em;}
-  input[type=text],textarea{border:1px solid var(--line);border-radius:3px;background:var(--surface);color:var(--ink);}
-  input[type=text]:focus,textarea:focus{outline:2px solid var(--brass);outline-offset:-1px;}
+  .btn.sec{background:var(--surface2);color:var(--ink);border:1px solid var(--line);}
+  .btn:disabled{background:#CFC9C1;color:#7B756E;}
+  .prev{border-radius:2px;border-color:var(--line);background:var(--surface);}
+  label.f{color:var(--brand);font-weight:700;letter-spacing:.04em;}
+  input[type=text],textarea{border:1px solid var(--line);border-radius:2px;background:var(--surface);color:var(--ink);}
+  input[type=text]:focus,textarea:focus{outline:2px solid var(--brand);outline-offset:-1px;}
   .check,.mcard{border:1px solid var(--line);border-radius:2px;background:var(--surface);}
-  .check:hover,.mcard:hover{border-color:var(--brass);background:var(--surface2);}
-  .mcard.on{border-color:var(--brass);background:var(--brass-bg);}
-  .mcard b{font-family:var(--serif);letter-spacing:.04em;}
-  .drop{border:2px dashed var(--line);border-radius:3px;background:var(--surface);color:var(--soft);}
-  .drop.on{border-color:var(--brass);background:var(--brass-bg);color:var(--brand);}
+  .check:hover,.mcard:hover{border-color:var(--brand);background:var(--brand-bg);}
+  .mcard.on{border-color:var(--brand);background:var(--brand-bg);}
+  .mcard b{font-family:var(--serif);letter-spacing:.03em;}
+  .drop{border:2px dashed var(--line);border-radius:2px;background:var(--surface2);color:var(--soft);}
+  .drop.on{border-color:var(--brand);background:var(--brand-bg);color:var(--brand);}
   .note{background:var(--surface2);border:1px solid var(--line);border-radius:2px;color:var(--soft);}
-  .warn,.notice.err,.err{background:var(--warn-bg);color:var(--warn);border:1px solid #DFBDB6;border-radius:2px;}
-  .notice.ok{background:var(--ok-bg);color:var(--ok);border:1px solid #B9CDB6;border-radius:2px;}
-  .steps li:before{background:transparent;border:1px solid var(--brass);color:var(--brand);font-family:var(--serif);font-weight:700;}
+  .warn,.notice.err,.err{background:var(--brand-bg);color:var(--brand);border:1px solid #EFC6C8;border-left:4px solid var(--brand);border-radius:2px;}
+  .notice.ok{background:var(--ok-bg);color:var(--ok);border:1px solid #BDD3C4;border-radius:2px;}
+  .steps li:before{background:var(--brand);color:#fff;font-family:"IBM Plex Mono";font-weight:600;border-radius:2px;}
   .steps li b{font-family:var(--serif);letter-spacing:.03em;}
   .done .big{font-family:var(--serif);font-weight:800;color:var(--brand);letter-spacing:.06em;}
+  .st.CLEARED{background:var(--ok-bg);color:var(--ok);}
+  .st.CORRECTION_REQUIRED,.st.ESCALATED{background:var(--brand-bg);color:var(--brand);}
 </style>
 </head>
 <body>

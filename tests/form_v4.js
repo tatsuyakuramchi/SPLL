@@ -55,7 +55,8 @@ const portalHtml=read('spll_src/index.html');
 ['spll_src/index.html','spll_src/guide.html','spll_src/upload.html'].forEach(function(f){
   const h=read(f);
   ok(/Shippori\+Mincho|Shippori Mincho/.test(h), f+' が明朝の見出し書体を読み込む');
-  ok(/--brass:#C09B4A/.test(h), f+' が共通の配色トークンを持つ');
+  ok(/Zen\+Kaku\+Gothic|Zen Kaku Gothic/.test(h), f+' が本文のゴシック書体を読み込む');
+  ok(/--brand:#B3121B/.test(h) && /--ink:#1A1714/.test(h), f+' が共通の配色トークン（朱・墨）を持つ');
 });
 
 console.log('\nFORM V4 RESULT: '+pass+' passed, '+fail+' failed');
