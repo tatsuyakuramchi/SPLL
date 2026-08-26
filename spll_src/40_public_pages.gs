@@ -163,26 +163,75 @@ function serveBadge_(e){
   return HtmlService.createHtmlOutput(html).setTitle('SPLL 認証バッジ');
 }
 
+/**
+ * 認証の照会（画面・APIの共通処理）。
+ * 総当たり対策のレート制限と照会ログはここで行うので、どの入口から来ても同じ扱いになる。
+ * 無効の理由（未入金による停止など）は返さない。掲載者以外に事情を推測させないため。
+ */
+function verifyCertificate_(certId, code){
+  const id = String(certId || '');
+  if(!id) return { state:'INPUT' };
+  if(!rateLimit_('verify:' + id, 30, 3600))
+    return { state:'LIMITED', title:'確認できません',
+      message:'照会回数が上限に達しました。時間をおいて再度お試しください。' };
+  const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.cert_id === id; });
+  const codeOk = cert && cert.check_code_hash && String(cert.check_code_hash) === hash_(String(code || ''));
+  if(!cert || !codeOk){
+    logEvent_('certificate', id, 'public', null, { verify:'MISMATCH' });   // 照会ログ（総当たり検知用）
+    return { state:'MISMATCH', title:'確認できません',
+      message:'正規に発行された認証ではないか、照合コードが一致しません。' };
+  }
+  const active = String(cert.status) === 'ACTIVE';
+  return {
+    state: active ? 'ACTIVE' : 'INACTIVE',
+    title: active ? '正規ライセンス 確認済み' : '無効',
+    message: active ? 'このライセンスは有効です。' : 'このライセンスは現在有効ではありません（' + cert.status + '）。',
+    work_names: contractWorkNames_(cert.contract_id),
+    license_id: cert.contract_id, issued_at: cert.issued_at, status: cert.status
+  };
+}
+/** 公開Web（Cloud Run）から呼ぶ照会API。表示はCloud Run側で組む。 */
+function web_verifyCertificate(certId, code){ return verifyCertificate_(certId, code); }
+
 /** 検証ポータル（?page=verify）。id+照合コード（ハッシュ照合・§13.2）で認証状態を表示。 */
 function serveVerify_(e){
   const p = e.parameter || {};
-  if(!p.id) return verifyInputHtml_();
-  // レート制限（§6.4）：認証ID単位の照会回数（総当たり対策）
-  if(!rateLimit_('verify:' + String(p.id), 30, 3600))
-    return verifyHtml_('gray', '確認できません', '照会回数が上限に達しました。時間をおいて再度お試しください。', '');
-  const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.cert_id === p.id; });
-  const codeOk = cert && cert.check_code_hash && String(cert.check_code_hash) === hash_(String(p.c||''));
-  if(!cert || !codeOk){
-    logEvent_('certificate', String(p.id||''), 'public', null, { verify:'MISMATCH' });   // 照会ログ（総当たり検知用）
-    return verifyHtml_('gray', '確認できません', '正規に発行された認証ではないか、照合コードが一致しません。', '');
-  }
-  const works = contractWorkNames_(cert.contract_id);
-  const meta = '対象原作：' + (works.length ? esc_(works.join('、')) : '—') +
-    '<br>ライセンスID：' + esc_(cert.contract_id) + '<br>発行日：' + esc_(cert.issued_at) +
-    '<br>状態：' + esc_(cert.status);
-  return cert.status === 'ACTIVE'
-    ? verifyHtml_('ok', '正規ライセンス 確認済み', 'このライセンスは有効です。', meta)
-    : verifyHtml_('ng', '無効', 'このライセンスは現在有効ではありません（' + esc_(cert.status) + '）。', meta);
+  const v = verifyCertificate_(p.id, p.c);
+  if(v.state === 'INPUT') return verifyInputHtml_();
+  if(v.state === 'LIMITED' || v.state === 'MISMATCH') return verifyHtml_('gray', v.title, v.message, '');
+  const meta = '対象原作：' + (v.work_names.length ? esc_(v.work_names.join('、')) : '—') +
+    '<br>ライセンスID：' + esc_(v.license_id) + '<br>発行日：' + esc_(v.issued_at) +
+    '<br>状態：' + esc_(v.status);
+  return verifyHtml_(v.state === 'ACTIVE' ? 'ok' : 'ng', v.title, v.message, meta);
+}
+
+/**
+ * 認証バッジの取得（公開Web用）。画像はDrive上にあり匿名では読めないため、
+ * メタ情報と画像を分けて返す。画像は1枚ずつ渡し、1回の応答を重くしない。
+ */
+function web_getBadgeContext(token){
+  const b = badgeForToken_(token, true);
+  if(!b) return null;
+  return { license_id:b.contract_id, badge_id:b.badge_id, issued_at:b.issued_at,
+    work_names: contractWorkNames_(b.contract_id).join('、'),
+    sizes: [{ key:'l', label:'大 (L)' }, { key:'m', label:'中 (M)' }, { key:'s', label:'小 (S)' }] };
+}
+function web_getBadgeImage(token, size){
+  const b = badgeForToken_(token, false);      // 画像取得では回数を消費しない（3枚で3回減らさない）
+  if(!b) return null;
+  const fileId = { l:b.png_l, m:b.png_m, s:b.png_s }[String(size || 'l')];
+  if(!fileId) return null;
+  try{
+    return { base64: Utilities.base64Encode(DriveApp.getFileById(fileId).getBlob().getBytes()) };
+  }catch(err){ return null; }
+}
+/** バッジ用トークンの解決。提出・案内のトークンでも閲覧できる（再発行を不要にするため）。 */
+function badgeForToken_(token, consume){
+  let tok = resolveToken_(token, 'BADGE_DOWNLOAD');
+  if(tok){ if(consume) consumeToken_(tok); }
+  else { tok = resolveToken_(token, 'SUBMISSION') || resolveToken_(token, 'GUIDE'); }
+  if(!tok) return null;
+  return readRows_(ssOps_(),'Badges').find(function(x){ return x.contract_id === tok.contract_id && String(x.status) === 'ISSUED'; }) || null;
 }
 
 function verifyInputHtml_(){

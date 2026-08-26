@@ -5,9 +5,11 @@ FROM node:22-alpine
 ENV NODE_ENV=production
 WORKDIR /app
 
-# 画面の正本（GAS①と同じHTML）
+# 画面の正本（GASが配信しているものと同じHTML）
 COPY spll_src/index.html                    ./spll_src/index.html
 COPY spll_src/portal_contract_v4_patch.html ./spll_src/portal_contract_v4_patch.html
+COPY spll_src/guide.html                    ./spll_src/guide.html
+COPY spll_src/upload.html                   ./spll_src/upload.html
 # サーバー
 COPY apps/public-web/                       ./apps/public-web/
 

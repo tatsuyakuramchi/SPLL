@@ -13,13 +13,14 @@ function ok(cond, msg){ if(cond){ pass++; } else { fail++; console.log('  FAIL:'
 
 // 転送先とキーは環境変数で受け取る。server.js を読む前に入れておく。
 process.env.GAS_PORTAL_URL = process.env.GAS_PORTAL_URL || 'https://script.google.com/macros/s/TEST/exec';
+process.env.GAS_WORKFLOW_URL = process.env.GAS_WORKFLOW_URL || 'https://script.google.com/macros/s/TEST2/exec';
 process.env.PUBLIC_WEB_KEY = process.env.PUBLIC_WEB_KEY || 'test-key';
 
-const { buildPage, RPC_FUNCTIONS } = require(path.join(ROOT, 'apps/public-web/page.js'));
+const { buildPortalPage, buildTokenPage, RPC_FUNCTIONS, RPC_TARGETS } = require(path.join(ROOT, 'apps/public-web/page.js'));
 const server = require(path.join(ROOT, 'apps/public-web/server.js'));
 
 // ---- 1. 画面はGASと同じ正本から組み立てる ----
-const page = buildPage();
+const page = buildPortalPage();
 const indexHtml = read('spll_src/index.html');
 const patchHtml = read('spll_src/portal_contract_v4_patch.html');
 ok(page.indexOf('SPLL 利用申込窓口') >= 0, 'ポータルのタイトルを含む');
@@ -90,8 +91,51 @@ async function rpc(payload, opts){ return server.handleRpc(payload, opts || {});
     '共有鍵が未設定なら常に拒否する（フェイルクローズ）');
   ok(/hasOwnProperty\.call\(handlers, fn\)/.test(entry), '許可リストにある名前だけを呼ぶ');
   ok(!/this\[fn\]/.test(entry), '関数名から動的に解決しない');
-  RPC_FUNCTIONS.forEach((fn) => ok(new RegExp(fn + ':\\s*function').test(entry), 'GAS①が ' + fn + ' を公開する'));
+  const wentry = read('apps/workflow/entry.gs');
+  RPC_FUNCTIONS.forEach((fn) => {
+    const target = RPC_TARGETS[fn] === 'workflow' ? wentry : entry;
+    const label = RPC_TARGETS[fn] === 'workflow' ? 'GAS②' : 'GAS①';
+    ok(new RegExp(fn + ':\\s*function').test(target), label + 'が ' + fn + ' を公開する');
+  });
   ok(!/admin_|setup_/.test(entry.split('publicWebRpcHandlers_')[1] || ''), 'GAS①の受け口に管理系・セットアップ系を並べない');
+  // GAS②はWebhookと同じURLに同居するので、RPCとWebhookの振り分けが明示されていること
+  ok(/function doPost\(e\)/.test(wentry) && /rpc \|\| ''\) === '1'/.test(wentry),
+    'GAS②は ?rpc=1 のPOSTだけをRPCとして扱う（Webhookと混ざらない）');
+  ok(/PUBLIC_WEB_KEY/.test(wentry) && /if\(!expected\) return false;/.test(wentry),
+    'GAS②のRPC受け口も共有鍵を要求し、未設定なら常に拒否する');
+  ok(!/admin_|setup_/.test(wentry.split('workflowRpcHandlers_')[1] || ''), 'GAS②の受け口に管理系・セットアップ系を並べない');
+  ok(/receiveWebhook_/.test(wentry), 'GAS②のWebhook受信は従来どおり残る');
+
+  // ---- 4.5 クリエーター向けページ（提出・案内・検証・バッジ） ----
+  // GASのテンプレート差込（<?= token ?>）と同じ位置に、同じ値を入れているか
+  ['guide.html','upload.html'].forEach((f) => {
+    const src = read('spll_src/' + f);
+    ok(src.indexOf('var TOKEN = "<?= token ?>"') >= 0, f + ' の差込はTOKENの1箇所だけ');
+    const built = buildTokenPage(f, 'TKN-abc123');
+    ok(built.indexOf('var TOKEN = "TKN-abc123"') >= 0, f + ' にトークンを差し込む');
+    ok(built.indexOf('<?= token ?>') < 0, f + ' にテンプレート記法を残さない');
+    ok(built.indexOf('window.google.script') < built.indexOf('var TOKEN'), f + ' もshimを先に読み込む');
+  });
+  // トークンはURLに現れる文字だけを通す（差込先はJS文字列リテラルのため）
+  ok(buildTokenPage('guide.html', 'a"+alert(1)+"b').indexOf('alert(1)') < 0, 'トークンに紛れ込んだJSを差し込まない');
+
+  // 検証ページ：状態で表示が変わり、無効の理由は出さない
+  const { verifyPage, badgePage } = require(path.join(ROOT, 'apps/public-web/verify-page.js'));
+  const okPage = verifyPage({ state:'ACTIVE', title:'正規ライセンス 確認済み', message:'このライセンスは有効です。',
+    work_names:['新クトゥルフ神話TRPG'], license_id:'SPLL-202608-0042', issued_at:'2026-08-11', status:'ACTIVE' });
+  ok(/確認済み/.test(okPage) && /SPLL-202608-0042/.test(okPage), '有効な認証はSPLL番号とともに確認済みを示す');
+  const ngPage = verifyPage({ state:'INACTIVE', title:'無効', message:'このライセンスは現在有効ではありません（PAYMENT_HOLD）。',
+    work_names:[], license_id:'SPLL-1', issued_at:'2026-08-10', status:'PAYMENT_HOLD' });
+  ok(/無効/.test(ngPage), '停止中の認証は無効と示す');
+  ok(verifyPage({ state:'INPUT' }).indexOf('name="id"') >= 0, 'IDが無いときは入力フォームを出す');
+  ok(/確認できません/.test(verifyPage({ state:'MISMATCH', title:'確認できません', message:'一致しません。' })),
+    '照合できない場合は理由を明かさず「確認できません」に統一する');
+
+  // バッジページ：画像は1枚ずつ別URLから取る（1回の応答を重くしない）
+  const bp = badgePage({ license_id:'SPLL-1', badge_id:'BDG-1', issued_at:'2026-08-11', work_names:'作品A',
+    sizes:[{key:'l',label:'大 (L)'},{key:'m',label:'中 (M)'},{key:'s',label:'小 (S)'}] }, 'TKN-1');
+  ok((bp.match(/\/badge-image\?t=TKN-1/g) || []).length >= 3, 'バッジ画像は size ごとに別URLで取得する');
+  ok(/リンクが無効です/.test(badgePage(null, 'x')), 'トークンが無効なら案内を出す');
 
   // ---- 5. 申込 → クラウドサインフォームへの引継ぎ（Cloud Run経由でも成立するか） ----
   // GASが返す申込結果が、画面がフォームURLを組み立てるのに必要な項目を全部持っているか。

@@ -1,8 +1,7 @@
 /**
- * 公開ポータルのHTMLを組み立てる。
+ * クリエーター向けページのHTMLを組み立てる。
  *
- * 正本は spll_src/index.html と spll_src/portal_contract_v4_patch.html（GAS①と同じもの）。
- * GAS では HtmlService が両者を結合して配信しているため、ここでも同じ順序で結合し、
+ * 正本は spll_src/*.html（GASが配信しているものと同じ）。GAS側と同じ結合・差込を行い、
  * 画面の実装を二重に持たない。Cloud Run 側の差分は「google.script.run のかわりに
  * HTTPでRPCする shim を先に読み込ませる」ことだけ。
  */
@@ -13,21 +12,35 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..', '..');
 const SRC = path.join(ROOT, 'spll_src');
 
-/** 画面から呼び出してよい関数（サーバー側の許可リストと同じ並び） */
-const RPC_FUNCTIONS = [
-  'api_listWorks',
-  'api_getUsageOptions',
-  'api_previewFeeTerms',
-  'api_getLegalTexts',
-  'api_getLegalTextsV4',
-  'api_getApplyConfig',
-  'web_createApplicationV4'
-];
+/**
+ * 画面から呼び出してよい関数と、その転送先。
+ *   portal   … GAS①（申込。スプレッドシートのみ触れる狭い権限）
+ *   workflow … GAS②（提出・案内・検証・バッジ。トークンで守られる）
+ * サーバー側の許可リストと同じ並び。ここに無い関数はshimに生えないし、サーバーも通さない。
+ */
+const RPC_TARGETS = {
+  api_listWorks:               'portal',
+  api_getUsageOptions:         'portal',
+  api_previewFeeTerms:         'portal',
+  api_getLegalTexts:           'portal',
+  api_getLegalTextsV4:         'portal',
+  api_getApplyConfig:          'portal',
+  web_createApplicationV4:     'portal',
+  web_getSubmitContext:        'workflow',
+  web_submitWork:              'workflow',
+  web_openDriveSubmission:     'workflow',
+  web_finalizeDriveSubmission: 'workflow',
+  web_getGuideContext:         'workflow',
+  web_getSubmitLinkFromGuide:  'workflow',
+  web_verifyCertificate:       'workflow',
+  web_getBadgeContext:         'workflow',
+  web_getBadgeImage:           'workflow'
+};
+const RPC_FUNCTIONS = Object.keys(RPC_TARGETS);
 
 /**
  * google.script.run 互換のクライアント。
  * withSuccessHandler / withFailureHandler の連鎖と、関数名での呼び出しを再現する。
- * 許可リストにない関数はそもそも生やさないので、画面から管理系を呼ぶ経路が存在しない。
  */
 function shimScript(){
   return `<script>
@@ -75,23 +88,31 @@ function shimScript(){
   window.google = window.google || {};
   window.google.script = window.google.script || {};
   Object.defineProperty(window.google.script, 'run', { get: function(){ return new Runner(); } });
-  // 管理コンソールへの切替は Google ログイン前提の機能。公開サイトでは常に非表示にする。
   window.api_getViewerRole = null;
 })();
 </script>
 `;
 }
 
-/** GAS① の doGet と同じ結合順で1枚のHTMLにする */
-function buildPage(){
-  const base = fs.readFileSync(path.join(SRC, 'index.html'), 'utf8');
-  const patch = fs.readFileSync(path.join(SRC, 'portal_contract_v4_patch.html'), 'utf8');
-  const withShim = base.indexOf('</head>') >= 0
-    ? base.replace('</head>', shimScript() + '</head>')
-    : shimScript() + base;
-  return withShim.indexOf('</body>') >= 0
-    ? withShim.replace('</body>', patch + '\n</body>')
-    : (withShim + patch);
+function withShim(html){
+  return html.indexOf('</head>') >= 0 ? html.replace('</head>', shimScript() + '</head>') : shimScript() + html;
+}
+function read(name){ return fs.readFileSync(path.join(SRC, name), 'utf8'); }
+
+/** 申込窓口。GAS① の doGet と同じ結合順で1枚のHTMLにする。 */
+function buildPortalPage(){
+  const base = withShim(read('index.html'));
+  const patch = read('portal_contract_v4_patch.html');
+  return base.indexOf('</body>') >= 0 ? base.replace('</body>', patch + '\n</body>') : (base + patch);
 }
 
-module.exports = { RPC_FUNCTIONS, buildPage, shimScript };
+/**
+ * 提出・案内ページ。GASでは HtmlService のテンプレートとして `<?= token ?>` を差し込んでいる。
+ * 差込はこの1箇所だけなので、同じ値を同じ場所へ入れる。
+ */
+function buildTokenPage(file, token){
+  const safe = String(token || '').replace(/[^A-Za-z0-9._~%-]/g, '');   // URLトークン以外の文字は落とす
+  return withShim(read(file)).split('<?= token ?>').join(safe);
+}
+
+module.exports = { RPC_TARGETS, RPC_FUNCTIONS, buildPortalPage, buildTokenPage, shimScript };

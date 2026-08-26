@@ -1,10 +1,13 @@
-# SPLL 公開ポータルの Cloud Run 配信 v1.0
+# SPLL クリエーター向けサイトの Cloud Run 配信 v1.1
 
-**対応**：Public Web移行設計 §3（Public Webの構造）・§21.1・§23 Phase 2
-**作成日**：2026-08-26
+**対応**：Public Web移行設計 §3・§21.1・§21.4・§21.5・§23 Phase 2〜5
+**作成日**：2026-08-26（v1.1：提出・案内・検証・バッジの各ページを追加）
 
-GASで作った申込窓口の画面を、そのままコンテナから配信する。
+GASで作ったクリエーター向けの画面を、そのままコンテナから配信する。
 業務の正本はスプレッドシートのままで、Cloud Run はデータを持たない。
+
+**GASを2プロジェクトへ集約するための前段**でもある。公開ページをすべてCloud Runへ移すと、
+GASに残るのは「業務処理（Webhook・バッチ）」と「管理コンソール」だけになる（§8）。
 
 ---
 
@@ -20,21 +23,42 @@ GASで作った申込窓口の画面を、そのままコンテナから配信�
     │  ・画面の配信        │
     │  ・/api/rpc         │
     │  ・読み取りキャッシュ │
-    └──────────┬──────────┘
-               │ 署名付きPOST（共有鍵＋許可リスト）
-               ▼
-       GAS① portal doPost
-               │
-               ▼
+    └──────┬───────┬──────┘
+           │       │ 署名付きPOST（共有鍵＋許可リスト）
+           ▼       ▼
+     GAS① portal  GAS② workflow
+     （申込）      （提出・案内・検証・バッジ／Webhook）
+           │       │
+           ▼       ▼
       スプレッドシート（正本）
 ```
 
-**画面の実装は二重に持たない。** コンテナは `spll_src/index.html` と
-`spll_src/portal_contract_v4_patch.html`（GAS①が配信しているものと同一）を読み、
-GAS① の `doGet` と同じ順序で結合して配信する。差分は「`google.script.run` のかわりに
+### 配信するページ
+
+URLの形はGAS②と同じにしてある。**`WORKFLOW_URL` を差し替えるだけ**で、
+発行済みリンクの作り方を変えずに移行できる。
+
+| URL | 内容 | データの取得先 |
+|---|---|---|
+| `/` | 申込窓口 | GAS① |
+| `/?page=guide&t=…` | 締結後のお手続き案内 | GAS② |
+| `/?page=upload&t=…` | 作品提出 | GAS② |
+| `/?page=badge&t=…` | 認証バッジの取得 | GAS② |
+| `/?page=verify&id=&c=…` | ライセンス認証の確認（QRの遷移先） | GAS② |
+
+トークン付きのページは `Cache-Control: no-store` で返す。
+
+**画面の実装は二重に持たない。** コンテナは `spll_src/*.html`（GASが配信しているものと同一）を読み、
+GASの `doGet` と同じ結合・差込を行う。差分は「`google.script.run` のかわりに
 HTTPでRPCする shim を先に読み込ませる」ことだけ。
 
-意匠を直したいときは `spll_src/index.html` を直せば、GAS版とCloud Run版の両方に反映される。
+- 申込窓口：`index.html` ＋ `portal_contract_v4_patch.html` を結合
+- 案内・提出：`guide.html` / `upload.html` の `<?= token ?>` にトークンを差し込む
+  （差込はこの1箇所だけ。トークンはURLに現れる文字以外を落としてから入れる）
+- 検証・バッジ：GAS側でもサーバー描画だったため、Cloud Run でもサーバー側で組む
+  （判定はGAS②の `web_verifyCertificate` / `web_getBadgeContext` が行い、表示だけを担う）
+
+意匠を直したいときは `spll_src/*.html` を直せば、GAS版とCloud Run版の両方に反映される。
 
 ---
 
@@ -45,6 +69,8 @@ HTTPでRPCする shim を先に読み込ませる」ことだけ。
 
 ### 呼べる関数（これだけ）
 
+**GAS①（申込。スプレッドシートしか触れない狭い権限）**
+
 ```text
 api_listWorks           原作一覧
 api_getUsageOptions     利用目的の選択肢
@@ -54,6 +80,23 @@ api_getLegalTextsV4     法務文書（PRIVACY＋GUIDELINE）
 api_getApplyConfig      フォームURL・法人の案内先・上限件数
 web_createApplicationV4 申込作成
 ```
+
+**GAS②（提出・案内・検証・バッジ。各関数の中でトークン／照合コードを検証する）**
+
+```text
+web_getSubmitContext         提出ページの内容
+web_submitWork               作品の提出（20MBまで）
+web_openDriveSubmission      大容量提出のフォルダ払出し
+web_finalizeDriveSubmission  大容量提出の確定
+web_getGuideContext          案内ページの内容（振込先・提出・バッジ）
+web_getSubmitLinkFromGuide   提出リンクの再発行
+web_verifyCertificate        認証の照会
+web_getBadgeContext          バッジのメタ情報
+web_getBadgeImage            バッジ画像（1枚ずつ）
+```
+
+GAS②のRPCは**Webhookと同じURLに同居する**ため、`?rpc=1` が付いたPOSTだけをRPCとして扱う。
+Webhookの受信経路は従来どおり変わらない。
 
 `admin_*` / `setup_*` / トークン発行は **portal のコードに存在しない**（SEC-01のビルド分割）うえ、
 許可リストにも無いので二重に届かない。`api_getViewerRole`（管理者判定）も外してある。
@@ -87,18 +130,19 @@ shim側で常に「非管理者」を返して打ち切る。
 | 変数 | 必須 | 既定 | 内容 |
 |---|:-:|---|---|
 | `GAS_PORTAL_URL` | ○ | — | GAS① のウェブアプリURL（`/exec`） |
-| `PUBLIC_WEB_KEY` | ○ | — | GAS① の同名ScriptPropertyと同じ値 |
+| `GAS_WORKFLOW_URL` | ○ | — | GAS② のウェブアプリURL（`/exec`） |
+| `PUBLIC_WEB_KEY` | ○ | — | GAS①・GAS② の同名ScriptPropertyと同じ値 |
 | `PORT` | — | 8080 | Cloud Runが渡す |
 | `CACHE_TTL_SECONDS` | — | 60 | 読み取りキャッシュの保持時間 |
 | `APPLY_RATE_LIMIT` | — | 5 | 申込作成の上限（IP／時間） |
 
 `GAS_PORTAL_URL` か `PUBLIC_WEB_KEY` が未設定だと `/healthz` は 503 を返す。
 
-### GAS①（スクリプト プロパティ）
+### GAS①・GAS②（スクリプト プロパティ）
 
 | キー | 内容 |
 |---|---|
-| `PUBLIC_WEB_KEY` | 32文字以上の乱数。Cloud Run側と同じ値 |
+| `PUBLIC_WEB_KEY` | 32文字以上の乱数。**3か所（GAS①・GAS②・Cloud Run）で同じ値** |
 
 鍵の作り方（どちらでも可）：
 
@@ -110,10 +154,11 @@ openssl rand -hex 24
 
 ## 4. デプロイ手順
 
-### 4.1 GAS①側
+### 4.1 GAS側
 
-1. `npm run deploy:portal` でRPCの受け口を含む版を反映する
-2. GAS① の「プロジェクトの設定 → スクリプト プロパティ」に `PUBLIC_WEB_KEY` を追加
+1. `npm run deploy:all` でRPCの受け口を含む版を反映する
+2. **GAS① と GAS② の両方**の「プロジェクトの設定 → スクリプト プロパティ」に
+   `PUBLIC_WEB_KEY`（同じ値）を追加
 3. ウェブアプリのアクセス権は従来どおり **全員（匿名を含む）**
    （鍵を知らないPOSTは `doPost` が即座に拒否する）
 
@@ -139,7 +184,7 @@ gcloud run deploy spll-public-web \
   --image asia-northeast1-docker.pkg.dev/PROJECT/spll/public-web:latest \
   --region asia-northeast1 \
   --allow-unauthenticated \
-  --set-env-vars GAS_PORTAL_URL=https://script.google.com/macros/s/XXXX/exec \
+  --set-env-vars GAS_PORTAL_URL=https://script.google.com/macros/s/XXXX/exec,GAS_WORKFLOW_URL=https://script.google.com/macros/s/YYYY/exec \
   --set-secrets PUBLIC_WEB_KEY=spll-public-web-key:latest
 
 # 3. Cloud Run のサービスアカウントに鍵の読み取りを許可（初回のみ）
@@ -158,8 +203,11 @@ apps/public-web/Dockerfile
 apps/public-web/cloudbuild.yaml
 apps/public-web/page.js
 apps/public-web/server.js
+apps/public-web/verify-page.js
 spll_src/index.html
 spll_src/portal_contract_v4_patch.html
+spll_src/guide.html
+spll_src/upload.html
 ```
 
 ### 4.3 動作確認
@@ -176,10 +224,25 @@ curl -s https://（Cloud RunのURL）/healthz
 
 ```bash
 GAS_PORTAL_URL=https://script.google.com/macros/s/XXXX/exec \
+GAS_WORKFLOW_URL=https://script.google.com/macros/s/YYYY/exec \
 PUBLIC_WEB_KEY=（同じ鍵） \
 npm run web:dev
 # → http://localhost:8080
 ```
+
+### 4.5 リンクの向き先を切り替える
+
+ここまでで Cloud Run 上に全ページが揃う。管理コンソール「設定」で次を切り替えると、
+**以後に発行する案内・提出・バッジ・検証のリンクがCloud Runを指す**。
+
+| 設定 | 値 | 効くもの |
+|---|---|---|
+| `WORKFLOW_URL` | Cloud RunのURL | 案内ページ・提出リンク・バッジ配布リンク |
+| `PUBLIC_BASE_URL` | 独自ドメイン | 認証バッジのQR（`https://（ドメイン）/v/…`） |
+
+`PUBLIC_BASE_URL` は**そのドメインで検証ページが開けるようになってから**設定する。
+QRは頒布物に印刷されて回収できない。なおCloud Runの検証ページは現状 `?page=verify&id=&c=` 形式で、
+`/v/{cert_id}?c=` 形式のQRを使うならロードバランサ等での書き換えが要る（未実装）。
 
 ---
 
@@ -197,22 +260,50 @@ Cloud Run のドメインマッピング、またはロードバランサで独�
 | 内容 | いつ |
 |---|---|
 | PostgreSQL（public projection・Webhook受信箱・ジョブ） | 移行設計 §4.2／Phase 3以降 |
-| Webhook受信のCloud Run移行 | Phase 3。現状はGAS②が受ける |
-| 作品提出ページ・QR取得／検証ページの移行 | Phase 4・5。現状はGAS②が配信 |
-| GAS公開ページの停止 | Phase 6。現状はGAS①のURLも生きている |
+| Webhook受信のCloud Run移行 | Phase 3。現状はGAS②が受ける（受ける必要がある：formrun/CloudSignは匿名POST） |
+| `/v/{cert_id}` 形式のQR URL | ロードバランサでの書き換え、またはルート追加 |
+| GAS公開ページの停止 | Phase 6。現状はGASのURLも生きている |
 
-いまはアクセスが集中する**申込窓口の画面だけ**をコンテナへ出した状態。
-GAS①のURLも従来どおり動くので、切り戻しはDNS（またはリンク先）を戻すだけで済む。
+GASのURLも従来どおり動くので、切り戻しは `WORKFLOW_URL` を戻すだけで済む。
+
+---
+
+## 8. GASを2プロジェクトへ集約する（次の段階）
+
+公開ページがCloud Runへ揃ったので、GASに残る役割は次の2つになる。
+
+| 残すもの | 中身 | アクセス |
+|---|---|---|
+| **業務処理** | Webhook受信（formrun・CloudSign）、定期バッチ、AI審査、バッジ生成、公開Web向けRPC | 匿名（鍵・署名で防御） |
+| **管理コンソール** | 台帳・審査・契約管理・事務局運営・設定・セットアップ | 組織内限定 |
+
+GAS① portal は、画面の配信をやめた今、申込RPCだけを持つ。これを業務処理側へ移せば2つになる。
+
+**移すときに失うもの**：GAS① は3つの中で最も権限が狭い（スプレッドシート＋メアドのみ）。
+統合すると、匿名で叩かれる申込RPCが Drive・Gemini・メール送信・トリガーを持つプロジェクトの中に入る。
+許可リストと共有鍵は維持されるため到達できる関数は変わらないが、**万一の踏み台としての射程は広がる**。
+
+判断の材料：
+
+- 統合する利点 … clasp・ScriptProperties・デプロイが1つ減る
+- 統合しない利点 … 申込の入口を最小権限に閉じ込めたままにできる
+
+いずれにせよ、まずは本書の切替（`WORKFLOW_URL`）を本番で動かし、
+Cloud Run 経由の導線が安定してから判断するのが安全。
 
 ---
 
 ## 7. テスト
 
-`npm test` の `tests/public_web.js`（66件）で次を固定している。
+`npm test` の `tests/public_web.js`（103件）で次を固定している。
 
 - 画面がGASと同じ正本から組み立てられていること（意匠の二重管理をしていないこと）
 - shim が本体スクリプトより先に読み込まれること（`hasGas` 判定に間に合うこと）
 - 画面にもサーバーにも `admin_*` / `setup_*` / `api_getViewerRole` の経路が無いこと
+- 提出・案内ページのトークン差込が1箇所であり、URL以外の文字を差し込まないこと
+- 検証ページが状態で表示を変え、無効の理由を出さないこと
+- バッジ画像がサイズごとに別URLで、1回の応答を重くしないこと
+- GAS②が `?rpc=1` のPOSTだけをRPCとして扱い、Webhookと混ざらないこと
 - 読み取りはキャッシュされ、申込作成はキャッシュされないこと
 - 申込作成がIPごとに制限されること
 - GAS①の受け口が共有鍵を要求し、未設定なら常に拒否すること
