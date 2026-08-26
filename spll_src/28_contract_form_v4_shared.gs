@@ -1,6 +1,22 @@
 /** SPLL 28_contract_form_v4_shared ― CloudSign FORM v4 共通：個別条件・ハッシュ・改変検知 */
 
 const CONTRACT_FORM_V4_VERSION = 'v4.1';
+
+/**
+ * CloudSign FORM（formrun）へ実際に転送する項目。
+ *
+ * formrunの「初期値つき公開フォームURL」は1000文字までという制約があり、日本語はURLエンコードで
+ * 3倍前後に膨らむ。全条件をURLに載せるとクレジット表記や原作名だけで上限に届くため、
+ * 契約書へ差し込む最小限だけを転送し、残りはテンプレートの固定文言とする。
+ * SPLL側は全条件（CONTRACT_FORM_V4_HASH_KEYS）を内部スナップショットとして保持し続ける。
+ */
+const CONTRACT_FORM_V4_TRANSFER_KEYS = [
+  'license_id','application_ref','usage_category','work_names','licensor_name','fee_amount_or_rate','credit_text'
+];
+/** URLに載せる転送項目以外のシステム項目（改変検知・経路特定） */
+const CONTRACT_FORM_V4_CONTROL_KEYS = ['handoff_token','terms_snapshot_hash','template_route'];
+
+/** terms_snapshot_hash の対象＝契約個別条件の全体。転送しない項目も含む。 */
 const CONTRACT_FORM_V4_HASH_KEYS = [
   'contract_template_version','license_id','application_ref','usage_category','work_count','work_names',
   'work_id_1','work_title_1','work_id_2','work_title_2','work_id_3','work_title_3',
@@ -9,7 +25,7 @@ const CONTRACT_FORM_V4_HASH_KEYS = [
   'licensed_uses','payment_terms','reporting_terms','credit_text','special_terms'
 ];
 
-/** 料金・原作条件からCloudSign FORMへ渡す個別条件を生成。ユーザー入力ではなくSPLL側の確定値。 */
+/** 料金・原作条件からCloudSign FORMへ渡す個別条件を生成。クリエーターの入力ではなくSPLL側の確定値。 */
 function contractFormFieldsV4_(appId, licenseId, ref, usageCategory, workIds){
   const ids = (workIds || []).map(String).filter(Boolean).slice(0, formMaxWorks_());
   const master = readRows_(ssMaster_(),'Works_Master');
@@ -53,6 +69,56 @@ function contractFormFieldsV4_(appId, licenseId, ref, usageCategory, workIds){
   return out;
 }
 
+/** 全条件から、FORMへ転送する項目だけを取り出す（内部スナップショットは全条件のまま保持する）。 */
+function contractFormTransferFieldsV4_(fields){
+  const out = {};
+  CONTRACT_FORM_V4_TRANSFER_KEYS.forEach(function(k){
+    out[k] = (fields && fields[k] !== undefined && fields[k] !== null) ? String(fields[k]) : '';
+  });
+  return out;
+}
+
+/** 経路サフィックス。定額と売上連動でフォームが別なので、項目IDのマップも別に持てるようにする。 */
+function formRouteSuffix_(route){
+  if(route === 'STANDARD_FIXED') return '_FIXED';
+  if(route === 'STANDARD_RATE')  return '_RATE';
+  return '';
+}
+/** 経路別の設定（FORM_HIDDEN_MAP_FIXED 等）。未設定なら共通設定へフォールバックする。 */
+function formMapByRoute_(baseKey, route){
+  const suffix = formRouteSuffix_(route);
+  if(suffix){
+    const byRoute = parseJson_(prop_(baseKey + suffix), null);
+    if(byRoute && typeof byRoute === 'object') return byRoute;
+  }
+  return parseJson_(prop_(baseKey), {}) || {};
+}
+/** canonical key → formrunのhidden項目キー（_field_N） */
+function formHiddenMapV4_(route){ return formMapByRoute_('FORM_HIDDEN_MAP', route); }
+/** formrunの実フィールド名/ID → canonical key */
+function formrunFieldMapV4_(route){ return formMapByRoute_('FORMRUN_FIELD_MAP', route); }
+
+/** 初期値つき公開フォームURLの上限（formrun仕様1000字に対し余裕を持たせる） */
+function formUrlMaxChars_(){ return num_(getConfig_('FORM_URL_MAX_CHARS','850')) || 850; }
+/**
+ * 実際にポータルが生成する公開フォームURLの長さを見積もる。
+ * 上限を超えると初期値がフォームへ届かず、条件の入っていない契約書が送られてしまうため、
+ * 申込の時点で検出して個別確認（MANUAL_REVIEW）へ退避させる。
+ */
+function estimateFormUrlLengthV4_(baseUrl, route, transfer, control){
+  const map = formHiddenMapV4_(route);
+  const parts = [];
+  const add = function(k, v){
+    const actual = map[k] || k; if(!actual) return;
+    parts.push(encodeURIComponent(actual) + '=' + encodeURIComponent(v === undefined || v === null ? '' : String(v)));
+  };
+  CONTRACT_FORM_V4_CONTROL_KEYS.forEach(function(k){ if(control && control[k] !== undefined) add(k, control[k]); });
+  CONTRACT_FORM_V4_TRANSFER_KEYS.forEach(function(k){ if(transfer && transfer[k] !== undefined) add(k, transfer[k]); });
+  const base = String(baseUrl || '');
+  if(!base) return 0;                                  // URL未設定は長さ判定の対象外（別途案内される）
+  return base.length + 1 + parts.join('&').length;     // '?' or '&' の1文字
+}
+
 /** ハッシュ対象を固定順に正規化。terms_snapshot_hash自身は含めない。 */
 function contractFormHashV4_(fields){
   fields = fields || {};
@@ -69,10 +135,14 @@ function contractFormFieldsFromApplicationV4_(app){
   return contractFormFieldsV4_(app.application_id, app.license_id, app.application_ref, app.usage_category, ids);
 }
 
-/** FormRun payloadをcanonical keyへ正規化。FORMRUN_FIELD_MAPは「実フィールド名/ID → canonical key」。 */
-function formrunCanonV4_(body){
+/**
+ * FormRun payloadをcanonical keyへ正規化。FORMRUN_FIELD_MAPは「実フィールド名/ID → canonical key」。
+ * routeを渡すと経路別マップ（FORMRUN_FIELD_MAP_FIXED / _RATE）を優先する。
+ * 経路は申込を特定してから分かるため、呼び出し側は「共通マップで一度正規化 → 申込を特定 → 経路別で再正規化」とする。
+ */
+function formrunCanonV4_(body, route){
   body = body || {};
-  const map = parseJson_(prop_('FORMRUN_FIELD_MAP'), {});
+  const map = formrunFieldMapV4_(route);
   const canon = {};
   function put(rawKey, value){
     if(rawKey === undefined || rawKey === null) return;

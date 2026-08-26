@@ -165,7 +165,7 @@ ul.tight b{color:var(--ink)}
 
 <div class="wrap">
 <nav>
-  <div class="grp">利用者から見た流れ</div>
+  <div class="grp">クリエーターから見た流れ</div>
   <button class="nv" data-s="flow" aria-current="true"><span class="n">00</span>全体像</button>
   <button class="nv" data-s="portal"><span class="n">01</span>公開ポータル（申込）</button>
   <button class="nv" data-s="form"><span class="n">02</span>クラウドサイン契約</button>
@@ -189,23 +189,23 @@ ul.tight b{color:var(--ink)}
 <section class="screen on" id="s-flow">
   <div class="intro"><h2>全体像</h2><p>公開する画面は「申込ポータル」「案内ページ」「検証ページ」の3枚だけ。契約書の署名はクラウドサイン、事務局の作業は管理コンソールに集約しています。権限の異なる処理を混ぜないため、GASプロジェクトを3つに分けています。</p></div>
 
-  <div class="card"><div class="ch"><h3>申込から認証まで</h3><span class="hint">利用者の操作は4回</span></div><div class="cb">
+  <div class="card"><div class="ch"><h3>申込から認証まで</h3><span class="hint">クリエーターの操作は4回</span></div><div class="cb">
     <div class="flow">
-      <div class="n"><span class="who">利用者</span><b>1. 申込</b><span>原作を選び、利用目的と個別条件を入力。個人のみ受付。</span></div>
-      <div class="n"><span class="who">利用者</span><b>2. 契約に署名</b><span>クラウドサインの契約書に条件が引き渡され、その場で締結。</span></div>
+      <div class="n"><span class="who">クリエーター</span><b>1. 申込</b><span>原作を選び、利用目的と個別条件を入力。個人のみ受付。</span></div>
+      <div class="n"><span class="who">クリエーター</span><b>2. 契約に署名</b><span>クラウドサインの契約書に条件が引き渡され、その場で締結。</span></div>
       <div class="n"><span class="who">自動</span><b>3. 案内が届く</b><span>締結を検知して案内ページのURLを自動送信。</span></div>
-      <div class="n"><span class="who">利用者</span><b>4. 振込・提出</b><span>案内ページから利用許諾料を振込み、作品を提出。</span></div>
+      <div class="n"><span class="who">クリエーター</span><b>4. 振込・提出</b><span>案内ページから利用許諾料を振込み、作品を提出。</span></div>
       <div class="n"><span class="who">自動＋事務局</span><b>5. 審査</b><span>AIが一次審査、事務局が最終判断。</span></div>
       <div class="n"><span class="who">自動</span><b>6. 認証バッジ</b><span>SPLL番号入りのバッジとQR検証URLを発行。</span></div>
     </div>
-    <div class="note"><b>設計の要点：</b>契約締結後に利用者へ渡すリンクは<b>案内ページ1枚だけ</b>です。振込先はページ側に持たせ、メール本文には一切書きません。口座変更が過去のメールと食い違わず、当社を騙る振込先メールとも区別できます。</div>
+    <div class="note"><b>設計の要点：</b>契約締結後にクリエーターへ渡すリンクは<b>案内ページ1枚だけ</b>です。振込先はページ側に持たせ、メール本文には一切書きません。口座変更が過去のメールと食い違わず、当社を騙る振込先メールとも区別できます。</div>
   </div></div>
 
   <div class="card"><div class="ch"><h3>3プロジェクト構成</h3><span class="hint">権限分離</span></div><div class="tbl"><table>
     <thead><tr><th>プロジェクト</th><th>役割</th><th>公開範囲</th><th>持たない権限</th></tr></thead>
     <tbody>
       <tr><td><b>① portal</b><span class="sm">公開ポータル</span></td><td>原作検索・申込作成・法務文書の表示</td><td><span class="pill wait">匿名公開</span></td><td>Drive／メール送信／管理関数／トークン発行</td></tr>
-      <tr><td><b>② workflow</b><span class="sm">利用者向け処理</span></td><td>締結Webhook受信・案内ページ・提出・審査・バッジ・検証・定期バッチ</td><td><span class="pill wait">匿名公開</span><span class="sm">トークン／署名で防御</span></td><td>管理関数・初期セットアップ</td></tr>
+      <tr><td><b>② workflow</b><span class="sm">クリエーター向け処理</span></td><td>締結Webhook受信・案内ページ・提出・審査・バッジ・検証・定期バッチ</td><td><span class="pill wait">匿名公開</span><span class="sm">トークン／署名で防御</span></td><td>管理関数・初期セットアップ</td></tr>
       <tr><td><b>③ admin</b><span class="sm">管理コンソール</span></td><td>台帳・審査・契約管理・事務局運営・設定</td><td><span class="pill sign">組織内限定</span></td><td>Webhook受信・匿名提出処理</td></tr>
     </tbody>
   </table></div></div>
@@ -283,7 +283,7 @@ ul.tight b{color:var(--ink)}
 
 <!-- ============ 02 クラウドサイン ============ -->
 <section class="screen" id="s-form">
-  <div class="intro"><h2>クラウドサイン契約（FORM v4.1）</h2><p>申込内容は隠しフィールドで契約書へ引き渡され、利用者はその場で署名します。事務局が契約書を作る作業はありません。</p></div>
+  <div class="intro"><h2>クラウドサイン契約（FORM v4.1）</h2><p>申込内容は隠しフィールドで契約書へ引き渡され、クリエーターはその場で署名します。事務局が契約書を作る作業はありません。</p></div>
   <div class="frame">
     <div class="chrome"><div class="dots"><i></i><i></i><i></i></div><div class="url">クラウドサインフォーム（powered by formrun）</div><span class="scope">外部サービス</span></div>
     <div class="body">
@@ -609,7 +609,7 @@ ul.tight b{color:var(--ink)}
             <div class="fld"><label>口座種別<i>PAYMENT_ACCOUNT_TYPE</i></label><div class="inp">普通</div></div>
             <div class="fld"><label>口座番号<i>PAYMENT_ACCOUNT_NUMBER</i></label><div class="inp mono">1234567</div></div>
           </div>
-          <div class="fld"><label>利用者向けページURL<i>WORKFLOW_URL</i></label><div class="inp mono ro">…workflow…/exec</div></div>
+          <div class="fld"><label>クリエーター向けページURL<i>WORKFLOW_URL</i></label><div class="inp mono ro">…workflow…/exec</div></div>
           <div><span class="btn p">振込先・案内設定を保存</span></div>
         </div></div>
 

@@ -161,7 +161,7 @@ function api_getLegalTexts(){
   };
 }
 /**
- * 利用者向けページ（提出・手続き案内・バッジ・検証）を配信するGAS②のURL。
+ * クリエーター向けページ（提出・手続き案内・バッジ・検証）を配信するGAS②のURL。
  * admin（GAS③）から発行するリンクは自プロジェクトのURLでは開けないため、Configで明示する。
  * 未設定時は自プロジェクトURLへフォールバック（単一プロジェクト構成・開発時の互換）。
  */
@@ -171,7 +171,7 @@ function workflowUrl_(){
   let base = ''; try{ base = ScriptApp.getService().getUrl() || ''; }catch(e){}
   return String(base).replace(/\/+$/, '');
 }
-/** 利用者向けページのURLを組み立てる（page＋トークン） */
+/** クリエーター向けページのURLを組み立てる（page＋トークン） */
 function userPageUrl_(page, tokenParam, token){
   const base = workflowUrl_();
   return (base || '') + '?page=' + encodeURIComponent(page) + '&' + tokenParam + '=' + encodeURIComponent(token);
@@ -368,9 +368,20 @@ function badgeFolder_(c){
   try{ if(c.folder_id) return DriveApp.getFolderById(c.folder_id); }catch(e){}
   return DriveApp.getFolderById(cfg_('DRIVE_ROOT'));
 }
+/**
+ * QR・バッジに焼き込む公開ドメイン（設定設計 §1.3）。
+ * QRは頒布物に印刷されて永続するため、実行基盤のURL（script.google.com・*.run.app等）を入れない。
+ * 独自ドメインを立てたらPUBLIC_BASE_URLへ設定する。以後、基盤を移してもDNSの向き先を変えるだけで済む。
+ * 未設定の間は現行どおりGAS②のURLを使う（設定した瞬間から新規発行分に適用される）。
+ */
+function publicBaseUrl_(){
+  return String(getConfig_('PUBLIC_BASE_URL','') || '').trim().replace(/\/+$/, '');
+}
 function verifyUrl_(certId, code){
-  let base = ''; try{ base = ScriptApp.getService().getUrl() || ''; }catch(e){}
-  return (base||'') + '?page=verify&id=' + encodeURIComponent(certId) + '&c=' + encodeURIComponent(code);
+  const pub = publicBaseUrl_();
+  if(pub) return pub + '/v/' + encodeURIComponent(certId) + '?c=' + encodeURIComponent(code);
+  // 発行元はGAS②（クリエーター向けページ）。adminから再発行してもadminのURLを焼き込まない。
+  return workflowUrl_() + '?page=verify&id=' + encodeURIComponent(certId) + '&c=' + encodeURIComponent(code);
 }
 /** 暗号学的乱数コード（V2-014-5：Math.random不使用）。UUID×2のSHA-256から生成。 */
 function randCode_(n){

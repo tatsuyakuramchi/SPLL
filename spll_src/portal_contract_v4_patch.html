@@ -88,13 +88,13 @@
       const actual=map[canonical]||canonical;
       if(actual) params.push(encodeURIComponent(actual)+'='+encodeURIComponent(value==null?'':String(value)));
     };
-    add('license_id',res&&res.license_id||'');
-    add('application_ref',res&&res.application_ref||'');
+    // formrunの初期値つきURLは1000字までのため、載せるのはサーバーが選んだ転送項目だけ。
+    // 全条件はSPLL側が内部スナップショットとして保持しており、締結後の照合はそちらで行う。
     add('handoff_token',res&&res.handoff_token||'');
     add('terms_snapshot_hash',res&&res.terms_snapshot_hash||'');
+    add('template_route',res&&res.template_route||'');
     const ff=(res&&res.form_fields)||{};
     Object.keys(ff).forEach(k=>add(k,ff[k]));
-    add('template_route',res&&res.template_route||'');
     return base+(base.indexOf('?')>=0?'&':'?')+params.join('&');
   };
 

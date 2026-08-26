@@ -31,7 +31,7 @@ const SCHEMA_MASTER = {
 const SCHEMA_OPS = {
   // 申込：複数原作は中間テーブル Application_Works で管理（B経路固定・A/B分岐なし）
   //   usage_category：利用目的（別紙2の料金計算キー）／privacy_hash・terms_hash：同意時文書ハッシュ（§7.2）
-  Applications:         ['application_id','application_ref','usage_category','privacy_hash','terms_hash','handoff_expires_at','status','created_at','form_submission_id','form_submitted_at','cloudsign_send_status','cloudsign_send_error','manual_review_reason','supersedes_application_id','superseded_by_application_id','license_id'],
+  Applications:         ['application_id','application_ref','usage_category','privacy_hash','terms_hash','handoff_expires_at','status','created_at','form_submission_id','form_submitted_at','cloudsign_send_status','cloudsign_send_error','manual_review_reason','template_route','supersedes_application_id','superseded_by_application_id','license_id'],
   Application_Works:    ['application_work_id','application_id','work_id'],
   // 契約：締結時に対象原作を Contract_Works へスナップショット（法務証跡）
   //   link_status: LINKED（申込突合済）/ UNLINKED（未突合＝手動紐付け待ち）
@@ -44,7 +44,7 @@ const SCHEMA_OPS = {
   Access_Tokens:        ['token_id','contract_id','purpose','token_hash','status','expires_at','max_uses','used_count','last_used_at','issued_at','revoked_at'],
   // submission_method: UPLOAD（20MBまでの直接アップロード）/ DRIVE_FOLDER（大容量・専用Driveフォルダ受渡）
   Submissions:          ['submission_id','contract_id','title','status','submitted_at','submission_method'],
-  // DRIVE_FOLDER の版は、フォルダ払出し（OPEN）→利用者が投入→提出完了（確定）で成立する
+  // DRIVE_FOLDER の版は、フォルダ払出し（OPEN）→クリエーターが投入→提出完了（確定）で成立する
   Submission_Versions:  ['version_id','submission_id','version_no','status','submitted_at','submission_method','drive_folder_id','folder_status','folder_opened_at','folder_closed_at','file_count','total_bytes'],
   Submission_Files:     ['submission_file_id','version_id','drive_file_id','mime_type','size','sha256','original_filename','magic_valid'],
   AI_Review_Jobs:       ['ai_review_id','submission_id','version_id','model','prompt_version','status','retry_count','overall_result','risk_score','human_review_required','response_file_id','started_at','completed_at','last_error'],
@@ -203,6 +203,8 @@ function setup_bootstrap(opts){
   // 法人の退避先（窓口は個人専用）。ダミー値を置き、実運用の受け口が決まり次第
   // 管理コンソール「設定→申込導線」で差し替える（Googleフォーム／formrun／メールいずれも可）
   if(!getConfig_('CORPORATE_INQUIRY_EMAIL','')) setConfig_('CORPORATE_INQUIRY_EMAIL','spll-corporate@example.com');
+  // CloudSign FORM（formrun）の初期値つきURLは1000字まで。余裕を見て超過分は個別確認へ退避させる
+  if(!getConfig_('FORM_URL_MAX_CHARS',''))    setConfig_('FORM_URL_MAX_CHARS','850');
 
   // 5) サンプル投入（既定ON・既存があればスキップ）
   if(opts.seed !== false) setup_seedSamples_();
@@ -239,7 +241,7 @@ function setup_seedSamples_(){
 }
 
 // ---- スキーマ移行（修正設計書v2 V2-003）----
-const SCHEMA_VERSION = 9;   // v9: 案内メールの自動送信（通知の送信状態）。v8: 連絡先メール。v7: 大容量提出
+const SCHEMA_VERSION = 10;  // v10: 申込の契約書経路（template_route）。v9: 案内メールの自動送信（通知の送信状態）。v8: 連絡先メール。v7: 大容量提出
 
 /**
  * 既存スプレッドシートへ不足シート・不足列を追加する（既存列の削除・並び替えはしない）。

@@ -141,7 +141,7 @@ function admin_setHumanReview(submissionId, result, comment, reviewer, versionId
     comments:sanitizeCell_(String(comment||'')), reviewed_at:new Date().toISOString() });
   updateRow_(ssOps_(),'Submissions','submission_id',submissionId,{ status:result });
   markVersionStatus_(targetVersion, result);
-  // 通知キュー（§10）：是正要求／審査結果を利用者へ伝えるべきことを記録（メール非保持のため人手対応）
+  // 通知キュー（§10）：是正要求／審査結果をクリエーターへ伝えるべきことを記録（メール非保持のため人手対応）
   const ntype = result === 'CORRECTION_REQUIRED' ? 'CORRECTION_REQUEST' : 'REVIEW_RESULT';
   enqueueNotification_(sub.contract_id, ntype, targetVersion, { submission_id:submissionId, result:result, comment:String(comment||'').slice(0,300) });
   logEvent_('human_review', submissionId, actor.email, {status:sub.status}, {result:result, version_id:targetVersion});
@@ -184,7 +184,7 @@ function admin_sendUploadLink(contractId){ requireRole_(['OPERATIONS']);
   if(!c) throw new Error('契約が見つかりません: '+contractId);
   revokeTokens_(contractId, 'SUBMISSION');            // 再発行時は旧トークンを失効（§9.1）
   const token = prepareSubmissionToken_(contractId);
-  const url = userPageUrl_('upload','t',token);   // 利用者向けページはGAS②（WORKFLOW_URL）で配信
+  const url = userPageUrl_('upload','t',token);   // クリエーター向けページはGAS②（WORKFLOW_URL）で配信
   logEvent_('contract', contractId, actor_(), null, {upload_link_issued:true});
   return { url:url, token:token };
 }
@@ -458,7 +458,7 @@ const PAYMENT_CONFIG_KEYS = [
   ['bank_name','PAYMENT_BANK_NAME'], ['branch','PAYMENT_BRANCH'], ['account_type','PAYMENT_ACCOUNT_TYPE'],
   ['account_number','PAYMENT_ACCOUNT_NUMBER'], ['account_holder','PAYMENT_ACCOUNT_HOLDER'],
   ['holder_kana','PAYMENT_HOLDER_KANA'], ['note','PAYMENT_NOTE'], ['office_contact','OFFICE_CONTACT'],
-  ['workflow_url','WORKFLOW_URL'], ['office_email_domain','OFFICE_EMAIL_DOMAIN'],
+  ['workflow_url','WORKFLOW_URL'], ['public_base_url','PUBLIC_BASE_URL'], ['office_email_domain','OFFICE_EMAIL_DOMAIN'],
   ['mail_from_name','MAIL_FROM_NAME'], ['mail_reply_to','MAIL_REPLY_TO'],
   ['guide_email_auto_send','GUIDE_EMAIL_AUTO_SEND'], ['guide_email_subject','GUIDE_EMAIL_SUBJECT'], ['guide_email_body','GUIDE_EMAIL_BODY']
 ];
@@ -475,7 +475,13 @@ function admin_saveGuideConfig(c){ const actor = requireRole_(['SYSTEM_ADMIN','O
   c = c || {};
   const url = String(c.workflow_url || '').trim();
   if(url && !/^https:\/\//i.test(url))
-    throw new Error('VALIDATION_ERROR: 利用者向けページURLは https:// で始まる必要があります');
+    throw new Error('VALIDATION_ERROR: クリエーター向けページURLは https:// で始まる必要があります');
+  // QR・バッジに焼き込むドメイン。頒布物に印刷されて永続するため、後から直せない前提で検証する
+  const pub = String(c.public_base_url || '').trim();
+  if(pub && !/^https:\/\/[^\s?#]+$/i.test(pub))
+    throw new Error('VALIDATION_ERROR: 公開ドメインは https:// で始まるURLで、クエリ・フラグメントを含めないでください');
+  if(pub && /script\.google\.com|\.run\.app|localhost|^\d/i.test(pub.replace(/^https:\/\//i,'')))
+    throw new Error('VALIDATION_ERROR: QRには実行基盤のURL・IPアドレスを設定できません（自社管理の独自ドメインを指定してください）');
   const before = {};
   PAYMENT_CONFIG_KEYS.forEach(function(x){ before[x[0]] = getConfig_(x[1],''); });
   PAYMENT_CONFIG_KEYS.forEach(function(x){
@@ -519,7 +525,8 @@ function admin_getPortalRoutingConfig(){ requireRole_([]);
     corporate_inquiry_url:   getConfig_('CORPORATE_INQUIRY_URL',''),
     corporate_inquiry_email: getConfig_('CORPORATE_INQUIRY_EMAIL',''),
     corporate_inquiry_note:  getConfig_('CORPORATE_INQUIRY_NOTE',''),
-    corporate_default_note:  CORPORATE_INQUIRY_DEFAULT_NOTE
+    corporate_default_note:  CORPORATE_INQUIRY_DEFAULT_NOTE,
+    form_url_max_chars:      String(formUrlMaxChars_())
   };
 }
 function admin_savePortalRoutingConfig(c){ requireRole_(['SYSTEM_ADMIN','OPERATIONS']);
@@ -536,6 +543,13 @@ function admin_savePortalRoutingConfig(c){ requireRole_(['SYSTEM_ADMIN','OPERATI
    ['corporate_inquiry_note','CORPORATE_INQUIRY_NOTE']].forEach(function(x){
     if(c[x[0]] !== undefined) setConfig_(x[1], String(c[x[0]]).trim());
   });
+  if(c.form_url_max_chars !== undefined){
+    const max = num_(c.form_url_max_chars);
+    // formrunの初期値つきURLは1000字まで。超える設定は初期値が届かない契約書を生むので受け付けない
+    if(!(max >= 200 && max <= 1000))
+      throw new Error('VALIDATION_ERROR: FORM引継ぎURLの上限は200〜1000字で指定してください（formrun仕様の上限は1000字）');
+    setConfig_('FORM_URL_MAX_CHARS', String(Math.floor(max)));
+  }
   logEvent_('config', 'PORTAL_ROUTING', actor_(), null,
     { corporate_inquiry: url || mail || '(未設定)', saved: true });
   return true;

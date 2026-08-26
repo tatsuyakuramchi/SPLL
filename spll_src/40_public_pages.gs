@@ -1,4 +1,4 @@
-/** SPLL 40_public_pages ― GAS② 利用者向けページ：提出・バッジDL・検証ポータル */
+/** SPLL 40_public_pages ― GAS② クリエーター向けページ：提出・バッジDL・検証ポータル */
 
 
 // ============================================================
@@ -26,7 +26,7 @@ function web_getSubmitContext(token){
         method:v.submission_method || 'UPLOAD', folder_status:v.folder_status || '',
         version_id:(v.folder_status === 'OPEN' ? v.version_id : ''),   // 未確定の版だけ操作対象として返す
         folder_url:(v.folder_status === 'OPEN' ? ('https://drive.google.com/drive/folders/' + v.drive_folder_id) : '') }; });
-    // 是正要求の内容を利用者へ提示（修正設計書 §17.2）。最新の人手審査が是正/上申の場合のみ。
+    // 是正要求の内容をクリエーターへ提示（修正設計書 §17.2）。最新の人手審査が是正/上申の場合のみ。
     const latestReview = reviews.filter(function(h){ return h.submission_id === s.submission_id; })
       .sort(function(a,b){ return String(b.reviewed_at||'').localeCompare(String(a.reviewed_at||'')); })[0];
     let correction = null;

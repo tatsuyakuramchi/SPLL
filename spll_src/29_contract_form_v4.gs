@@ -90,15 +90,32 @@ function web_createApplicationV4(params){
 
   const route = decideContractRouteV4_({ usageCategory:usageCategory, workIds:ids, partyType:partyType,
     isMinor:params.isMinor===true, isOverseas:params.isOverseas===true, hasSpecialTerms:params.hasSpecialTerms===true });
+  // FORMへ転送するのは契約書へ差し込む最小限だけ。全条件はSPLL側の内部スナップショットとして保持する。
+  const handoff = makeHandoffToken_(appId, ref, ids, usageCategory, snapshotHash, handoffExpires);
+  const transfer = contractFormTransferFieldsV4_(formFields);
+  const control = { handoff_token:handoff, terms_snapshot_hash:snapshotHash, template_route:route.route };
+
+  // 初期値つきURLが上限を超えると条件がフォームへ届かず、条件の入っていない契約書が送られてしまう。
+  // 申込の時点で検出し、自動締結せず個別確認へ退避させる。
+  let finalRoute = route.route, reasons = route.reasons.slice(), urlLength = 0;
+  if(finalRoute !== 'MANUAL_REVIEW'){
+    urlLength = estimateFormUrlLengthV4_(partyFormUrlV4_(partyType, finalRoute), finalRoute, transfer, control);
+    if(urlLength > formUrlMaxChars_()){
+      reasons.push('FORM引継ぎURLが上限超過（' + urlLength + '字／上限' + formUrlMaxChars_() + '字）');
+      finalRoute = 'MANUAL_REVIEW';
+      control.template_route = finalRoute;
+    }
+  }
+
   updateRow_(ssOps_(),'Applications','application_id',appId,{ status:'FORM_PENDING', cloudsign_send_status:'NOT_STARTED',
-    manual_review_reason:route.route === 'MANUAL_REVIEW' ? sanitizeCell_(route.reasons.join('、')) : '' });
+    template_route:finalRoute,
+    manual_review_reason:finalRoute === 'MANUAL_REVIEW' ? sanitizeCell_(reasons.join('、')) : '' });
   logEvent_('license_case', licenseId, 'portal', null,
     { application_ref:ref, form_version:CONTRACT_FORM_V4_VERSION, guideline_hash:guidelineHash,
-      terms_snapshot_hash:snapshotHash, route:route.route, reasons:route.reasons });
+      terms_snapshot_hash:snapshotHash, route:finalRoute, reasons:reasons, form_url_length:urlLength });
 
-  const handoff = makeHandoffToken_(appId, ref, ids, usageCategory, snapshotHash, handoffExpires);
   return { application_id:appId, application_ref:ref, license_id:licenseId,
     handoff_token:handoff, handoff_expires_at:handoffExpires, terms_snapshot_hash:snapshotHash,
-    template_route:route.route, route_reasons:route.reasons,
-    form_url:partyFormUrlV4_(partyType, route.route), form_fields:formFields };
+    template_route:finalRoute, route_reasons:reasons, form_url_length:urlLength,
+    form_url:partyFormUrlV4_(partyType, finalRoute), form_fields:transfer };
 }

@@ -127,7 +127,7 @@
       <table><thead><tr><th>区分</th><th>対象</th><th>作品</th><th>状態</th><th>発生</th></tr></thead><tbody id="dash-alerts"></tbody></table>
     </div>
     <div class="panel">
-      <div class="ph"><h3>📮 要対応の通知（利用者への案内）</h3><span class="hint">Notification_Queue（メール非保持のため人手対応）<span id="err-count" style="margin-left:10px;color:var(--fail);"></span></span></div>
+      <div class="ph"><h3>📮 要対応の通知（クリエーターへの案内）</h3><span class="hint">Notification_Queue（メール非保持のため人手対応）<span id="err-count" style="margin-left:10px;color:var(--fail);"></span></span></div>
       <table><thead><tr><th>種別</th><th>契約</th><th>対象原作</th><th>内容</th><th>起票日</th><th>操作</th></tr></thead><tbody id="notify-tbody"></tbody></table>
     </div>
   </section>
@@ -418,8 +418,10 @@
           </div>
           <div class="fld"><label>お支払いに関する注記 <span class="h">PAYMENT_NOTE（振込手数料の負担、振込名義の指定など）</span></label><input id="gc-note" placeholder="振込手数料はご負担ください。振込名義にSPLL番号を添えてください。"></div>
           <div class="fld"><label>事務局の問い合わせ先 <span class="h">OFFICE_CONTACT（案内ページ末尾に表示）</span></label><input id="gc-office_contact" placeholder="spll@example.com"></div>
-          <div class="fld"><label>利用者向けページのURL <span class="h">WORKFLOW_URL（GAS②のウェブアプリURL /exec）</span></label><input id="gc-workflow_url" placeholder="https://script.google.com/macros/s/.../exec"></div>
+          <div class="fld"><label>クリエーター向けページのURL <span class="h">WORKFLOW_URL（GAS②のウェブアプリURL /exec）</span></label><input id="gc-workflow_url" placeholder="https://script.google.com/macros/s/.../exec"></div>
           <div class="fld"><label>自社メールドメイン <span class="h">OFFICE_EMAIL_DOMAIN（CloudSignの送付先から自社アカウントを除外するため）</span></label><input id="gc-office_email_domain" placeholder="example.co.jp"></div>
+          <div class="fld"><label>QR・バッジの公開ドメイン <span class="h">PUBLIC_BASE_URL（未設定なら上のGAS②URLを使用）</span></label><input id="gc-public_base_url" placeholder="https://spll.example.jp"></div>
+          <div class="note" style="margin:0 0 10px"><b>QRは頒布物に印刷されて残ります。</b>ここに自社管理の独自ドメインを設定すると、検証URLは <span class="mono">https://（ドメイン）/v/（認証ID）</span> になり、将来システムの置き場所を変えてもDNSの向き先を変えるだけで過去のQRが生き続けます。<b>設定したドメインで検証ページが開ける状態にしてから</b>登録してください（設定後に発行する分から適用されます）。</div>
           <div class="note" id="gc-status" style="margin:0"></div>
         </div>
         <div class="pfoot"><button class="save" onclick="saveGuideConfig()">振込先・案内設定を保存</button></div>
@@ -466,6 +468,7 @@
             <div class="fld"><label>法人向け問い合わせURL <span class="h">CORPORATE_INQUIRY_URL</span></label><input id="pr-corporate_inquiry_url" placeholder="https://docs.google.com/forms/… / https://form.run/@…"></div>
             <div class="fld"><label>法人向け問い合わせメール <span class="h">CORPORATE_INQUIRY_EMAIL</span></label><input id="pr-corporate_inquiry_email" placeholder="corporate@example.com"></div>
           </div>
+          <div class="fld"><label>FORM引継ぎURLの上限 <span class="h">FORM_URL_MAX_CHARS（formrun仕様は1000字。超える申込は個別確認へ退避）</span></label><input id="pr-form_url_max_chars" type="number" min="200" max="1000" placeholder="850"></div>
           <div class="fld"><label>法人向け案内文 <span class="h">CORPORATE_INQUIRY_NOTE（空欄で既定文言）</span></label><textarea id="pr-corporate_inquiry_note" style="min-height:64px"></textarea></div>
           <div id="pr-preview" class="note" style="margin:0"></div>
         </div>
@@ -523,7 +526,7 @@
       <div class="panel">
         <div class="ph"><h3>認証バッジ（クレジット表記）</h3><span class="hint">ScriptProperties</span></div>
         <div class="pbody">
-          <p class="setnote">契約締結時（B経路固定）に、認証バッジを PNG 3サイズ（大/中/小）で自動生成し、検証ポータル／提出リンクから利用者が取得できます（当社からのメール送信はしません）。テンプレートSlides ID を指定すると差込（{{work_name}}/{{license_id}}/{{issued_at}}/{{credit}}）で生成、未指定なら暫定デザインを自動組版します。</p>
+          <p class="setnote">契約締結時（B経路固定）に、認証バッジを PNG 3サイズ（大/中/小）で自動生成し、検証ポータル／提出リンクからクリエーターが取得できます（当社からのメール送信はしません）。テンプレートSlides ID を指定すると差込（{{work_name}}/{{license_id}}/{{issued_at}}/{{credit}}）で生成、未指定なら暫定デザインを自動組版します。</p>
           <label class="chk"><input type="checkbox" id="bd-auto"> 締結時に自動発行する</label>
           <div class="fld" style="margin-top:10px"><label>バッジ用 Slides テンプレートID <span class="h">BADGE_TEMPLATE_ID（任意）</span></label><input id="bd-template_id" placeholder="（未指定＝暫定デザインで自動生成）"></div>
         </div>
@@ -559,7 +562,7 @@
       <div class="note">
         <b>デプロイに関する注意：</b> 「管理コンソール →」ボタンは<b>ログインユーザーを識別できる場合のみ</b>表示されます。
         現在のデプロイ（アクセス権：全員・匿名）ではログインユーザーを識別できないため、ボタンは表示されず、アクセス限定（ADMIN_ENFORCE）も効きません。
-        識別を有効にするには、GASのデプロイ設定で<b>アクセスできるユーザーを「Googleアカウントを持つ全員」または「同じドメイン内」</b>に変更してください（申込者にもGoogleログインを求める点にご注意ください）。
+        識別を有効にするには、GASのデプロイ設定で<b>アクセスできるユーザーを「Googleアカウントを持つ全員」または「同じドメイン内」</b>に変更してください（クリエーターにもGoogleログインを求める点にご注意ください）。
       </div>
     </div>
   </section>
@@ -866,7 +869,7 @@ function saveAiConfig(){
 }
 
 // ---- 締結後の手続き案内・振込先 ----
-var GC_FIELDS=["bank_name","branch","account_type","account_number","account_holder","holder_kana","note","office_contact","workflow_url","office_email_domain",
+var GC_FIELDS=["bank_name","branch","account_type","account_number","account_holder","holder_kana","note","office_contact","workflow_url","public_base_url","office_email_domain",
   "mail_from_name","mail_reply_to","guide_email_subject","guide_email_body"];
 function loadGuideConfig(){
   call("admin_getGuideConfig",[],function(c){
@@ -878,7 +881,7 @@ function loadGuideConfig(){
     el.innerHTML=(c.configured
       ? '<b style="color:var(--pass)">✓ 振込先が設定されています</b>'
       : '<b style="color:var(--fail)">⚠ 振込先が未設定です</b>（案内ページにお支払い欄が表示されません）')+
-      '　／　利用者向けページURL：<span class="mono">'+esc(c.workflow_url_effective||"（未設定・adminのURLが使われます）")+'</span>';
+      '　／　クリエーター向けページURL：<span class="mono">'+esc(c.workflow_url_effective||"（未設定・adminのURLが使われます）")+'</span>';
   });
 }
 function saveGuideConfig(){
@@ -904,7 +907,7 @@ function sendMailTest(){
 
 // ---- 申込導線（経路別フォームURL・法人の案内先）----
 var PR_FIELDS=["form_url_standard_fixed","form_url_standard_rate","form_url_individual","form_url_manual_review",
-  "corporate_inquiry_url","corporate_inquiry_email","corporate_inquiry_note"];
+  "corporate_inquiry_url","corporate_inquiry_email","corporate_inquiry_note","form_url_max_chars"];
 var _prDefaultNote="";
 function loadPortalRouting(){
   call("admin_getPortalRoutingConfig",[],function(c){
@@ -934,11 +937,12 @@ function saveCloudSign(){
   var s=$("cs-secret").value; if(s) c.secret=s;
   call("admin_saveCloudSignConfig",[c],function(){ toast("CloudSign設定を保存しました"); loadIntegration(); });
 }
+// formrunの初期値つきURLは1000字までのため、ひな形には実際に転送する項目だけを並べる。
+// 許諾期間・地域・支払条件などはCloudSignテンプレート側の固定文言とし、URLでは渡さない。
+var FORM_TRANSFER_KEYS=["handoff_token","terms_snapshot_hash","template_route",
+  "license_id","application_ref","usage_category","work_names","licensor_name","fee_amount_or_rate","credit_text"];
 function insertHiddenMapSkeleton(){
-  var n=parseInt($("fr-max_works").value||"5",10)||5;
-  var o={application_ref:""};
-  for(var i=1;i<=n;i++){ o["work_id_"+i]=""; o["work_title_"+i]=""; }
-  ["usage_category","fee_model","fee_amount_or_rate","licensed_uses","payment_due","reporting_requirement","report_due","threshold_or_cap","reprint_rule","special_terms"].forEach(function(k){ o[k]=""; });
+  var o={}; FORM_TRANSFER_KEYS.forEach(function(k){ o[k]=""; });
   var cur=$("fr-hidden_map").value.trim();
   if(cur && !confirm("現在のマッピング内容を置き換えますか？")) return;
   $("fr-hidden_map").value=JSON.stringify(o,null,2);
@@ -1133,7 +1137,7 @@ function humanReview(r,result){
 function showUploadLink(contractId, res){
   var url=(res&&res.url)||"";
   if(!url){ toast("提出リンクの発行に失敗しました"); return; }
-  window.prompt("契約 "+contractId+" の作品提出リンク（利用者へ共有。当社からのメール送信は行いません）：", url);
+  window.prompt("契約 "+contractId+" の作品提出リンク（クリエーターへ共有。当社からのメール送信は行いません）：", url);
 }
 function showGuideLink(contractId, res){
   var url=(res&&res.url)||"";
@@ -1143,7 +1147,7 @@ function showGuideLink(contractId, res){
   var srcLabel={CLOUDSIGN:"CloudSign送付先",FORM:"申込フォーム入力"}[res&&res.contact_email_source]||"";
   window.prompt("SPLL番号 "+((res&&res.license_id)||contractId)+" の「今後のお手続き」案内リンク\n"+
     (to?("送付先："+to+(srcLabel?("（"+srcLabel+"）"):"")+"\n"):"送付先：未取得（CloudSign照会・フォーム入力とも取得できていません）\n")+
-    "（振込先・作品提出・認証バッジをまとめたページ。利用者へ共有してください）：", url);
+    "（振込先・作品提出・認証バッジをまとめたページ。クリエーターへ共有してください）：", url);
 }
 
 // ---- 未紐付け締結の手動紐付け ----
@@ -1333,7 +1337,7 @@ function loadAccCs(){
         var reason=prompt("訂正・再申込の理由（必須）：",""); if(!reason) return;
         call("admin_createReplacementApplication",[a.application_id,reason],function(r){
           toast("再申込を作成しました： "+r.application_ref+"（旧申込はSUPERSEDED）"); loadAccCs();
-          if(r.form_url) prompt("新しいフォームURL（利用者へ案内してください）：", r.form_url+"?application_ref="+r.application_ref);
+          if(r.form_url) prompt("新しいフォームURL（クリエーターへ案内してください）：", r.form_url+"?application_ref="+r.application_ref);
         });
       }));
       act.appendChild(mkBtn("取消","btn d",function(){

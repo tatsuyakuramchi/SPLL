@@ -6,7 +6,7 @@
  * そこで「提出の版ごとに空のDriveフォルダを払い出し、期限つきの編集リンクを渡す」方式を用意する。
  *
  *   1. web_openDriveSubmission(token, {...})   … 版を作成し、フォルダを払い出して投入リンクを返す（OPEN）
- *   2. 利用者がブラウザからフォルダへ投入（GASを経由しないためサイズ制限を受けない）
+ *   2. クリエーターがブラウザからフォルダへ投入（GASを経由しないためサイズ制限を受けない）
  *   3. web_finalizeDriveSubmission(token, versionId) … 中身を検査して確定・共有解除（CLOSED）→審査へ
  *
  * 未確定のまま放置されたフォルダは日次バッチ closeStaleSubmissionFolders_ で共有解除する。
@@ -75,7 +75,7 @@ function web_openDriveSubmission(token, data){
   return driveSubmissionInfo_(row, '');
 }
 
-/** 投入リンク・期限・上限を利用者向けに整形 */
+/** 投入リンク・期限・上限をクリエーター向けに整形 */
 function driveSubmissionInfo_(v, note){
   const lim = submitFolderLimits_();
   const opened = v.folder_opened_at ? new Date(v.folder_opened_at) : new Date();

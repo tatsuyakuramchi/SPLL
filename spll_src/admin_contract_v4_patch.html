@@ -5,7 +5,7 @@
   const formPane=document.getElementById('p-formrun');
   if(formPane){
     const note=formPane.querySelector('.setnote');
-    if(note) note.innerHTML='CloudSign FORM v4では、利用者が入力するのは契約者情報のみです。SPLL番号・対象原作・料金・期間・クレジット等は<b>システムhidden項目</b>として契約書へ引き継ぎ、Webhookで改変検知します。';
+    if(note) note.innerHTML='CloudSign FORM v4では、クリエーターが入力するのは契約者情報のみです。SPLL番号・対象原作・料金・期間・クレジット等は<b>システムhidden項目</b>として契約書へ引き継ぎ、Webhookで改変検知します。';
     const notes=formPane.querySelectorAll('.note');
     if(notes[0]) notes[0].innerHTML='<b>v4設定：</b>「hidden項目ひな形」を挿入し、各canonical keyをFormRunの実フィールドIDへ割り当ててください。逆方向の <span class="mono">FORMRUN_FIELD_MAP</span> も同じ項目で設定します。契約成立はFormRun送信時ではなくCloudSign上の同意完了時です。';
   }

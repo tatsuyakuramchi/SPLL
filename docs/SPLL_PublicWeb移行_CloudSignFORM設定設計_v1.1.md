@@ -1,9 +1,10 @@
-# SPLL Public Web移行設計・修正計画 / CloudSign FORM設定設計 v1.0
+# SPLL Public Web移行設計・修正計画 / CloudSign FORM設定設計 v1.1
 
 - 文書名: SPLL Public Web移行設計・修正計画 / CloudSign FORM設定設計
 - 対象リポジトリ: `tatsuyakuramchi/SPLL`
 - 対象ブランチ: `claude/new-design-implementation-wlqwv9`
 - 作成日: 2026-08-26
+- 更新日: 2026-08-26（v1.1：用語定義 §0.0、現行GASでの実装状況 §32 を追記）
 - 目的:
   1. 一般公開部分のアクセス集中耐性をGASから切り離す
   2. 社内の作品・契約・審査管理はGoogle Spreadsheet中心の運用を維持する
@@ -11,6 +12,22 @@
   4. CloudSign FORM powered by formrunを正式な申込受付として維持する
   5. 作品提出・認証QR取得・QR検証を移植可能なPublic Webに統合する
   6. 本書だけを見ながらCloudSign FORM / formrun側のフォーム設定ができる粒度まで落とす
+
+---
+
+## 0.0 用語
+
+本書および実装（画面文言・コード内コメント）で使う呼称を次に統一する。
+
+| 呼称 | 指すもの | 例 |
+|---|---|---|
+| **クリエーター** | SPLLへ利用許諾を申請し、二次創作物を制作・頒布する側 | 申込ポータルの入力者、CloudSignの署名者、作品の提出者、認証バッジの掲載者 |
+| **ユーザー** | 社内で実際に業務を担当する側 | 管理コンソールのログインユーザー、審査担当、契約担当、事務局運営の構成員 |
+
+従来「利用者」と書いていた箇所はすべて**クリエーター**を指すため、実装の文言を置換済み。
+「ユーザー」は社内担当者のみを指す語とし、クリエーターの意味では使わない。
+
+なお契約書・法務文書では、契約当事者を示す法律上の呼称（甲・乙・契約者）をそのまま用いる。
 
 ---
 
@@ -1766,3 +1783,55 @@ CloudSign FORM / formrunの管理画面上の名称はサービス側のUI更新
 ```
 
 以上。
+
+
+---
+
+# 32. 現行GASでの実装状況（v1.1追記）
+
+CloudSign FORMのデモ環境が用意できた時点で、**§28の優先度2・3・4に相当するコード修正を現行GASへ先に入れた**。
+Public Web（Docker）へ移す前に、いまのGASのままフォーム接続テストができる状態にするため。
+
+## 32.1 実装済み
+
+| 本書の該当 | 内容 | 実装 |
+|---|---|---|
+| §9 | FORM転送項目と内部スナップショットの分離 | `CONTRACT_FORM_V4_TRANSFER_KEYS`（`license_id` / `application_ref` / `usage_category` / `work_names` / `licensor_name` / `fee_amount_or_rate` / `credit_text`）＋制御項目3つのみURLへ載せる。`terms_snapshot_hash` は従来どおり全条件（`CONTRACT_FORM_V4_HASH_KEYS`）から生成 |
+| §9 | URL長チェック | `FORM_URL_MAX_CHARS`（既定850）。ポータルが実際に組み立てるURLをサーバー側で見積もり、超過した申込は `MANUAL_REVIEW` へ退避し理由を申込レコードへ記録 |
+| §10 | 改変検知の修正版 | 受信時に ①`application_ref` ②`license_id` ③`terms_snapshot_hash` を照合 → ④SPLL正本を再生成して申込時ハッシュと一致するか確認 → ⑤**転送した項目だけ**を正本と突合。`handoff_token` のHMAC検証は従来どおり `processFormrunEvent_` |
+| §14 §15 | 経路別マップ | `FORM_HIDDEN_MAP_FIXED` / `_RATE`、`FORMRUN_FIELD_MAP_FIXED` / `_RATE`。未設定なら共通マップへフォールバック。受信は「共通マップで正規化 → 申込を特定 → その経路のマップで再正規化」の2段 |
+| §14 | 申込の経路記録 | `Applications.template_route`（スキーマv10）。受信時にどちらのフォームか判定するために必要 |
+| §21.5 §1.3 | QRのドメイン固定 | `PUBLIC_BASE_URL`。設定すると検証URLは `https://（ドメイン）/v/{cert_id}?c={code}`。未設定時は現行どおりGAS②のURL。**あわせて `verifyUrl_` が `ScriptApp.getService().getUrl()` を使っていた不具合を修正**（管理コンソールからコード再発行するとadminのURLがQRに焼き込まれていた） |
+| §7 | FORM入力項目 | canonical key は `party_name` / `circle_name` / `postal_code` / `party_address` / `email` / `adult_confirmed`。SPLL側が保持するのは氏名（`party_display_name`）と連絡先メールのみで、**住所・郵便番号はCloudSign側に残し台帳へ持ち込まない**（個人情報の最小化） |
+| — | 設定画面 | 管理コンソール「設定」に公開ドメインとURL上限の入力欄を追加。hidden項目マッピングの「ひな形を挿入」も転送項目だけを出すよう変更 |
+
+### 締結時スナップショットの出所が変わった点
+
+転送項目を絞った結果、FormRun受信証跡から全条件を復元することはできなくなった。
+そのため締結時の `terms_snapshot` は次の順で確定する。
+
+1. **`SPLL_SNAPSHOT`** … 申込から正本を再生成し、申込時ハッシュと一致した場合（通常はこれ）
+2. `FORMRUN_RECEIPT` … 一致しない場合に、全項目を転送していた旧フォームの受信証跡から復元できたとき
+3. `RECOMPUTED` … どちらも取れないとき。`TERMS_MISMATCH` として認証・バッジを停止する
+
+申込後に原作マスタ・料金表が変わると 1 が一致しなくなるため、**条件のドリフトはここで必ず検出される**。
+
+## 32.2 未着手（Public Web移行本体）
+
+§28 の 5〜9（Docker化・Webhook receiver移行・作品提出ページ移行・QR取得/検証ページ移行・GAS公開部分停止）は未着手。
+独自ドメイン（§28-4）が決まり次第、`PUBLIC_BASE_URL` を設定できる。
+
+> **注意：** `PUBLIC_BASE_URL` は**そのドメインで検証ページが開ける状態になってから**設定する。
+> QRは頒布物に印刷されて残るため、開けないドメインで発行したQRは後から回収できない。
+> 管理コンソール側でも、実行基盤のURL（`script.google.com` / `*.run.app`）やIPアドレスは入力を拒否する。
+
+## 32.3 テスト
+
+`npm test` に次を追加（合計508件）。
+
+- 転送項目のみがURLへ載ること／内部スナップショットには全条件が残ること
+- URL上限超過の申込が `MANUAL_REVIEW` へ退避し、理由が残ること
+- 経路別マップでの正規化・フォールバック
+- 転送項目の書換えは自動締結を止め、転送していない項目は比較対象にしないこと
+- 申込後にマスタが変わった受信を自動締結しないこと
+- 公開ドメイン設定の検証（実行基盤URL・クエリ付きの拒否）とURL上限の範囲検証

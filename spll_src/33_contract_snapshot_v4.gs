@@ -7,10 +7,16 @@
 function snapshotContractTerms_(contractId, app){
   const usage = (app && app.usage_category) || '';
   if(app && /^v4:/.test(String(app.terms_hash || ''))){
-    // 正本はFormRun受信証跡（申込時ハッシュで検証済み）。取れない場合のみ現在のマスタから再構成するが、
-    // 再構成値は申込時と一致する保証がないため出所とハッシュ一致可否を必ず記録する（verifyContractTerms_が判定）。
-    let fields = contractFormFieldsFromReceiptV4_(app), source = 'FORMRUN_RECEIPT';
-    if(!fields){ fields = contractFormFieldsFromApplicationV4_(app); source = 'RECOMPUTED'; }
+    // 正本はSPLL側の内部スナップショット（申込時ハッシュと一致すれば申込時の条件そのもの）。
+    // FORMへ転送するのは契約書へ差し込む最小限だけになったため、受信証跡から全条件は復元できない。
+    // 一致しない場合（申込後に原作マスタ・料金表が変わった等）は、全項目を転送していた旧フォームの
+    // 受信証跡からの復元を試し、それも取れなければ再構成値であることを記録する（verifyContractTerms_が判定）。
+    let fields = contractFormFieldsFromApplicationV4_(app), source = 'SPLL_SNAPSHOT';
+    if(('v4:' + contractFormHashV4_(fields)) !== String(app.terms_hash || '')){
+      const fromReceipt = contractFormFieldsFromReceiptV4_(app);
+      if(fromReceipt){ fields = fromReceipt; source = 'FORMRUN_RECEIPT'; }
+      else source = 'RECOMPUTED';
+    }
     fields.terms_snapshot_hash = String(app.terms_hash || '');
     fields.terms_snapshot_source = source;
     fields.terms_snapshot_hash_verified =

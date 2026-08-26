@@ -814,8 +814,15 @@ function mkAppV4(workIds,usage,extra){ return G.web_createApplicationV4(Object.a
   privacyDocumentId:legalV4.privacy_doc_id, guidelineDocumentId:gdraft.legal_document_id }, extra||{})); }
 const v4a=mkAppV4(['WRK-ARK00012','WRK-BKK00019'],'書籍');
 ok(/^SPLL-/.test(v4a.license_id)&&/^v4:/.test(v4a.terms_snapshot_hash),'v4申込でSPLL番号＋個別条件ハッシュを発行');
-ok(v4a.form_fields.fee_amount_or_rate.indexOf('16,500')>=0&&v4a.form_fields.work_count==='2'&&v4a.form_fields.contract_template_version==='v4.1',
-  'FORM引渡の個別条件に料金・原作数・契約書版が入る');
+// FORMへ渡すのは契約書へ差し込む最小限だけ（formrunの初期値URLは1000字上限）。全条件はSPLL側が保持する。
+ok(v4a.form_fields.fee_amount_or_rate.indexOf('16,500')>=0&&v4a.form_fields.work_names&&v4a.form_fields.license_id===v4a.license_id,
+  'FORM転送項目に料金・原作名・SPLL番号が入る');
+ok(v4a.form_fields.work_count===undefined&&v4a.form_fields.work_id_1===undefined&&v4a.form_fields.license_term===undefined,
+  '内部専用の項目（原作数・work_id・許諾期間）はFORMへ転送しない');
+const snapA=G.contractFormFieldsFromApplicationV4_(rows(OPS,'Applications').find(a=>a.application_id===v4a.application_id));
+ok(snapA.work_count==='2'&&snapA.contract_template_version==='v4.1'&&snapA.work_id_1==='WRK-ARK00012',
+  '内部スナップショットには全条件が残る（ハッシュ対象）');
+ok('v4:'+G.contractFormHashV4_(snapA)===v4a.terms_snapshot_hash,'terms_snapshot_hashは全条件から生成する');
 ok(v4a.template_route==='STANDARD_FIXED','定額は自動締結経路（STANDARD_FIXED）');
 let gErr=false; try{ mkAppV4(['WRK-ARK00012'],'書籍',{guidelineConsent:false}); }catch(e){ gErr=/ガイドライン/.test(String(e.message)); }
 ok(gErr,'ガイドライン未確認の申込は拒否');
@@ -871,8 +878,8 @@ ok(rows(OPS,'Applications').find(a=>a.application_id===v4b.application_id).statu
 G.doPost({parameter:{},postData:{contents:JSON.stringify({document_id:'DOC-V4-1',status:'COMPLETED',application_ref:v4a.application_ref})}});
 const cV4=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-V4-1');
 const tV4=JSON.parse(cV4.terms_snapshot||'{}');
-ok(tV4.terms_snapshot_hash===v4a.terms_snapshot_hash&&tV4.terms_snapshot_source==='FORMRUN_RECEIPT'&&tV4.terms_snapshot_hash_verified==='true',
-  '締結スナップショットはFormRun受信証跡から復元しハッシュ一致を記録');
+ok(tV4.terms_snapshot_hash===v4a.terms_snapshot_hash&&tV4.terms_snapshot_source==='SPLL_SNAPSHOT'&&tV4.terms_snapshot_hash_verified==='true',
+  '締結スナップショットはSPLL内部の正本から復元しハッシュ一致を記録');
 ok(cV4.terms_verification_status==='VERIFIED'&&rows(OPS,'Certificates').some(x=>x.contract_id===cV4.contract_id),'条件照合VERIFIEDで認証発行');
 ok(G.admin_listLicenseCases().find(k=>k.license_id===v4a.license_id).fee.indexOf('16,500')>=0,'ライセンス一覧の利用許諾料はv4スナップショットからも表示');
 // 経理引渡：契約書版が変わっても請求条件のキーは同じ形で渡す
@@ -1373,6 +1380,97 @@ ok(memRole,'AUDITOR: 構成員の登録は拒否');
 let voteRole=false; try{ G.admin_castSecretariatVote(ptc.agenda_id, mem.coreA,'FOR',''); }catch(e){ voteRole=/AUTHORIZATION_ERROR/.test(String(e.message)); }
 ok(voteRole,'AUDITOR: 投票の記録は拒否');
 G.Session=SessPart;
+
+
+// ============ CloudSign FORM 引継ぎのコンパクト化（設定設計 §9・§10・§14・§15） ============
+// 122. 転送項目だけをURLへ載せ、上限を超える申込は自動締結しない
+ok(G.formUrlMaxChars_()===850,'初期値つきURLの上限は既定850字（formrun仕様1000字に余裕を持たせる）');
+const urlLenApp=mkAppV4(['WRK-ARK00012'],'書籍');
+ok(urlLenApp.form_url_length>0&&urlLenApp.form_url_length<=850,'標準経路は上限内: '+urlLenApp.form_url_length+'字');
+G.setConfig_('FORM_URL_MAX_CHARS','80');
+const tooLong=mkAppV4(['WRK-ARK00012'],'書籍');
+ok(tooLong.template_route==='MANUAL_REVIEW','URLが上限を超える申込は個別確認へ退避する');
+ok(tooLong.route_reasons.some(r=>/上限超過/.test(r)),'退避理由に長さを記録: '+tooLong.route_reasons.slice(-1)[0]);
+ok(rows(OPS,'Applications').find(a=>a.application_id===tooLong.application_id).manual_review_reason.indexOf('上限超過')>=0,
+  '申込レコードにも退避理由が残る');
+ok(tooLong.form_url===G.getConfig_('FORM_URL_MANUAL_REVIEW','')||tooLong.form_url==='','退避時は標準フォームURLを返さない');
+G.setConfig_('FORM_URL_MAX_CHARS','850');
+
+// 123. hidden項目マップは経路別に持てる（定額と売上連動でフォームが別）
+scriptProps.FORM_HIDDEN_MAP=JSON.stringify({license_id:'_field_1'});
+scriptProps.FORM_HIDDEN_MAP_RATE=JSON.stringify({license_id:'_field_9'});
+ok(G.formHiddenMapV4_('STANDARD_RATE').license_id==='_field_9','売上連動フォームは専用のhidden項目IDを使う');
+ok(G.formHiddenMapV4_('STANDARD_FIXED').license_id==='_field_1','未設定の経路は共通マップへフォールバック');
+delete scriptProps.FORM_HIDDEN_MAP_RATE; delete scriptProps.FORM_HIDDEN_MAP;
+
+// 124. 受信側の項目IDマップも経路別（申込を特定してから経路のマップで読み直す）
+const routeApp=mkAppV4(['WRK-ARK00012'],'書籍');
+ok(rows(OPS,'Applications').find(a=>a.application_id===routeApp.application_id).template_route==='STANDARD_FIXED',
+  '申込に契約書経路を記録する（受信時にどのフォームか分かる）');
+scriptProps.FORMRUN_FIELD_MAP_FIXED=JSON.stringify({_f_ref:'application_ref',_f_lic:'license_id',
+  _f_hash:'terms_snapshot_hash',_f_tok:'handoff_token',_f_fee:'fee_amount_or_rate',_f_works:'work_names'});
+const tf=routeApp.form_fields;
+const routeWh=G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({submission_id:'FR-ROUTE-1',
+  columns:[{name:'_f_ref',value:routeApp.application_ref},{name:'_f_lic',value:routeApp.license_id},
+    {name:'_f_hash',value:routeApp.terms_snapshot_hash},{name:'_f_tok',value:routeApp.handoff_token},
+    {name:'_f_fee',value:tf.fee_amount_or_rate},{name:'_f_works',value:tf.work_names}]})}});
+ok(String(routeWh.getContent())==='ok','経路別マップで正規化した受信が通る');
+delete scriptProps.FORMRUN_FIELD_MAP_FIXED;
+
+// 125. 改変検知：転送項目の書換えは止める／転送していない項目は比較対象にしない
+const tamperApp=mkAppV4(['WRK-ARK00012'],'書籍');
+const okCols=function(res,over){ const t=Object.assign({},res.form_fields,over||{});
+  const c=[{name:'application_ref',value:res.application_ref},{name:'license_id',value:res.license_id},
+    {name:'terms_snapshot_hash',value:res.terms_snapshot_hash},{name:'handoff_token',value:res.handoff_token}];
+  Object.keys(t).forEach(function(k){ c.push({name:k,value:t[k]}); }); return c; };
+const whFee=G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({submission_id:'FR-TMP-1',
+  columns:okCols(tamperApp,{fee_amount_or_rate:'0円（無償）'})})}});
+ok(String(whFee.getContent())==='accepted-manual-review','転送項目（利用許諾料）の書換えは自動締結を止める');
+const errFee=rows(OPS,'System_Errors').slice(-1)[0];
+ok(/fee_amount_or_rate/.test(String(errFee.detail)+String(errFee.message)),'どの項目が食い違ったかを記録: '+String(errFee.message).slice(0,60));
+const tamperApp2=mkAppV4(['WRK-ARK00012'],'書籍');
+const whMinimal=G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({submission_id:'FR-TMP-2',
+  columns:[{name:'application_ref',value:tamperApp2.application_ref},{name:'license_id',value:tamperApp2.license_id},
+    {name:'terms_snapshot_hash',value:tamperApp2.terms_snapshot_hash},{name:'handoff_token',value:tamperApp2.handoff_token}]})}});
+ok(String(whMinimal.getContent())==='ok','転送しなかった項目は比較対象にしない（テンプレート固定文言のため）');
+
+// 126. 申込後にマスタが変わった場合は、正本を再現できないので自動締結しない
+const driftApp=mkAppV4(['WRK-BKK00019'],'書籍');
+G.updateRow_(MAS,'Works_Master','work_id','WRK-BKK00019',{ work_name:'インセイン（改題2）' });
+const whDrift=G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({submission_id:'FR-DRIFT-1',
+  columns:okCols(driftApp)})}});
+ok(String(whDrift.getContent())==='accepted-manual-review','申込時条件を再現できない受信は自動締結を止める');
+G.updateRow_(MAS,'Works_Master','work_id','WRK-BKK00019',{ work_name:'インセイン' });
+
+// 127. QRは独自ドメインへ固定できる（実行基盤のURLを頒布物へ焼き込まない）
+G.setConfig_('WORKFLOW_URL','https://script.google.com/macros/s/WF/exec');
+ok(G.verifyUrl_('CERT-1','ABCD').indexOf('https://script.google.com/macros/s/WF/exec?page=verify')===0,
+  '未設定のうちはGAS②のURLで検証リンクを作る');
+G.setConfig_('PUBLIC_BASE_URL','https://spll.example.jp/');
+ok(G.verifyUrl_('CERT-1','ABCD')==='https://spll.example.jp/v/CERT-1?c=ABCD','独自ドメインを設定するとQRはそのドメインになる');
+ok(G.verifyUrl_('CERT-1','ABCD').indexOf('script.google.com')<0,'QRに実行基盤のURLを含めない');
+G.setConfig_('PUBLIC_BASE_URL','');
+
+// 128. 公開ドメインは設定画面から登録する（誤設定はQRが永久に壊れるので入口で弾く）
+const SessFm=G.Session;
+let pubBad=false; try{ G.admin_saveGuideConfig({ public_base_url:'https://script.google.com/macros/s/X/exec' }); }
+catch(e){ pubBad=/実行基盤のURL/.test(String(e.message)); }
+ok(pubBad,'QRの公開ドメインに実行基盤のURLは設定できない');
+let pubBad2=false; try{ G.admin_saveGuideConfig({ public_base_url:'https://spll.example.jp/v?x=1' }); }
+catch(e){ pubBad2=/クエリ/.test(String(e.message)); }
+ok(pubBad2,'クエリ付きのドメインは拒否');
+G.admin_saveGuideConfig({ public_base_url:'https://spll.example.jp' });
+ok(G.admin_getGuideConfig().public_base_url==='https://spll.example.jp','正しい独自ドメインは保存できる');
+G.admin_saveGuideConfig({ public_base_url:'' });
+
+// 129. URL上限も設定画面から変えられる（formrun仕様の1000字を超える値は拒否）
+let maxBad=false; try{ G.admin_savePortalRoutingConfig({ form_url_max_chars:'1200' }); }
+catch(e){ maxBad=/200〜1000字/.test(String(e.message)); }
+ok(maxBad,'formrunの上限1000字を超える設定は拒否');
+G.admin_savePortalRoutingConfig({ form_url_max_chars:'900' });
+ok(G.admin_getPortalRoutingConfig().form_url_max_chars==='900'&&G.formUrlMaxChars_()===900,'上限は設定画面から変更できる');
+G.admin_savePortalRoutingConfig({ form_url_max_chars:'850' });
+G.Session=SessFm;
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

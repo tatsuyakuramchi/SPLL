@@ -223,7 +223,9 @@ function processFormrunEvent_(body){
   body = body || {};
   // 正規化はv4ガードと同一ロジックを使う（ガードは通るのに本処理でrefやhandoffを拾えない、を防ぐ）
   let canon;
-  if(typeof formrunCanonV4_ === 'function'){
+  if(typeof formrunResolveV4_ === 'function'){
+    canon = formrunResolveV4_(body).canon;      // 経路別の項目IDマップまで解決した正規化
+  }else if(typeof formrunCanonV4_ === 'function'){
     canon = formrunCanonV4_(body);
   }else{
     const map = parseJson_(prop_('FORMRUN_FIELD_MAP'), {});
