@@ -54,9 +54,8 @@ const portalHtml=read('spll_src/index.html');
 // 世界観：明朝の見出しと真鍮の差し色（申込窓口・案内・提出で共通）
 ['spll_src/index.html','spll_src/guide.html','spll_src/upload.html'].forEach(function(f){
   const h=read(f);
-  ok(/Shippori\+Mincho|Shippori Mincho/.test(h), f+' が明朝の見出し書体を読み込む');
-  ok(/Zen\+Kaku\+Gothic|Zen Kaku Gothic/.test(h), f+' が本文のゴシック書体を読み込む');
-  ok(/--brand:#B3121B/.test(h) && /--ink:#1A1714/.test(h), f+' が共通の配色トークン（朱・墨）を持つ');
+  ok(/Zen\+Kaku\+Gothic|Zen Kaku Gothic/.test(h), f+' がゴシック書体を読み込む');
+  ok(/--brand:#00AECE/.test(h) && /--navy:#1B3A6B/.test(h), f+' が共通の配色トークン（シアン・濃紺）を持つ');
 });
 
 console.log('\nFORM V4 RESULT: '+pass+' passed, '+fail+' failed');
