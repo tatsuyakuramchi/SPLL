@@ -11,6 +11,8 @@
 substitutions:
   _IMAGE: 'asia-northeast1-docker.pkg.dev/PROJECT_ID/spll/public-web'
 
+# タグには $BUILD_ID を使う。$SHORT_SHA はトリガー実行でしか設定されず、
+# gcloud builds submit（ローカルからソースを送る形）では空になってタグが壊れる。
 steps:
   - name: gcr.io/cloud-builders/docker
     args:
@@ -18,14 +20,14 @@ steps:
       - '-f'
       - apps/public-web/Dockerfile
       - '-t'
-      - '${_IMAGE}:${SHORT_SHA}'
+      - '${_IMAGE}:$BUILD_ID'
       - '-t'
       - '${_IMAGE}:latest'
       - '.'
 
 images:
-  - '${_IMAGE}:${SHORT_SHA}'
-  - '${_IMAGE}:latest'
+  - '${_IMAGE}:$BUILD_ID'      # 巻き戻し用の不変タグ
+  - '${_IMAGE}:latest'         # デプロイが参照するタグ
 
 options:
   logging: CLOUD_LOGGING_ONLY

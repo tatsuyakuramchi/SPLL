@@ -199,6 +199,9 @@ async function rpc(payload, opts){ return server.handleRpc(payload, opts || {});
   const cb = read('apps/public-web/cloudbuild.yaml');
   ok(/-f[\s\S]{0,40}apps\/public-web\/Dockerfile/.test(cb), 'Cloud Build がDockerfileの場所を明示する');
   ok(/\n\s+- '\.'/.test(cb), 'ビルドコンテキストはリポジトリのルート（spll_src を拾うため）');
+  // $SHORT_SHA はトリガー実行でしか埋まらず、gcloud builds submit では空になる
+  ok(!/SHORT_SHA/.test(cb.replace(/^#.*$/gm, '')), 'タグに $SHORT_SHA を使わない（submit時に空になる）');
+  ok(/\$\{_IMAGE\}:latest/.test(cb), 'デプロイが参照する latest タグを push する');
 
   console.log('\nPUBLIC WEB RESULT: ' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
