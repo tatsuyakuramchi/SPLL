@@ -93,6 +93,52 @@ async function rpc(payload, opts){ return server.handleRpc(payload, opts || {});
   RPC_FUNCTIONS.forEach((fn) => ok(new RegExp(fn + ':\\s*function').test(entry), 'GAS①が ' + fn + ' を公開する'));
   ok(!/admin_|setup_/.test(entry.split('publicWebRpcHandlers_')[1] || ''), 'GAS①の受け口に管理系・セットアップ系を並べない');
 
+  // ---- 5. 申込 → クラウドサインフォームへの引継ぎ（Cloud Run経由でも成立するか） ----
+  // GASが返す申込結果が、画面がフォームURLを組み立てるのに必要な項目を全部持っているか。
+  const HANDOFF = {
+    application_id:'APP-1', application_ref:'REF-2608-0001', license_id:'SPLL-202608-0042',
+    handoff_token:'HMACxxxxxxxxxxxxxxxxxxxxxxxxxxxx', terms_snapshot_hash:'v4:abcdef',
+    template_route:'STANDARD_FIXED', route_reasons:[], form_url_length:420,
+    form_url:'https://form.run/@spll-fixed',
+    form_fields:{ license_id:'SPLL-202608-0042', application_ref:'REF-2608-0001', usage_category:'書籍',
+      work_names:'新クトゥルフ神話TRPG、光砕のリヴァルチャー', licensor_name:'アークライト',
+      fee_amount_or_rate:'16,500円／契約', credit_text:'指定のシリーズ権利表記を記載' }
+  };
+  const applyRpc = async (url, init) => {
+    const body = JSON.parse(init.body);
+    ok(body.fn === 'web_createApplicationV4', '申込作成はRPCとしてGASへ渡る');
+    return { status:200, text: async () => JSON.stringify({ ok:true, result: HANDOFF }) };
+  };
+  const applied = await rpc({ fn:'web_createApplicationV4', args:[{ workIds:['WRK-1'], usageCategory:'書籍' }] },
+    { fetchImpl: applyRpc, ip:'9.9.9.9' });
+  const res = applied.body.result;
+  ['form_url','form_fields','handoff_token','terms_snapshot_hash','template_route']
+    .forEach((k) => ok(res[k] !== undefined, 'RPCの応答が ' + k + ' を運ぶ'));
+
+  // 画面が実際に使う buildFormUrl（v4パッチの実物）へ通し、フォームURLが組み上がるか
+  const src = patchHtml.match(/buildFormUrl = function\(res\)\{[\s\S]*?\n  \};/)[0];
+  const APPLY = { formUrl:'', hiddenMap:{ handoff_token:'_field_1', terms_snapshot_hash:'_field_2',
+    template_route:'_field_3', license_id:'_field_4', application_ref:'_field_5', usage_category:'_field_6',
+    work_names:'_field_7', licensor_name:'_field_8', fee_amount_or_rate:'_field_9', credit_text:'_field_10' } };
+  let buildFormUrl;
+  eval(src.replace('buildFormUrl = function(res)', 'buildFormUrl = function(res)'));
+  const formUrl = buildFormUrl(res);
+  ok(formUrl.indexOf('https://form.run/@spll-fixed?') === 0, '経路に応じたフォームURLを土台にする: ' + formUrl.slice(0, 40));
+  ok(/_field_1=HMAC/.test(formUrl), 'handoff_token をhidden項目IDへ載せる');
+  ok(/_field_2=v4%3Aabcdef/.test(formUrl), 'terms_snapshot_hash を載せる（改変検知の突合キー）');
+  ok(/_field_4=SPLL-202608-0042/.test(formUrl), 'SPLL番号を載せる');
+  ok(/_field_7=%E6%96%B0%E3%82%AF/.test(formUrl), '選択した原作名を載せる');
+  ok(/_field_9=16%2C500/.test(formUrl), '利用許諾料を載せる');
+  ok(formUrl.indexOf('work_id_1') < 0 && formUrl.indexOf('license_term') < 0,
+    '内部専用の項目はURLへ載せない（formrunの1000字上限）');
+  ok(formUrl.length <= 850, '組み上がったURLが上限内: ' + formUrl.length + '字');
+
+  // 締結の受け口はCloud Runへ移していない（Webhookは従来どおりGAS②）
+  const buildJs = read('scripts/build.js');
+  ok(/workflow:[\s\S]*?35_webhooks\.gs/.test(buildJs), 'formrun/CloudSignのWebhookはGAS②が受ける');
+  ok(!/35_webhooks|receiveWebhook_/.test(read('apps/public-web/server.js')),
+    'Cloud RunはWebhookを受けない（締結の経路を変えていない）');
+
   // ---- 5. コンテナ ----
   const dockerfile = read('apps/public-web/Dockerfile');
   ok(/COPY spll_src\/index\.html/.test(dockerfile), '画面の正本をイメージへ入れる');
