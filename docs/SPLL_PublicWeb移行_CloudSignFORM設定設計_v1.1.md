@@ -1816,9 +1816,21 @@ Public Web（Docker）へ移す前に、いまのGASのままフォーム接続�
 
 申込後に原作マスタ・料金表が変わると 1 が一致しなくなるため、**条件のドリフトはここで必ず検出される**。
 
-## 32.2 未着手（Public Web移行本体）
+## 32.2 Phase 2（Public Web作成）：申込窓口をCloud Runへ
 
-§28 の 5〜9（Docker化・Webhook receiver移行・作品提出ページ移行・QR取得/検証ページ移行・GAS公開部分停止）は未着手。
+§23 Phase 2 に着手し、**アクセスが集中する申込窓口の画面だけ**をコンテナへ出した。
+詳細は `docs/SPLL_公開ポータルのCloudRun配信_v1.0.md`。
+
+- `apps/public-web/`（依存パッケージなし・Node 22）が `spll_src/index.html` ＋ v4パッチを
+  GAS① の `doGet` と同じ順序で結合して配信する。**画面の実装を二重に持たない**
+- `google.script.run` のかわりに `/api/rpc` へHTTPで問い合わせる shim を先に読み込ませる
+- GAS① に許可リスト付きの `doPost` を追加（7関数のみ・共有鍵 `PUBLIC_WEB_KEY` 必須・
+  未設定なら常に拒否）。`admin_*` / `setup_*` / `api_getViewerRole` は届かない
+- 読み取りはコンテナ側で既定60秒キャッシュし、一覧表示のたびにスプレッドシートを読まない
+- 申込作成はキャッシュせず、IPごとに時間あたり5回まで
+
+§28 の 6〜9（Webhook receiver移行・作品提出ページ移行・QR取得/検証ページ移行・GAS公開部分停止）と、
+§4.2 の PostgreSQL は未着手。
 独自ドメイン（§28-4）が決まり次第、`PUBLIC_BASE_URL` を設定できる。
 
 > **注意：** `PUBLIC_BASE_URL` は**そのドメインで検証ページが開ける状態になってから**設定する。

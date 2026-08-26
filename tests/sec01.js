@@ -24,7 +24,14 @@ const p = combined('portal'), w = combined('workflow'), a = combined('admin');
 // portal（匿名公開・最小権限）
 ok(!/function admin_/.test(p),               'portal に admin_ 関数が含まれない');
 ok(!/function setup_/.test(p),               'portal に setup_ 関数が含まれない');
-ok(!/function doPost/.test(p),               'portal に doPost（Webhook受け口）が無い');
+// portal の doPost は公開Web（Cloud Run）からのデータ取得口だけ。Webhook受信ではない。
+ok(!/receiveWebhook_|processWebhookEvent_/.test(p), 'portal の doPost はWebhook受信を行わない');
+ok(!/function doPost/.test(p) || /publicWebRpcHandlers_/.test(p),
+  'portal に doPost があるなら公開WebのRPC受け口に限る');
+ok(!/function doPost/.test(p) || /PUBLIC_WEB_KEY/.test(p),
+  'portal のRPC受け口は共有鍵を要求する');
+ok(!/function doPost/.test(p) || /if\(!expected\) return false;/.test(p),
+  'portal のRPC受け口は鍵未設定なら常に拒否する（フェイルクローズ）');
 ok(!/function issueToken_/.test(p),          'portal にトークン発行が無い');
 ok(!/function receiveWebhook_/.test(p),      'portal にWebhook処理が無い');
 ok(/function web_createApplicationV4/.test(p), 'portal に申込作成（v4）がある');

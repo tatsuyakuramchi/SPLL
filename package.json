@@ -7,7 +7,7 @@
     "login": "clasp login",
     "logout": "clasp logout",
     "build": "node scripts/build.js",
-    "test": "node tests/harness.js && node scripts/build.js && node tests/sec01.js && node tests/form_v4.js && node tests/partnership_governance.js",
+    "test": "node tests/harness.js && node scripts/build.js && node tests/sec01.js && node tests/form_v4.js && node tests/partnership_governance.js && node tests/public_web.js",
     "push:portal": "npm run build && cd apps/portal && clasp push -f",
     "push:workflow": "npm run build && cd apps/workflow && clasp push -f",
     "push:admin": "npm run build && cd apps/admin && clasp push -f",
@@ -15,7 +15,9 @@
     "deploy:portal": "npm run build && node scripts/deploy.js portal",
     "deploy:workflow": "npm run build && node scripts/deploy.js workflow",
     "deploy:admin": "npm run build && node scripts/deploy.js admin",
-    "deploy:all": "npm run build && node scripts/deploy.js portal && node scripts/deploy.js workflow && node scripts/deploy.js admin"
+    "deploy:all": "npm run build && node scripts/deploy.js portal && node scripts/deploy.js workflow && node scripts/deploy.js admin",
+    "web:dev": "node apps/public-web/server.js",
+    "web:build": "docker build -f apps/public-web/Dockerfile -t spll-public-web ."
   },
   "devDependencies": {
     "@google/clasp": "^2.4.2",
