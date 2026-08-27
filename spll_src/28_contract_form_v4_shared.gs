@@ -136,6 +136,25 @@ function estimateFormUrlLengthV4_(baseUrl, route, transfer, control){
   return contractFormUrlV4_(baseUrl, route, transfer, control).length;
 }
 
+/**
+ * URLの何が長いのかを、字数の多い順に並べる。
+ * 上限超過は「どれかを短くすれば収まる」という運用判断につながるので、
+ * 事務局が原因を特定できるように内訳を残す（日本語はURLエンコードで3倍前後になる）。
+ */
+function formUrlLengthBreakdownV4_(route, transfer, control, top){
+  const map = formHiddenMapV4_(route);
+  const parts = [];
+  const add = function(k, v){
+    const actual = map[k] || k; if(!actual) return;
+    const len = encodeURIComponent(actual).length + 1 +
+      encodeURIComponent(v === undefined || v === null ? '' : String(v)).length;
+    parts.push({ key:k, length:len });
+  };
+  CONTRACT_FORM_V4_CONTROL_KEYS.forEach(function(k){ if(control && control[k] !== undefined) add(k, control[k]); });
+  CONTRACT_FORM_V4_TRANSFER_KEYS.forEach(function(k){ if(transfer && transfer[k] !== undefined) add(k, transfer[k]); });
+  return parts.sort(function(a, b){ return b.length - a.length; }).slice(0, top || 3);
+}
+
 /** ハッシュ対象を固定順に正規化。terms_snapshot_hash自身は含めない。 */
 function contractFormHashV4_(fields){
   fields = fields || {};

@@ -1391,6 +1391,8 @@ G.setConfig_('FORM_URL_MAX_CHARS','80');
 const tooLong=mkAppV4(['WRK-ARK00012'],'書籍');
 ok(tooLong.template_route==='MANUAL_REVIEW','URLが上限を超える申込は個別確認へ退避する');
 ok(tooLong.route_reasons.some(r=>/上限超過/.test(r)),'退避理由に長さを記録: '+tooLong.route_reasons.slice(-1)[0]);
+// 何を短くすれば収まるかが分からないと、事務局は同じ申込を延々と個別対応することになる
+ok(tooLong.route_reasons.some(r=>/内訳：.+\d+字/.test(r)),'退避理由に字数の多い項目を添える');
 ok(rows(OPS,'Applications').find(a=>a.application_id===tooLong.application_id).manual_review_reason.indexOf('上限超過')>=0,
   '申込レコードにも退避理由が残る');
 ok(tooLong.form_url===G.getConfig_('FORM_URL_MANUAL_REVIEW','')||tooLong.form_url==='','退避時は標準フォームURLを返さない');

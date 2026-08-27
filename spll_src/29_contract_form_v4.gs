@@ -101,7 +101,11 @@ function web_createApplicationV4(params){
   if(finalRoute !== 'MANUAL_REVIEW'){
     urlLength = estimateFormUrlLengthV4_(partyFormUrlV4_(partyType, finalRoute), finalRoute, transfer, control);
     if(urlLength > formUrlMaxChars_()){
-      reasons.push('FORM引継ぎURLが上限超過（' + urlLength + '字／上限' + formUrlMaxChars_() + '字）');
+      // 何を短くすれば収まるかが分かるよう、字数の多い項目を添える
+      const heavy = formUrlLengthBreakdownV4_(finalRoute, transfer, control, 3)
+        .map(function(p){ return p.key + ' ' + p.length + '字'; }).join('・');
+      reasons.push('FORM引継ぎURLが上限超過（' + urlLength + '字／上限' + formUrlMaxChars_() + '字）' +
+        (heavy ? '／内訳：' + heavy : ''));
       finalRoute = 'MANUAL_REVIEW';
       control.template_route = finalRoute;
     }
