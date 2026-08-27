@@ -191,6 +191,37 @@ function contractFormFieldsFromReceiptV4_(app){
   return null;
 }
 
+/** 標準自動締結の対象となる年齢（民法上の成年）。 */
+const ADULT_AGE_V4 = 18;
+
+/**
+ * CloudSign FORMで取得した生年月日から、受信時点で成年かを判定する。
+ *
+ * 生年月日そのものは台帳へ保存せず、判定結果（ADULT/MINOR/UNKNOWN）だけを残す。
+ * 保有する個人情報を増やさないためで、事務局が必要とするのは可否と理由だけである。
+ *
+ * 解釈できない値・未取得は UNKNOWN とし、成年とはみなさない。未成年との契約は
+ * 取り消される可能性があるため、判定できないまま自動で有効化しない（フェイルクローズ）。
+ */
+function adultCheckFromBirthDate_(value, asOf){
+  const raw = String(value === undefined || value === null ? '' : value).trim();
+  if(!raw) return { result:'UNKNOWN', reason:'生年月日が取得できていません' };
+  const m = raw.match(/(\d{4})\D{1,3}(\d{1,2})\D{1,3}(\d{1,2})/);
+  if(!m) return { result:'UNKNOWN', reason:'生年月日を解釈できません' };
+  const y = num_(m[1]), mo = num_(m[2]), d = num_(m[3]);
+  if(mo < 1 || mo > 12 || d < 1 || d > 31) return { result:'UNKNOWN', reason:'生年月日を解釈できません' };
+  // JSTの暦日で数える（UTCのまま数えると誕生日の前後で1日ずれる）
+  const jst = new Date((asOf ? new Date(asOf) : new Date()).getTime() + 9 * 3600 * 1000);
+  const ny = jst.getUTCFullYear(), nm = jst.getUTCMonth() + 1, nd = jst.getUTCDate();
+  if(y < 1900 || (y * 10000 + mo * 100 + d) > (ny * 10000 + nm * 100 + nd))
+    return { result:'UNKNOWN', reason:'生年月日を解釈できません' };
+  let age = ny - y;
+  if(nm < mo || (nm === mo && nd < d)) age--;
+  return age >= ADULT_AGE_V4
+    ? { result:'ADULT', age:age }
+    : { result:'MINOR', age:age, reason:'未成年（' + age + '歳）' };
+}
+
 /**
  * v4の自動締結経路。未成年・海外・イベント・その他・特約は個別確認（申込は受け付ける）。
  * 法人は本窓口の対象外＝個別契約ルートへ退避させるため、web_createApplicationV4 が申込作成前に拒否する。

@@ -196,8 +196,11 @@ var GUIDELINE_DOC_ID = '';   // §31で公開したGUIDELINEの文書ID（未公
 /** v4申込のFormRun受信payload（改変検知を通るhidden一式）を組み立てる */
 function v4Cols(res, over){
   const ff = Object.assign({}, res.form_fields, over || {});
+  // 生年月日はフォームの必須入力（成年確認）。既定は成年、over で差し替えられる。
   const cols = [{name:'application_ref',value:res.application_ref},{name:'license_id',value:res.license_id},
-    {name:'terms_snapshot_hash',value:res.terms_snapshot_hash},{name:'handoff_token',value:res.handoff_token}];
+    {name:'terms_snapshot_hash',value:res.terms_snapshot_hash},{name:'handoff_token',value:res.handoff_token},
+    {name:'birth_date',value:(over && over.birth_date !== undefined) ? over.birth_date : '1990-04-01'}];
+  if(over) delete ff.birth_date;
   Object.keys(ff).forEach(function(k){ cols.push({name:k,value:ff[k]}); });
   return cols;
 }
@@ -1457,6 +1460,43 @@ const whDrift=G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.strin
   columns:okCols(driftApp)})}});
 ok(String(whDrift.getContent())==='accepted-manual-review','申込時条件を再現できない受信は自動締結を止める');
 G.updateRow_(MAS,'Works_Master','work_id','WRK-BKK00019',{ work_name:'インセイン' });
+
+// 126-2. 成年確認（フォームの生年月日）。未成年との契約は取り消される可能性があるため自動締結しない
+ok(G.adultCheckFromBirthDate_('1990-04-01','2026-08-27T00:00:00.000Z').result==='ADULT','成年は自動締結の対象');
+ok(G.adultCheckFromBirthDate_('2015/03/09','2026-08-27T00:00:00.000Z').result==='MINOR','未成年を検出する');
+ok(G.adultCheckFromBirthDate_('','2026-08-27T00:00:00.000Z').result==='UNKNOWN','生年月日が無ければ成年とみなさない');
+ok(G.adultCheckFromBirthDate_('わかりません','2026-08-27T00:00:00.000Z').result==='UNKNOWN','解釈できない値も成年とみなさない');
+ok(G.adultCheckFromBirthDate_('2030-01-01','2026-08-27T00:00:00.000Z').result==='UNKNOWN','未来の日付は受け付けない');
+// 誕生日の当日／前日：JSTの暦日で数える（UTCのまま数えると1日ずれる）
+ok(G.adultCheckFromBirthDate_('2008-08-27','2026-08-26T16:00:00.000Z').result==='ADULT','JSTで誕生日当日なら成年');
+ok(G.adultCheckFromBirthDate_('2008-08-28','2026-08-26T16:00:00.000Z').result==='MINOR','JSTで誕生日前日はまだ未成年');
+
+const minorApp=mkAppV4(['WRK-BKK00019'],'書籍');
+G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({submission_id:'FR-MINOR-1',
+  columns:v4Cols(minorApp,{birth_date:'2015-03-09'})})}});
+const minorRow=rows(OPS,'Applications').find(a=>a.application_id===minorApp.application_id);
+ok(minorRow.adult_check==='MINOR','受信時に成年判定を記録する');
+ok(minorRow.manual_review_reason.indexOf('成年確認')>=0,'未成年は個別確認の理由を残す');
+ok(String(JSON.stringify(minorRow)).indexOf('2015-03-09')<0,'生年月日そのものは台帳へ残さない');
+
+const noDobApp=mkAppV4(['WRK-BKK00019'],'書籍');
+G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({submission_id:'FR-NODOB-1',
+  columns:v4Cols(noDobApp,{birth_date:''})})}});
+ok(rows(OPS,'Applications').find(a=>a.application_id===noDobApp.application_id).adult_check==='UNKNOWN',
+  '生年月日が届かなければUNKNOWNとして個別確認へ回す');
+
+const adultApp=mkAppV4(['WRK-BKK00019'],'書籍');
+G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({submission_id:'FR-ADULT-1',
+  columns:v4Cols(adultApp)})}});
+ok(rows(OPS,'Applications').find(a=>a.application_id===adultApp.application_id).adult_check==='ADULT',
+  '成年なら自動締結の経路のまま進む');
+// 締結後の条件照合でも止める（受信時の個別確認を素通りしても自動有効化させない）
+ok(/成年確認/.test(G.verifyContractTerms_('CTR-NONE',{application_id:minorApp.application_id,
+  status:'CONTRACT_PENDING',adult_check:'MINOR',usage_category:'書籍'}).detail),
+  '成年確認が取れていない契約は締結後の照合でも止める');
+ok(!/成年確認/.test(G.verifyContractTerms_('CTR-NONE',{application_id:adultApp.application_id,
+  status:'CONTRACT_PENDING',adult_check:'',usage_category:'書籍'}).detail),
+  'この検査より前に成立した申込（空欄）は対象にしない');
 
 // 127. QRは独自ドメインへ固定できる（実行基盤のURLを頒布物へ焼き込まない）
 G.setConfig_('WORKFLOW_URL','https://script.google.com/macros/s/WF/exec');

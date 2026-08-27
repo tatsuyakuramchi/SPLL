@@ -256,6 +256,18 @@ function processFormrunEvent_(body){
   // フォーム送信の記録（経理設計書 §10.4）：form submission ID・送信日時
   const submissionId = sanitizeCell_(String(body.submission_id || body.id || body.sequence_number || ''));
   const sendPatch = { form_submission_id: submissionId, form_submitted_at: new Date().toISOString() };
+  // 成年確認（フォームの生年月日）。未成年との契約は取り消される可能性があるため、
+  // 標準の自動締結から外して事務局の個別確認へ回す。生年月日は台帳へ残さず判定結果だけを持つ。
+  const adult = adultCheckFromBirthDate_(canon.birth_date);
+  sendPatch.adult_check = adult.result;
+  if(adult.result !== 'ADULT'){
+    sendPatch.manual_review_reason = sanitizeCell_(('成年確認: ' + (adult.reason || adult.result)).slice(0, 200));
+    enqueueNotification_('', 'ADULT_CHECK_REQUIRED', app.application_id,
+      { application_ref: ref, reason: adult.reason || adult.result,
+        action: '管理コンソール「契約管理」から個別確認してください（未成年は法定代理人の同意が必要です）' });
+    logEvent_('application', app.application_id, 'formrun', { adult_check: app.adult_check || '' },
+      { adult_check: adult.result, application_ref: ref });
+  }
   // formrun→CloudSign連携失敗の検知：payload内のエラー通知は自動再送せず手動キューへ
   const csError = canon.cloudsign_error || body.cloudsign_error ||
     (String(body.cloudsign_status || '').toLowerCase() === 'error' ? 'cloudsign_status=error' : '');
@@ -320,6 +332,11 @@ function verifyContractTerms_(contractId, app){
   const cws = readRows_(ssOps_(),'Contract_Works').filter(function(x){ return x.contract_id === contractId; });
   if(!cws.length) problems.push('対象原作のスナップショットがありません');
   else if(appWorks.length !== cws.length) problems.push('対象原作の件数が申込と一致しません（申込' + appWorks.length + '/契約' + cws.length + '）');
+  // 成年確認：判定できていない申込は自動で有効化しない。
+  // 空欄はこの検査より前に成立した申込（受信時に判定していない）なので対象外。
+  const adultCheck = String(app.adult_check || '');
+  if(adultCheck && adultCheck !== 'ADULT')
+    problems.push('成年確認が取れていません（' + adultCheck + '）');
   // 利用目的・料金モデル
   const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === contractId; }) || {};
   if(String(c.usage_category || '') !== String(app.usage_category || ''))
