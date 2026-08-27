@@ -31,8 +31,7 @@ const SCHEMA_MASTER = {
 const SCHEMA_OPS = {
   // 申込：複数原作は中間テーブル Application_Works で管理（B経路固定・A/B分岐なし）
   //   usage_category：利用目的（別紙2の料金計算キー）／privacy_hash・terms_hash：同意時文書ハッシュ（§7.2）
-  // adult_check: フォームの生年月日から求めた成年判定（ADULT/MINOR/UNKNOWN）。生年月日そのものは持たない。
-  Applications:         ['application_id','application_ref','usage_category','privacy_hash','terms_hash','handoff_expires_at','status','created_at','form_submission_id','form_submitted_at','cloudsign_send_status','cloudsign_send_error','manual_review_reason','template_route','adult_check','supersedes_application_id','superseded_by_application_id','license_id'],
+  Applications:         ['application_id','application_ref','usage_category','privacy_hash','terms_hash','handoff_expires_at','status','created_at','form_submission_id','form_submitted_at','cloudsign_send_status','cloudsign_send_error','manual_review_reason','template_route','supersedes_application_id','superseded_by_application_id','license_id'],
   Application_Works:    ['application_work_id','application_id','work_id'],
   // 契約：締結時に対象原作を Contract_Works へスナップショット（法務証跡）
   //   link_status: LINKED（申込突合済）/ UNLINKED（未突合＝手動紐付け待ち）
@@ -242,7 +241,7 @@ function setup_seedSamples_(){
 }
 
 // ---- スキーマ移行（修正設計書v2 V2-003）----
-const SCHEMA_VERSION = 11;  // v11: 成年確認の判定結果（adult_check）。v10: 申込の契約書経路（template_route）。v9: 案内メールの自動送信（通知の送信状態）。v8: 連絡先メール。v7: 大容量提出
+const SCHEMA_VERSION = 10;  // v10: 申込の契約書経路（template_route）。v9: 案内メールの自動送信（通知の送信状態）。v8: 連絡先メール。v7: 大容量提出
 
 /**
  * 既存スプレッドシートへ不足シート・不足列を追加する（既存列の削除・並び替えはしない）。
