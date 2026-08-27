@@ -136,7 +136,11 @@ shim側で常に「非管理者」を返して打ち切る。
 | `CACHE_TTL_SECONDS` | — | 60 | 読み取りキャッシュの保持時間 |
 | `APPLY_RATE_LIMIT` | — | 5 | 申込作成の上限（IP／時間） |
 
-`GAS_PORTAL_URL` か `PUBLIC_WEB_KEY` が未設定だと `/healthz` は 503 を返す。
+`GAS_PORTAL_URL` か `PUBLIC_WEB_KEY` が未設定だと `/_health` は 503 を返す。
+
+状態確認は **`/_health`** を使う。`/healthz` もサーバー側では受けているが、
+`run.app` では Google のフロントエンドがこのパスを横取りしてコンテナまで届かず、
+Google の 404 ページが返る（コンテナは正常に動いていても 404 に見える）。
 
 ### GAS①・GAS②（スクリプト プロパティ）
 
@@ -213,8 +217,8 @@ spll_src/upload.html
 ### 4.3 動作確認
 
 ```bash
-curl -s https://（Cloud RunのURL）/healthz
-# → {"ok":true,"service":"spll-public-web","gas":true,"key":true}
+curl -s https://（Cloud RunのURL）/_health
+# → {"ok":true,"service":"spll-public-web","portal":true,"workflow":true,"key":true}
 ```
 
 そのうえで画面を開き、**原作一覧が表示されること**（＝RPCが通っていること）を確認する。

@@ -203,6 +203,26 @@ async function rpc(payload, opts){ return server.handleRpc(payload, opts || {});
   ok(!/SHORT_SHA/.test(cb.replace(/^#.*$/gm, '')), 'タグに $SHORT_SHA を使わない（submit時に空になる）');
   ok(/\$\{_IMAGE\}:latest/.test(cb), 'デプロイが参照する latest タグを push する');
 
+  // ---- 6. 状態確認の受け口 ----
+  // run.app では Google のフロントエンドが /healthz を横取りしてコンテナまで届かないため、
+  // 横取りされない /_health でも同じ応答を返せることを確かめる。
+  const srv = server.createServer({ fetchImpl: async () => { throw new Error('GASへは出さない'); } });
+  await new Promise((r) => srv.listen(0, r));
+  const origin = 'http://127.0.0.1:' + srv.address().port;
+  const health = await fetch(origin + '/_health');
+  const healthBody = await health.json();
+  ok(health.status === 200, '/_health が 200 を返す（3点そろっている前提）');
+  ok(healthBody.ok === true && healthBody.service === 'spll-public-web', '/_health が状態を返す');
+  ok(healthBody.portal === true && healthBody.workflow === true && healthBody.key === true,
+    '/_health が転送先と鍵の有無を個別に示す');
+  const legacy = await fetch(origin + '/healthz');
+  ok(legacy.status === 200 && (await legacy.json()).service === 'spll-public-web',
+    '/healthz も従来どおり受ける（手順書の記載を壊さない）');
+  const unknown = await fetch(origin + '/nope');
+  ok(unknown.status === 200 && (await unknown.text()).indexOf('SPLL 利用申込窓口') >= 0,
+    '未知のパスは申込窓口へ戻す（導線を袋小路にしない）');
+  await new Promise((r) => srv.close(r));
+
   console.log('\nPUBLIC WEB RESULT: ' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })();

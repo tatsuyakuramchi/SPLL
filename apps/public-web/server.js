@@ -156,7 +156,9 @@ function createServer(options){
     const pathname = url.pathname;
     const q = url.searchParams;
 
-    if(pathname === '/healthz'){
+    // 状態確認。/healthz は Google のフロントエンドに横取りされてコンテナまで届かないため、
+    // 実運用では /_health を使う（両方受けるのは、手順書や既存のメモが /healthz を指しているため）。
+    if(pathname === '/_health' || pathname === '/healthz'){
       const ready = Boolean(GAS_PORTAL_URL && GAS_WORKFLOW_URL && RPC_KEY);
       return send(response, ready ? 200 : 503, 'application/json; charset=utf-8',
         JSON.stringify({ ok: ready, service: 'spll-public-web',
@@ -224,7 +226,7 @@ if(require.main === module){
   createServer().listen(PORT, () => {
     console.log('SPLL public web listening on :' + PORT);
     ['GAS_PORTAL_URL', 'GAS_WORKFLOW_URL', 'PUBLIC_WEB_KEY'].forEach((k) => {
-      if(!process.env[k]) console.warn(k + ' が未設定です（/healthz は 503 を返します）');
+      if(!process.env[k]) console.warn(k + ' が未設定です（/_health は 503 を返します）');
     });
   });
 }
