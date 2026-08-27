@@ -109,7 +109,13 @@ async function callGasOnce(url, fn, args, doFetch){
   });
   const text = await res.text();
   try{ return JSON.parse(text); }
-  catch(e){ throw new Error('GASの応答を解釈できませんでした（HTTP ' + res.status + '）'); }
+  catch(e){
+    // GASは実行時例外や認可待ちをHTMLのエラーページ（HTTP 200）で返す。
+    // 画面へはそのまま出さず（利用者に読めない上に内部が漏れる）、原因を追えるようログへ残す。
+    console.error('[rpc] ' + fn + ' がJSONでない応答を返しました（HTTP ' + res.status + '）: ' +
+      String(text).replace(/\s+/g, ' ').slice(0, 400));
+    throw new Error('GASの応答を解釈できませんでした（HTTP ' + res.status + '）');
+  }
 }
 
 /**
