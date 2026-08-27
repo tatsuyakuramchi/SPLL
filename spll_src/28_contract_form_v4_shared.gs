@@ -78,10 +78,15 @@ function contractFormTransferFieldsV4_(fields){
   return out;
 }
 
-/** 経路サフィックス。定額と売上連動でフォームが別なので、項目IDのマップも別に持てるようにする。 */
+/**
+ * 経路サフィックス。3経路それぞれformrun上で別フォームなので、項目IDのマップも別に持つ。
+ * 個別確認にも専用の枠を与える：共通マップは経路別が未設定のときのフォールバック先を兼ねるため、
+ * そこに個別確認用の番号を置くと、経路別を入れ忘れた側が黙って誤った項目IDでURLを組んでしまう。
+ */
 function formRouteSuffix_(route){
   if(route === 'STANDARD_FIXED') return '_FIXED';
   if(route === 'STANDARD_RATE')  return '_RATE';
+  if(route === 'MANUAL_REVIEW')  return '_MANUAL';
   return '';
 }
 /** 経路別の設定（FORM_HIDDEN_MAP_FIXED 等）。未設定なら共通設定へフォールバックする。 */

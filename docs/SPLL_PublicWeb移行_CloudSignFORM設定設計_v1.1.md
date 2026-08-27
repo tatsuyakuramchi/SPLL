@@ -1799,7 +1799,7 @@ Public Web（Docker）へ移す前に、いまのGASのままフォーム接続�
 | §9 | FORM転送項目と内部スナップショットの分離 | `CONTRACT_FORM_V4_TRANSFER_KEYS`（`license_id` / `application_ref` / `usage_category` / `work_names` / `licensor_name` / `fee_amount_or_rate` / `credit_text`）＋制御項目3つのみURLへ載せる。`terms_snapshot_hash` は従来どおり全条件（`CONTRACT_FORM_V4_HASH_KEYS`）から生成 |
 | §9 | URL長チェック | `FORM_URL_MAX_CHARS`（既定850）。ポータルが実際に組み立てるURLをサーバー側で見積もり、超過した申込は `MANUAL_REVIEW` へ退避し理由を申込レコードへ記録 |
 | §10 | 改変検知の修正版 | 受信時に ①`application_ref` ②`license_id` ③`terms_snapshot_hash` を照合 → ④SPLL正本を再生成して申込時ハッシュと一致するか確認 → ⑤**転送した項目だけ**を正本と突合。`handoff_token` のHMAC検証は従来どおり `processFormrunEvent_` |
-| §14 §15 | 経路別マップ | `FORM_HIDDEN_MAP_FIXED` / `_RATE`、`FORMRUN_FIELD_MAP_FIXED` / `_RATE`。未設定なら共通マップへフォールバック。受信は「共通マップで正規化 → 申込を特定 → その経路のマップで再正規化」の2段 |
+| §14 §15 | 経路別マップ | `FORM_HIDDEN_MAP_FIXED` / `_RATE` / `_MANUAL`、`FORMRUN_FIELD_MAP_FIXED` / `_RATE` / `_MANUAL`。未設定なら共通マップへフォールバック。受信は「共通マップで正規化 → 申込を特定 → その経路のマップで再正規化」の2段。個別確認にも専用枠を置くのは、共通マップがフォールバック先を兼ねるため（そこへ個別確認用の番号を置くと、経路別を入れ忘れた側が黙って誤った項目IDでURLを組む） |
 | §14 | 申込の経路記録 | `Applications.template_route`（スキーマv10）。受信時にどちらのフォームか判定するために必要 |
 | §21.5 §1.3 | QRのドメイン固定 | `PUBLIC_BASE_URL`。設定すると検証URLは `https://（ドメイン）/v/{cert_id}?c={code}`。未設定時は現行どおりGAS②のURL。**あわせて `verifyUrl_` が `ScriptApp.getService().getUrl()` を使っていた不具合を修正**（管理コンソールからコード再発行するとadminのURLがQRに焼き込まれていた） |
 | §7 | FORM入力項目 | canonical key は `party_name` / `circle_name` / `postal_code` / `party_address` / `email` / `adult_confirmed`。SPLL側が保持するのは氏名（`party_display_name`）と連絡先メールのみで、**住所・郵便番号はCloudSign側に残し台帳へ持ち込まない**（個人情報の最小化） |

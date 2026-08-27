@@ -1401,6 +1401,11 @@ scriptProps.FORM_HIDDEN_MAP=JSON.stringify({license_id:'_field_1'});
 scriptProps.FORM_HIDDEN_MAP_RATE=JSON.stringify({license_id:'_field_9'});
 ok(G.formHiddenMapV4_('STANDARD_RATE').license_id==='_field_9','売上連動フォームは専用のhidden項目IDを使う');
 ok(G.formHiddenMapV4_('STANDARD_FIXED').license_id==='_field_1','未設定の経路は共通マップへフォールバック');
+// 個別確認も専用枠。共通マップに個別確認用の番号を置くと、経路別を入れ忘れた側が黙って誤る。
+scriptProps.FORM_HIDDEN_MAP_MANUAL=JSON.stringify({license_id:'_field_8'});
+ok(G.formHiddenMapV4_('MANUAL_REVIEW').license_id==='_field_8','個別確認フォームも専用のhidden項目IDを使う');
+delete scriptProps.FORM_HIDDEN_MAP_MANUAL;
+ok(G.formHiddenMapV4_('MANUAL_REVIEW').license_id==='_field_1','個別確認も未設定なら共通マップへフォールバック');
 // 申込の応答は、その経路のマップで組んだURLを持って返る（画面で組み直させない）。
 // 画面が共通マップで組むと、定額用の項目IDのまま売上連動用フォームを開いてしまう。
 const rateApp=mkAppV4(['WRK-ARK00012'],'電子出版物');
