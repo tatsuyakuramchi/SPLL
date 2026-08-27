@@ -82,6 +82,9 @@
   termsHTML = function(){ return String(LEGAL.guideline || '<p>ガイドラインを読み込み中です。内容が表示されない場合はページを再読み込みしてください。</p>'); };
 
   buildFormUrl = function(res){
+    // 経路別のhidden項目マップは画面側に無いため、URLはサーバーが確定させたものを使う。
+    // 以下は form_url_full を返さない旧応答のための組み立て（共通マップのみ）。
+    if(res&&res.form_url_full) return res.form_url_full;
     const base=(res&&res.form_url)||APPLY.formUrl; if(!base) return '';
     const map=APPLY.hiddenMap||{}; const params=[];
     const add=(canonical,value)=>{

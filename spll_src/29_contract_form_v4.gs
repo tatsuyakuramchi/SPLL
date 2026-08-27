@@ -114,8 +114,11 @@ function web_createApplicationV4(params){
     { application_ref:ref, form_version:CONTRACT_FORM_V4_VERSION, guideline_hash:guidelineHash,
       terms_snapshot_hash:snapshotHash, route:finalRoute, reasons:reasons, form_url_length:urlLength });
 
+  // 経路が確定してから、その経路のhidden項目マップでURLを組む（画面では組み直さない）
+  const formUrl = partyFormUrlV4_(partyType, finalRoute);
   return { application_id:appId, application_ref:ref, license_id:licenseId,
     handoff_token:handoff, handoff_expires_at:handoffExpires, terms_snapshot_hash:snapshotHash,
     template_route:finalRoute, route_reasons:reasons, form_url_length:urlLength,
-    form_url:partyFormUrlV4_(partyType, finalRoute), form_fields:transfer };
+    form_url:formUrl, form_url_full:contractFormUrlV4_(formUrl, finalRoute, transfer, control),
+    form_fields:transfer };
 }

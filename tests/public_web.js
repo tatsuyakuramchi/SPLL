@@ -223,6 +223,13 @@ async function rpc(payload, opts){ return server.handleRpc(payload, opts || {});
     '内部専用の項目はURLへ載せない（formrunの1000字上限）');
   ok(formUrl.length <= 850, '組み上がったURLが上限内: ' + formUrl.length + '字');
 
+  // 経路別のhidden項目IDは画面側に無いので、サーバーが確定させたURLをそのまま開く。
+  // 共通マップで組み直すと、定額用の項目IDのまま売上連動用フォームを開いてしまう。
+  const rateUrl = 'https://form.run/@spll-rate?_r1=HMACxxx&_r7=%E4%BD%9C%E5%93%81A';
+  ok(buildFormUrl(Object.assign({}, res, { form_url_full: rateUrl })) === rateUrl,
+    'サーバーが組んだURLがあればそれを使う（経路別の項目IDを保つ）');
+  ok(buildFormUrl(res) === formUrl, 'URLを持たない旧応答は従来どおり画面で組む');
+
   // 締結の受け口はCloud Runへ移していない（Webhookは従来どおりGAS②）
   const buildJs = read('scripts/build.js');
   ok(/workflow:[\s\S]*?35_webhooks\.gs/.test(buildJs), 'formrun/CloudSignのWebhookはGAS②が受ける');

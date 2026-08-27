@@ -1401,6 +1401,22 @@ scriptProps.FORM_HIDDEN_MAP=JSON.stringify({license_id:'_field_1'});
 scriptProps.FORM_HIDDEN_MAP_RATE=JSON.stringify({license_id:'_field_9'});
 ok(G.formHiddenMapV4_('STANDARD_RATE').license_id==='_field_9','売上連動フォームは専用のhidden項目IDを使う');
 ok(G.formHiddenMapV4_('STANDARD_FIXED').license_id==='_field_1','未設定の経路は共通マップへフォールバック');
+// 申込の応答は、その経路のマップで組んだURLを持って返る（画面で組み直させない）。
+// 画面が共通マップで組むと、定額用の項目IDのまま売上連動用フォームを開いてしまう。
+const rateApp=mkAppV4(['WRK-ARK00012'],'電子出版物');
+if(rateApp.template_route==='STANDARD_RATE'){
+  ok(String(rateApp.form_url_full||'').indexOf('_field_9=')>=0,
+    '売上連動の申込URLは売上連動用のhidden項目IDで組まれる');
+  ok(String(rateApp.form_url_full||'').indexOf('_field_1=')<0,
+    '共通マップの項目IDが混ざらない');
+}
+const fixedApp=mkAppV4(['WRK-ARK00012'],'書籍');
+ok(String(fixedApp.form_url_full||'').indexOf(String(fixedApp.form_url||'x'))===0,
+  '組み上がったURLは経路別フォームURLを土台にする');
+ok(fixedApp.form_url_full.length===fixedApp.form_url_length,
+  '上限判定に使った長さと、実際に開くURLの長さが一致する');
+ok(fixedApp.form_url_full.indexOf(encodeURIComponent(fixedApp.handoff_token))>0,
+  '引継ぎトークンをURLへ載せる');
 delete scriptProps.FORM_HIDDEN_MAP_RATE; delete scriptProps.FORM_HIDDEN_MAP;
 
 // 124. 受信側の項目IDマップも経路別（申込を特定してから経路のマップで読み直す）

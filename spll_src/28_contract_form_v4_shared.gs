@@ -101,11 +101,16 @@ function formrunFieldMapV4_(route){ return formMapByRoute_('FORMRUN_FIELD_MAP', 
 /** 初期値つき公開フォームURLの上限（formrun仕様1000字に対し余裕を持たせる） */
 function formUrlMaxChars_(){ return num_(getConfig_('FORM_URL_MAX_CHARS','850')) || 850; }
 /**
- * 実際にポータルが生成する公開フォームURLの長さを見積もる。
- * 上限を超えると初期値がフォームへ届かず、条件の入っていない契約書が送られてしまうため、
- * 申込の時点で検出して個別確認（MANUAL_REVIEW）へ退避させる。
+ * 初期値つき公開フォームURLを組み立てる。
+ *
+ * 定額用と売上連動用はformrun上で別のフォームなので、hidden項目のキー（_field_xxxx）も別になる。
+ * 画面側が持っているのは共通の FORM_HIDDEN_MAP だけで経路別マップを引けないため、
+ * URLはここで確定させる。画面で組み直すと、定額用の項目IDのまま売上連動用フォームを開き、
+ * 初期値が入らないまま条件の無い契約書が送られてしまう。
  */
-function estimateFormUrlLengthV4_(baseUrl, route, transfer, control){
+function contractFormUrlV4_(baseUrl, route, transfer, control){
+  const base = String(baseUrl || '');
+  if(!base) return '';                                 // URL未設定は別途案内される
   const map = formHiddenMapV4_(route);
   const parts = [];
   const add = function(k, v){
@@ -114,9 +119,16 @@ function estimateFormUrlLengthV4_(baseUrl, route, transfer, control){
   };
   CONTRACT_FORM_V4_CONTROL_KEYS.forEach(function(k){ if(control && control[k] !== undefined) add(k, control[k]); });
   CONTRACT_FORM_V4_TRANSFER_KEYS.forEach(function(k){ if(transfer && transfer[k] !== undefined) add(k, transfer[k]); });
-  const base = String(baseUrl || '');
-  if(!base) return 0;                                  // URL未設定は長さ判定の対象外（別途案内される）
-  return base.length + 1 + parts.join('&').length;     // '?' or '&' の1文字
+  return base + (base.indexOf('?') >= 0 ? '&' : '?') + parts.join('&');
+}
+
+/**
+ * 実際にポータルが開く公開フォームURLの長さ。
+ * 上限を超えると初期値がフォームへ届かず、条件の入っていない契約書が送られてしまうため、
+ * 申込の時点で検出して個別確認（MANUAL_REVIEW）へ退避させる。
+ */
+function estimateFormUrlLengthV4_(baseUrl, route, transfer, control){
+  return contractFormUrlV4_(baseUrl, route, transfer, control).length;
 }
 
 /** ハッシュ対象を固定順に正規化。terms_snapshot_hash自身は含めない。 */
