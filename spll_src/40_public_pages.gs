@@ -38,12 +38,10 @@ function web_getSubmitContext(token){
       method:s.submission_method || 'UPLOAD' };
   });
   // バッジ取得導線（V2-014-7）：提出トークンのままバッジページを開ける（表示毎の再発行はしない）
-  let badgeUrl = '';
   const badge = readRows_(ssOps_(),'Badges').find(function(b){ return b.contract_id === contractId && String(b.status) === 'ISSUED'; });
-  if(badge){
-    let base = ''; try{ base = ScriptApp.getService().getUrl() || ''; }catch(e){}
-    badgeUrl = (base||'') + '?page=badge&token=' + encodeURIComponent(token);
-  }
+  // 配信元は WORKFLOW_URL（Cloud Run）を正とする。ScriptApp.getService().getUrl() は
+  // 実行中のGASプロジェクトのURLを返すため、画面を外へ出したあとは行き先が食い違う。
+  const badgeUrl = badge ? userPageUrl_('badge','token',token) : '';
   const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.contract_id === contractId; });
   const remaining = Math.max(0, num_(tok.max_uses) - num_(tok.used_count));
   const lim = submitFolderLimits_();

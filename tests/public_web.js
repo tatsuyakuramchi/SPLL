@@ -84,6 +84,52 @@ async function rpc(payload, opts){ return server.handleRpc(payload, opts || {});
   const err = await rpc({ fn: 'web_createApplicationV4', args: [{}] }, { fetchImpl: errFetch, ip: '3.3.3.3' });
   ok(err.body.ok === false && /CORPORATE_INQUIRY_REQUIRED/.test(err.body.error), '申込が拒否された理由は画面へ返す');
 
+  // ---- 3-2. GASの一時的な404を、読み取りに限って吸収する ----
+  // 画面はフェイルクローズなので、一度の404で「現在申込を受け付けられません」になってしまう。
+  // ただし再試行はGAS側の再実行なので、何度実行しても結果の変わらない読み取りに限る。
+  function flakyFetch(failures, payload){
+    let n = 0;
+    const f = async () => {
+      if(n++ < failures) return { status: 404, text: async () => '<html>Error 404 (Not Found)</html>' };
+      return { status: 200, text: async () => JSON.stringify({ ok: true, result: payload }) };
+    };
+    f.count = () => n;
+    return f;
+  }
+  const flaky = flakyFetch(1, [{ id: 'WRK-9' }]);
+  const recovered = await rpc({ fn: 'api_getUsageOptions', args: [] }, { fetchImpl: flaky });
+  ok(recovered.status === 200 && recovered.body.ok === true, '読み取りは一時的な404をやり直して通す');
+  ok(flaky.count() === 2, 'やり直しは1回だけ（GASを叩き続けない）');
+
+  // 引数を変えてキャッシュを避け、実際にGASまで出させる
+  const stillDown = flakyFetch(5, []);
+  const down = await rpc({ fn: 'api_previewFeeTerms', args: ['DOWN', 1] }, { fetchImpl: stillDown });
+  ok(down.body.ok === false && /404/.test(down.body.error), '続けて失敗するなら素直に失敗を返す');
+  ok(stillDown.count() === 2, '無限にやり直さない');
+
+  // 申込作成をやり直すと、GAS側で申込が二重に作られる
+  const flakyApply = flakyFetch(1, { license_id: 'SPLL-9' });
+  const applyDown = await rpc({ fn: 'web_createApplicationV4', args: [{}] }, { fetchImpl: flakyApply, ip: '4.4.4.4' });
+  ok(applyDown.body.ok === false && flakyApply.count() === 1, '申込作成はやり直さない（二重申込を作らない）');
+
+  // 認証の照会は回数制限と照会ログを消費する
+  const flakyVerify = flakyFetch(1, { state: 'ACTIVE' });
+  await rpc({ fn: 'web_verifyCertificate', args: ['X', 'Y'] }, { fetchImpl: flakyVerify });
+  ok(flakyVerify.count() === 1, '認証の照会はやり直さない（回数制限と照会ログを消費する）');
+
+  ['web_createApplicationV4', 'web_submitWork', 'web_openDriveSubmission', 'web_finalizeDriveSubmission',
+   'web_verifyCertificate', 'web_getSubmitLinkFromGuide', 'web_getBadgeImage']
+    .forEach((fn) => ok(!server.RETRYABLE.has(fn), fn + ' はやり直しの対象にしない'));
+
+  // 業務上の拒否（{ok:false}）は通信の失敗ではないので、やり直さずそのまま返す
+  let refuseCount = 0;
+  const refuseFetch = async () => {
+    refuseCount++;
+    return { status: 200, text: async () => JSON.stringify({ ok: false, error: 'VALIDATION_ERROR: 利用できない原作です' }) };
+  };
+  const refused = await rpc({ fn: 'api_previewFeeTerms', args: ['X', 1] }, { fetchImpl: refuseFetch });
+  ok(refused.body.ok === false && refuseCount === 1, '業務上の拒否はやり直さない');
+
   // ---- 4. GAS①側の受け口 ----
   const entry = read('apps/portal/entry.gs');
   ok(/function doPost\(e\)/.test(entry), 'GAS①にRPCの受け口がある');

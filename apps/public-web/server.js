@@ -37,6 +37,20 @@ const CACHEABLE = new Set([
 ]);
 const ALLOWED = new Set(RPC_FUNCTIONS);
 
+/**
+ * GASは正常に動いていても、まれにHTTP 404を返す（302の転送先が取れないことがある）。
+ * 画面はフェイルクローズなので、一度引くだけで「現在申込を受け付けられません」になってしまう。
+ * ただし再試行はGAS側の再実行を意味するため、**何度実行しても結果が変わらない読み取りに限る**。
+ * 除外するもの：申込・提出（作成する）、認証の照会（回数制限と照会ログを消費する）、バッジ画像（重い）。
+ */
+const RETRYABLE = new Set([
+  'api_listWorks', 'api_getUsageOptions', 'api_previewFeeTerms',
+  'api_getLegalTexts', 'api_getLegalTextsV4', 'api_getApplyConfig',
+  'web_getSubmitContext', 'web_getGuideContext', 'web_getBadgeContext'
+]);
+const RETRY_DELAY_MS = 250;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 const cache = new Map();      // key -> { at, value }
 const applyHits = new Map();  // ip  -> number[]（時刻）
 
@@ -85,13 +99,8 @@ function gasUrlFor(fn){
   return RPC_TARGETS[fn] === 'workflow' ? GAS_WORKFLOW_URL : GAS_PORTAL_URL;
 }
 
-/** GAS の doPost を叩く。応答は {ok, result} または {ok:false, error}。 */
-async function callGas(fn, args, fetchImpl){
-  const base = gasUrlFor(fn);
-  if(!base) throw new Error((RPC_TARGETS[fn] === 'workflow' ? 'GAS_WORKFLOW_URL' : 'GAS_PORTAL_URL') + ' が未設定です');
-  // GAS②はWebhookと同じURLなので、RPCであることをクエリで明示する
-  const url = RPC_TARGETS[fn] === 'workflow' ? (base + (base.indexOf('?') >= 0 ? '&' : '?') + 'rpc=1') : base;
-  const doFetch = fetchImpl || fetch;
+/** GASへ1往復。応答が読めた場合だけ本文を返し、通信そのものが失敗したら例外を投げる。 */
+async function callGasOnce(url, fn, args, doFetch){
   const res = await doFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -99,9 +108,30 @@ async function callGas(fn, args, fetchImpl){
     redirect: 'follow'
   });
   const text = await res.text();
-  let body;
-  try{ body = JSON.parse(text); }
+  try{ return JSON.parse(text); }
   catch(e){ throw new Error('GASの応答を解釈できませんでした（HTTP ' + res.status + '）'); }
+}
+
+/**
+ * GAS の doPost を叩く。応答は {ok, result} または {ok:false, error}。
+ * 読み取りに限り、通信が失敗したときだけ一度やり直す（RETRYABLE の註を参照）。
+ * {ok:false} は業務上の応答（申込の拒否理由など）なので、やり直さずそのまま返す。
+ */
+async function callGas(fn, args, fetchImpl){
+  const base = gasUrlFor(fn);
+  if(!base) throw new Error((RPC_TARGETS[fn] === 'workflow' ? 'GAS_WORKFLOW_URL' : 'GAS_PORTAL_URL') + ' が未設定です');
+  // GAS②はWebhookと同じURLなので、RPCであることをクエリで明示する
+  const url = RPC_TARGETS[fn] === 'workflow' ? (base + (base.indexOf('?') >= 0 ? '&' : '?') + 'rpc=1') : base;
+  const doFetch = fetchImpl || fetch;
+  const attempts = RETRYABLE.has(fn) ? 2 : 1;
+
+  let body, lastError;
+  for(let i = 0; i < attempts; i++){
+    if(i > 0) await sleep(RETRY_DELAY_MS);
+    try{ body = await callGasOnce(url, fn, args, doFetch); lastError = null; break; }
+    catch(error){ lastError = error; }
+  }
+  if(lastError) throw lastError;
   if(!body || body.ok !== true) throw new Error((body && body.error) || 'GASでエラーが発生しました');
   return body.result;
 }
@@ -231,4 +261,4 @@ if(require.main === module){
   });
 }
 
-module.exports = { createServer, handleRpc, callGas, gasUrlFor, ALLOWED, CACHEABLE };
+module.exports = { createServer, handleRpc, callGas, gasUrlFor, ALLOWED, CACHEABLE, RETRYABLE };
