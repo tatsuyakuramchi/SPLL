@@ -230,6 +230,8 @@ function processFormrunEvent_(body){
   }else{
     const map = parseJson_(prop_('FORMRUN_FIELD_MAP'), {});
     canon = {};
+    // formrunの実payloadは fields、columns は旧形式・他サービス互換
+    (body.fields || []).forEach(function(c){ const k = map[c.key] || map[c.label] || map[c.name]; if(k) canon[k] = c.value; });
     (body.columns || []).forEach(function(c){ const k = map[c.name || c.label]; if(k) canon[k] = c.value; });
   }
   const ref = canon.application_ref || refFromText_(JSON.stringify(body));

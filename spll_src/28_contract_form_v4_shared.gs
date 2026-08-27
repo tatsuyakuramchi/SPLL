@@ -161,6 +161,14 @@ function formrunCanonV4_(body, route){
     const key = map[String(rawKey)] || String(rawKey);
     canon[key] = value;
   }
+  // formrunの実payloadは fields:[{key:'_field_6', label:'handoff_token', value:'…'}] の形。
+  // columns は旧形式・他サービス互換のため残す。ラベル→キーの順に入れ、
+  // FORMRUN_FIELD_MAP でキーを明示している場合はそちらが後勝ちで優先される。
+  (body.fields || []).forEach(function(c){
+    put(c.label || c.name, c.value);
+    if(c.key) put(c.key, c.value);
+    if(c.id) put(c.id, c.value);
+  });
   (body.columns || []).forEach(function(c){
     put(c.name || c.label || c.id || c.key, c.value);
     if(c.id) put(c.id, c.value);

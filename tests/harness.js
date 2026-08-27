@@ -1433,6 +1433,55 @@ const routeWh=G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.strin
 ok(String(routeWh.getContent())==='ok','経路別マップで正規化した受信が通る');
 delete scriptProps.FORMRUN_FIELD_MAP_FIXED;
 
+// 124-2. formrunの実payload形式（fields[{key,label,value}]）を読む。
+// columns しか見ていないと「Webhookは届くのに申込に紐づかない」という壊れ方をする。
+const realApp=mkAppV4(['WRK-ARK00012'],'書籍');
+const rtf=realApp.form_fields;
+const realWh=G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({
+  team_name:'株式会社アークライト', form_name:'STANDARD_FIXED', entry_id:'136995750',
+  fields:[
+    {key:'_field_1',label:'メールアドレス',value:'creator@example.jp'},
+    {key:'_field_2_name',label:'名前',value:'倉持達也'},
+    {key:'_field_3',label:'屋号・サークル名',value:'テストサークル'},
+    {key:'_field_4_postal_code',label:'郵便番号',value:'1300021'},
+    {key:'_field_5',label:'選択',value:'私は満18歳以上です'},
+    {key:'_field_6',label:'handoff_token',value:realApp.handoff_token},
+    {key:'_field_7',label:'terms_snapshot_hash',value:realApp.terms_snapshot_hash},
+    {key:'_field_8',label:'template_route',value:realApp.template_route},
+    {key:'_field_9',label:'license_id',value:realApp.license_id},
+    {key:'_field_10',label:'application_ref',value:realApp.application_ref},
+    {key:'_field_11',label:'usage_category',value:rtf.usage_category},
+    {key:'_field_12',label:'work_names',value:rtf.work_names},
+    {key:'_field_13',label:'licensor_name',value:rtf.licensor_name},
+    {key:'_field_14',label:'fee_amount_or_rate',value:rtf.fee_amount_or_rate},
+    {key:'_field_15',label:'credit_text',value:rtf.credit_text}
+  ]})}});
+ok(String(realWh.getContent())==='ok','formrunのfields形式の受信が通る');
+const realRow=rows(OPS,'Applications').find(a=>a.application_id===realApp.application_id);
+ok(realRow.status==='CONTRACT_PENDING','fields形式でも申込がCONTRACT_PENDINGへ進む');
+// 契約者名・連絡先はマップ経由で拾う（hiddenと違いラベルが正規キーと一致しないため）
+scriptProps.FORMRUN_FIELD_MAP_FIXED=JSON.stringify({_field_1:'contact_email',_field_2_name:'party_name'});
+const partyApp=mkAppV4(['WRK-ARK00012'],'書籍');
+const ptf=partyApp.form_fields;
+G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({
+  fields:[
+    {key:'_field_1',label:'メールアドレス',value:'creator2@example.jp'},
+    {key:'_field_2_name',label:'名前',value:'山田花子'},
+    {key:'_field_6',label:'handoff_token',value:partyApp.handoff_token},
+    {key:'_field_7',label:'terms_snapshot_hash',value:partyApp.terms_snapshot_hash},
+    {key:'_field_9',label:'license_id',value:partyApp.license_id},
+    {key:'_field_10',label:'application_ref',value:partyApp.application_ref},
+    {key:'_field_11',label:'usage_category',value:ptf.usage_category},
+    {key:'_field_12',label:'work_names',value:ptf.work_names},
+    {key:'_field_13',label:'licensor_name',value:ptf.licensor_name},
+    {key:'_field_14',label:'fee_amount_or_rate',value:ptf.fee_amount_or_rate},
+    {key:'_field_15',label:'credit_text',value:ptf.credit_text}
+  ]})}});
+const partyCase=rows(OPS,'License_Cases').find(k=>k.license_id===partyApp.license_id);
+ok(partyCase.party_display_name==='山田花子','氏名を台帳の契約者名へ反映する');
+ok(partyCase.contact_email==='creator2@example.jp','メールアドレスを連絡先へ反映する');
+delete scriptProps.FORMRUN_FIELD_MAP_FIXED;
+
 // 125. 改変検知：転送項目の書換えは止める／転送していない項目は比較対象にしない
 const tamperApp=mkAppV4(['WRK-ARK00012'],'書籍');
 const okCols=function(res,over){ const t=Object.assign({},res.form_fields,over||{});
