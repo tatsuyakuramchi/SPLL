@@ -89,38 +89,54 @@ CloudSign
 
 次の情報はSPLL側で確定し、利用者に再入力させない。
 
-### 業務制御・改変検知
+> **実装との差異（2026-08-27 追記）**
+> 初版の本節は下記「参考：契約個別条件の全体」をそのまま転送する前提で書かれていたが、
+> formrunの初期値つき公開フォームURLは**1000文字まで**で、日本語はURLエンコードで3倍前後に膨らむ。
+> 全条件を載せるとクレジット表記と原作名だけで上限に届き、初期値がフォームへ届かないまま
+> 条件の無い契約書が送られる。そのため**実際に転送するのは次の10項目**とし、残りは
+> CloudSignテンプレート側の固定文言とする。SPLLは全条件を内部スナップショットとして保持し続け、
+> 締結後の照合はそちらで行う（`CONTRACT_FORM_V4_TRANSFER_KEYS` / `CONTRACT_FORM_V4_CONTROL_KEYS`）。
+
+### フォームに作るhidden項目（10項目）
+
+| # | hidden項目 | 区分 | 内容 |
+|---:|---|---|---|
+| 1 | `handoff_token` | 業務制御 | 引継ぎトークン |
+| 2 | `terms_snapshot_hash` | 改変検知 | 条件スナップショットのハッシュ |
+| 3 | `template_route` | 業務制御 | `STANDARD_FIXED` / `STANDARD_RATE` / `MANUAL_REVIEW` |
+| 4 | `license_id` | 契約個別条件 | SPLL番号 |
+| 5 | `application_ref` | 契約個別条件 | 申込参照 |
+| 6 | `usage_category` | 契約個別条件 | 利用目的 |
+| 7 | `work_names` | 契約個別条件 | 対象原作（読点で連結） |
+| 8 | `licensor_name` | 契約個別条件 | 許諾者 |
+| 9 | `fee_amount_or_rate` | 契約個別条件 | 利用許諾料 |
+| 10 | `credit_text` | 契約個別条件 | クレジット表記 |
+
+1〜3 は契約書へ差し込まない管理項目、4〜10 が契約書テンプレートの差込フィールドに対応する。
+定額用と売上連動用はformrun上で別フォームのため hidden項目のキー（`_field_xxxx`）も別になる。
+`FORM_HIDDEN_MAP_FIXED` / `FORM_HIDDEN_MAP_RATE` に経路別で登録し、URLはSPLL側
+（`contractFormUrlV4_`）が経路確定後に組み立てる。
+
+### CloudSignテンプレート側の固定文言とする条件
+
+`license_term`／`territory`／`licensed_uses`／`payment_terms`／`reporting_terms`／`special_terms`。
+経路（定額／売上連動）ごとにテンプレートが別なので、経路で決まる文言はテンプレートに埋め込める。
+
+### 参考：契約個別条件の全体（ハッシュ対象・内部スナップショット）
+
+`terms_snapshot_hash` は次の全体を固定順に正規化して算出する。転送しない項目も含む。
 
 ```text
-license_id
-application_ref
-handoff_token
-terms_snapshot_hash
 contract_template_version
+license_id / application_ref / usage_category
+work_count / work_names
+work_id_1 ～ work_id_5 / work_title_1 ～ work_title_5
+licensor_name / license_term / territory
+fee_model / fee_value / fee_amount_or_rate
+licensed_uses / payment_terms / reporting_terms / credit_text / special_terms
 ```
 
-### 契約個別条件
-
-```text
-usage_category
-work_count
-work_names
-work_id_1 ～ work_id_5
-work_title_1 ～ work_title_5
-licensor_name
-license_term
-territory
-fee_model
-fee_value
-fee_amount_or_rate
-licensed_uses
-payment_terms
-reporting_terms
-credit_text
-special_terms
-```
-
-これらはFormRunのhidden項目又は利用者が編集できない項目として保持し、CloudSign契約書テンプレートへ差し込む。
+hidden項目は利用者が編集できない項目として保持し、CloudSign契約書テンプレートへ差し込む。
 
 ---
 
