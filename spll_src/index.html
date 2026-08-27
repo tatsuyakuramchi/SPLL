@@ -333,6 +333,8 @@
       <div class="step" data-s="1"><span class="n">2</span> 個人情報の同意</div>
       <div class="step" data-s="2"><span class="n">3</span> 規約の同意</div>
       <div class="step" data-s="3"><span class="n">4</span> 申込</div>
+      <div class="step" data-s="4"><span class="n">5</span> 契約者情報の入力</div>
+      <div class="step" data-s="5"><span class="n">6</span> 契約の締結</div>
     </div>
 
     <!-- step 0: confirm selection + usage/fee -->
@@ -391,8 +393,10 @@
     <!-- done -->
     <div class="wstep" id="wsDone" style="display:none;">
       <div class="done">
-        <div class="big">お申込みを作成しました</div>
-        <p style="color:var(--soft);font-size:13px;">SPLL番号（license_id）</p>
+        <div class="big" id="doneTitle">申込を受け付けました</div>
+        <p id="doneLead" style="color:var(--warn);font-size:14px;font-weight:700;margin:6px 0 18px;">
+          契約はまだ成立していません。以下のお手続きが残っています。</p>
+        <p style="color:var(--soft);font-size:13px;">SPLL番号（受付番号・license_id）</p>
         <div class="refbox mono" id="refBox">—</div>
         <p id="doneMsg" style="color:var(--soft);font-size:13px;max-width:52ch;margin:0 auto;line-height:1.9;"></p>
         <div style="margin-top:24px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
@@ -717,8 +721,12 @@ function onCreated(res){
   const ref=(res&&res.license_id)||(res&&res.application_ref)||"—";
   document.getElementById("refBox").textContent=ref;
   document.getElementById("doneMsg").innerHTML=
-    "あなたの<b>SPLL番号</b>です。申込から契約・審査・認証まで、この番号で管理されます。控えとして保管してください。<br>"+
-    "続けてクラウドサインフォームで契約者情報を入力し、CloudSignで契約を締結してください（条件の再入力はありません）。";
+    "<ol style='text-align:left;max-width:44ch;margin:18px auto 0;padding-left:1.4em;line-height:2;'>"+
+    "<li><b>クラウドサインフォームで契約者情報をご入力ください</b>（下のボタン。利用条件の再入力はありません）</li>"+
+    "<li>入力内容をもとに、クラウドサインから契約書が届きます</li>"+
+    "<li><b>契約書にご同意いただいた時点で契約成立</b>です</li></ol>"+
+    "<div style='margin-top:10px;font-size:12px;color:var(--soft)'>SPLL番号は控えとして保管してください。"+
+    "申込から契約・審査・認証まで、この番号で管理されます。</div>";
   const toForm=document.getElementById("toForm");
   const url=buildFormUrl(res);
   if(url){

@@ -31,6 +31,15 @@ ok(page.indexOf(indexHtml.slice(indexHtml.length - 200)) >= 0 || page.indexOf('l
   'index.html を書き換えずに使っている');
 ok(patchHtml.length > 0 && page.length > indexHtml.length, 'パッチのぶんだけ増えている');
 
+// 申込完了画面は「受け付けた」だけで、契約成立ではない。完了したように読める表現を置かない。
+ok(page.indexOf('お申込みを作成しました') < 0, '申込画面の見出しで完了を示さない');
+ok(page.indexOf('申込を受け付けました') >= 0, '申込は「受け付けた」と示す');
+ok(page.indexOf('契約はまだ成立していません') >= 0, '契約が未成立であることを明示する');
+ok(page.indexOf('受付番号') >= 0, 'SPLL番号はこの時点では受付番号だと示す');
+ok(/契約者情報の入力[\s\S]{0,200}契約の締結/.test(page), '残りの手順を進捗表示に出す');
+ok(page.indexOf('この画面を閉じると、このリンクは再表示できません') >= 0,
+  'フォームのリンクが再表示できないことを伝える');
+
 // shim は本体スクリプトより前に置く（hasGas 判定に間に合わせるため）
 ok(page.indexOf('window.google.script') < page.indexOf('const hasGas'), 'RPC shim を本体スクリプトより前に読み込ませる');
 ok(page.indexOf("Object.defineProperty(window.google.script, 'run'") >= 0, 'google.script.run 互換の入口を用意する');

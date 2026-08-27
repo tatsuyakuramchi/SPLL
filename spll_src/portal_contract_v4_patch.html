@@ -101,23 +101,51 @@
     return base+(base.indexOf('?')>=0?'&':'?')+params.join('&');
   };
 
+  /**
+   * 申込完了画面。
+   * この時点では「申込を受け付けた」だけで契約は成立していない。番号を大きく出すと
+   * 手続きが終わったように読めてしまうため、残りの手順を常に併記する。
+   */
   onCreated = function(res){
     const ref=(res&&res.license_id)||(res&&res.application_ref)||'—';
     document.getElementById('refBox').textContent=ref;
     const done=document.getElementById('doneMsg'); const toForm=document.getElementById('toForm');
+    const title=document.getElementById('doneTitle'); const lead=document.getElementById('doneLead');
+    const steps=function(items){
+      return '<ol style="text-align:left;max-width:44ch;margin:18px auto 0;padding-left:1.4em;line-height:2;">'+
+        items.map(function(s){ return '<li>'+s+'</li>'; }).join('')+'</ol>';
+    };
+    if(title) title.textContent='申込を受け付けました';
+    // 進捗表示：申込までを済に、次にやること（契約者情報の入力）を現在地にする。
+    // 個別確認へ回った場合は次が事務局の連絡なので、現在地は動かさない。
+    const nextIndex = (res && res.template_route === 'MANUAL_REVIEW') ? -1 : 4;
+    document.querySelectorAll('#stepper .step').forEach(function(el, i){
+      el.classList.toggle('done', i <= 3);
+      el.classList.toggle('on', i === nextIndex);
+    });
     if(res && res.template_route === 'MANUAL_REVIEW'){
-      done.innerHTML='SPLL番号を発行しました。今回の申込は標準自動締結の対象外のため、事務局で内容を確認します。<br><span class="mono" style="font-size:11px">'+esc((res.route_reasons||[]).join('／'))+'</span>';
-      if(res.form_url){ toForm.textContent='個別確認フォームへ進む →'; toForm.onclick=()=>window.open(buildFormUrl(res),'_blank'); toForm.style.display=''; }
-      else {
-        // 個別確認フォーム未設定でも案内が途切れないよう、事務局からの連絡待ちであることを明示する
-        toForm.style.display='none';
-        done.innerHTML+='<br>このあと事務局よりご連絡します。SPLL番号を控えてお待ちください。';
-      }
+      if(lead) lead.innerHTML='契約はまだ成立していません。事務局の確認をお待ちください。';
+      done.innerHTML='今回の申込は、標準の自動締結の対象外です。事務局で内容を確認のうえ、ご連絡します。'+
+        '<br><span class="mono" style="font-size:11px">理由：'+esc((res.route_reasons||[]).join('／'))+'</span>'+
+        steps(['<b>事務局からのご連絡をお待ちください</b>（このあと当社より対応方法をご案内します）',
+               '個別に契約書をお送りします',
+               'クラウドサインで契約書にご同意いただいた時点で<b>契約成立</b>']);
+      if(res.form_url){ toForm.textContent='個別確認フォームへ進む →'; toForm.onclick=function(){ window.open(buildFormUrl(res),'_blank'); }; toForm.style.display=''; }
+      else { toForm.style.display='none'; }
+      done.innerHTML+='<div style="margin-top:14px;font-size:12px;color:var(--soft)">SPLL番号は控えとして保管してください。お問い合わせの際に使います。</div>';
     }else{
-      done.innerHTML='あなたの<b>SPLL番号</b>です。控えとして保管してください。<br>続けてCloudSign FORMで契約者情報を入力すると、個別条件が反映された契約書がCloudSignから送付されます。契約はCloudSign上で同意した時点で成立します。';
+      if(lead) lead.innerHTML='契約はまだ成立していません。あと2つのお手続きが残っています。';
+      done.innerHTML=steps(['<b>クラウドサインフォームで契約者情報をご入力ください</b>（下のボタン。利用条件の再入力はありません）',
+                            '入力内容をもとに、クラウドサインから契約書が届きます',
+                            '<b>契約書にご同意いただいた時点で契約成立</b>です']);
       const url=buildFormUrl(res);
-      if(url){ toForm.textContent='契約者情報を入力する →'; toForm.onclick=()=>window.open(url,'_blank'); toForm.style.display=''; }
-      else { toForm.style.display='none'; done.innerHTML+='<br><span class="mono" style="font-size:11px">（CloudSign FORM URLが未設定です。事務局へお問い合わせください）</span>'; }
+      if(url){
+        toForm.textContent='契約者情報の入力へ進む →'; toForm.onclick=function(){ window.open(url,'_blank'); }; toForm.style.display='';
+        done.innerHTML+='<div style="margin-top:14px;font-size:12px;color:var(--warn)">'+
+          'この画面を閉じると、このリンクは再表示できません。先にお手続きを済ませてください。</div>';
+      }
+      else { toForm.style.display='none'; done.innerHTML+='<div style="margin-top:14px;font-size:12px;color:var(--warn)">現在フォームをご案内できません。事務局へお問い合わせください。</div>'; }
+      done.innerHTML+='<div style="margin-top:10px;font-size:12px;color:var(--soft)">SPLL番号は控えとして保管してください。申込から契約・審査・認証まで、この番号で管理されます。</div>';
     }
     showWStep('Done');
   };
