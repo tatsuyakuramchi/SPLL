@@ -266,3 +266,63 @@ function certificateEventFor_(status, currentCertStatus){
   if(s === 'TERMINATED') return 'CONTRACT_TERMINATED';
   return 'CERTIFICATE_SUSPENDED';   // SUSPENDED / PAYMENT_HOLD / EXPIRED
 }
+
+/**
+ * ライセンス台帳と実体テーブルの整合監査（RP-002 §23 Step 8）。移行期間は毎日実行する。
+ * 見つけた矛盾は System_Errors（LICENSE_INCONSISTENCY）へ1件ずつ残し、要対応一覧に出す。
+ * 同じ矛盾を毎日積み上げないよう、未解決（OPEN）の同一メッセージがあればスキップする。
+ *
+ * 検査：
+ *   1. contract_status=SIGNED なのに SIGNED の契約行が無い
+ *   2. case_status=CERTIFIED なのに ACTIVE の認証が無い（逆に ACTIVE の認証があるのに CERTIFIED でない）
+ *   3. 認証が ACTIVE なのに審査が CLEARED でない（審査前の発行＝旧フローの残り）
+ *   4. Badge ISSUED なのに認証が失効・終了している（表示物だけ残っている。一時停止中は QR 検証側が「無効」を返すので対象外）
+ *   5. Submissions / Access_Tokens / Certificates / Badges に license_id が無い（移行漏れ）
+ *   6. case_status が遷移表に無い値
+ */
+function auditLicenseConsistency_(){
+  const ops = ssOps_();
+  const cases = readRows_(ops,'License_Cases');
+  const contracts = readRows_(ops,'Contracts'), certs = readRows_(ops,'Certificates'), badges = readRows_(ops,'Badges');
+  const findings = [];
+  const add = function(code, licenseId, msg){ findings.push({ code:code, license_id:licenseId, message:msg }); };
+
+  cases.forEach(function(k){
+    const lid = k.license_id;
+    const st = String(k.case_status || '');
+    if(LICENSE_CASE_STATUSES.indexOf(st) < 0) add('CASE_STATUS_UNKNOWN', lid, 'case_status が遷移表に無い値です: ' + st);
+    const signed = contracts.some(function(c){ return String(c.license_id) === lid && String(c.status) === 'SIGNED'; });
+    if(String(k.contract_status) === 'SIGNED' && !signed) add('SIGNED_WITHOUT_CONTRACT', lid, 'contract_status=SIGNED ですが SIGNED の契約行がありません');
+    const cert = certs.find(function(c){ return String(c.license_id || licenseIdOfContract_(c.contract_id)) === lid; });
+    const certActive = !!cert && String(cert.status) === 'ACTIVE';
+    if(st === 'CERTIFIED' && !certActive) add('CERTIFIED_WITHOUT_ACTIVE_CERT', lid, 'case_status=CERTIFIED ですが ACTIVE の認証がありません');
+    if(certActive && st !== 'CERTIFIED' && ['REVIEWING','CORRECTION_REQUIRED','MANUAL_REVIEW'].indexOf(st) < 0)
+      add('ACTIVE_CERT_NOT_CERTIFIED', lid, 'ACTIVE の認証がありますが case_status=' + st + ' です');
+    if(certActive && String(k.review_status) !== 'CLEARED' && ['REVIEWING','CORRECTION_REQUIRED','MANUAL_REVIEW'].indexOf(st) < 0)
+      add('CERT_BEFORE_REVIEW', lid, '認証が ACTIVE ですが審査が CLEARED ではありません（review_status=' + k.review_status + '）');
+    if(String(k.certification_status) !== String(cert ? cert.status : 'NOT_ISSUED'))
+      add('CERT_STATUS_MISMATCH', lid, '台帳の certification_status=' + k.certification_status + ' と認証の status=' + (cert ? cert.status : '（無し）') + ' が食い違います');
+    const badge = badges.find(function(b){ return String(b.license_id || licenseIdOfContract_(b.contract_id)) === lid && String(b.status) === 'ISSUED'; });
+    const certDead = !cert || ['REVOKED','TERMINATED'].indexOf(String(cert.status)) >= 0;
+    if(badge && certDead) add('BADGE_WITHOUT_ACTIVE_CERT', lid, 'ISSUED のバッジがありますが認証が' + (cert ? cert.status : '未発行') + 'です（バッジを SUPERSEDED にしてください）');
+  });
+  [['Submissions','submission_id'],['Access_Tokens','token_id'],['Certificates','cert_id'],['Badges','badge_id']].forEach(function(t){
+    readRows_(ops, t[0]).forEach(function(r){
+      if(!r.license_id && r.contract_id && licenseIdOfContract_(r.contract_id))
+        add('MISSING_LICENSE_ID', '', t[0] + ':' + r[t[1]] + ' に license_id がありません（契約からは解決できます。setup_migrateLicenseForeignKeysV2 を実行）');
+    });
+  });
+
+  // 未解決の同一メッセージは積み上げない
+  const open = {};
+  readRows_(ops,'System_Errors').forEach(function(e){ if(e.error_code === 'LICENSE_INCONSISTENCY' && e.status === 'OPEN') open[String(e.message)] = true; });
+  let recorded = 0;
+  findings.forEach(function(f){
+    const msg = (f.license_id ? f.license_id + ': ' : '') + f.message;
+    if(open[msg]) return;
+    logError_('LICENSE_INCONSISTENCY', 'auditLicenseConsistency:' + f.code, msg, { license_id: f.license_id, code: f.code });
+    open[msg] = true; recorded++;
+  });
+  return { processed: cases.length, findings: findings.length, recorded: recorded, errors: 0,
+    codes: findings.reduce(function(m, f){ m[f.code] = (m[f.code] || 0) + 1; return m; }, {}) };
+}

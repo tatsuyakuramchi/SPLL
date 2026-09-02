@@ -32,6 +32,7 @@ function trigger_daily(){                         // 期限処理・SLA・デー
   batchRun_('notifyReviewSla', notifyReviewSla_);
   batchRun_('closeStaleSubmissionFolders', closeStaleSubmissionFolders_);   // 未確定の投入フォルダを共有解除
   batchRun_('notifyCloudSignSendStale', notifyCloudSignSendStale_);   // 送信停滞の検知（§10.4）
+  batchRun_('auditLicenseConsistency', auditLicenseConsistency_);     // 台帳と実体の整合監査（RP-002 §23 Step8）
   batchRun_('purgeExpiredData', purgeExpiredData_);
 }
 

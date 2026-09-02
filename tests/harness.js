@@ -1864,5 +1864,33 @@ ok(rows(OPS,'License_Cases').find(k=>k.license_id===c3App.license_id).case_statu
    rows(OPS,'License_Cases').find(k=>k.license_id===c3App.license_id).finance_handoff_status==='READY',
   '経理が未受領（READY）でも certification_status / case_status は CERTIFIED のまま');
 
+// ============ RP-002 §23 Step 8：整合性監査 ============
+// 250. 整合が取れている台帳では矛盾が出ない（旧データの補完漏れは指摘する）
+const audit0=G.auditLicenseConsistency_();
+ok(audit0.processed===rows(OPS,'License_Cases').length,'全案件を監査する');
+// ここまでのテストは状態機械の検査で契約の無い案件を人為的に締結扱いにしている（205）ので、
+// 業務フローで作った案件に出てはいけない矛盾（認証の食い違い・審査前の認証）が無いことだけを見る
+ok(!audit0.codes.CERTIFIED_WITHOUT_ACTIVE_CERT&&!audit0.codes.CERT_BEFORE_REVIEW&&!audit0.codes.CERT_STATUS_MISMATCH,
+  '業務フローで作った案件に認証の矛盾は無い: '+JSON.stringify(audit0.codes));
+ok((audit0.codes.SIGNED_WITHOUT_CONTRACT||0)===1,'人為的に作った「契約の無い締結」（状態機械テスト）は検出する');
+// 251. 矛盾を人為的に作ると検出し、System_Errors に1件ずつ残る（同じ矛盾は積み上げない）
+G.updateLicenseCaseRaw_(c3App.license_id,{ case_status:'CERTIFIED', certification_status:'ACTIVE', review_status:'AWAITING_SUBMISSION' });
+G.updateRow_(OPS,'Certificates','cert_id',rows(OPS,'Certificates').find(c=>c.license_id===c3App.license_id).cert_id,{ status:'SUSPENDED' });
+const audit1=G.auditLicenseConsistency_();
+ok(audit1.codes.CERTIFIED_WITHOUT_ACTIVE_CERT>=1&&audit1.codes.CERT_STATUS_MISMATCH>=1,
+  'CERTIFIED なのに認証が ACTIVE でない／台帳と認証の食い違い、を検出: '+JSON.stringify(audit1.codes));
+// 失効した認証のバッジが ISSUED のまま残っていると指摘する（一時停止は対象外）
+G.updateRow_(OPS,'Certificates','cert_id',rows(OPS,'Certificates').find(c=>c.license_id===c3App.license_id).cert_id,{ status:'REVOKED' });
+ok((G.auditLicenseConsistency_().codes.BADGE_WITHOUT_ACTIVE_CERT||0)>=1,'失効後にバッジだけ残っている案件を検出');
+ok(rows(OPS,'System_Errors').some(e=>e.error_code==='LICENSE_INCONSISTENCY'&&String(e.message).indexOf(c3App.license_id)===0),'矛盾は System_Errors に SPLL番号つきで残る');
+const auditBefore=rows(OPS,'System_Errors').filter(e=>e.error_code==='LICENSE_INCONSISTENCY').length;
+const audit2=G.auditLicenseConsistency_();
+ok(audit2.recorded===0&&rows(OPS,'System_Errors').filter(e=>e.error_code==='LICENSE_INCONSISTENCY').length===auditBefore,'未解決の同じ矛盾は毎日積み上げない');
+ok(G.admin_dashboard().actions.some(a=>a.kind==='エラー'&&a.status==='LICENSE_INCONSISTENCY'),'矛盾はダッシュボードの要対応に出る');
+// 復元
+G.updateRow_(OPS,'Certificates','cert_id',rows(OPS,'Certificates').find(c=>c.license_id===c3App.license_id).cert_id,{ status:'ACTIVE' });
+G.updateLicenseCaseRaw_(c3App.license_id,{ review_status:'CLEARED' });
+ok(G.admin_auditLicenseConsistency().processed>0,'管理者は監査を手動で起動できる');
+
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

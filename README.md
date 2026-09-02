@@ -42,18 +42,25 @@ SPLL/
 
 ## アーキテクチャ概要
 
-作品マスタ(Sheets) → GAS① 作品公開API → 公開入口(index.html)
+作品マスタ(Sheets) → GAS① 作品公開API → 申込窓口（Cloud Run が配信、GAS①へRPC）
 
-- **A経路（契約前審査）**：申込＋作品提出 → Gemini審査 → PASS/REVIEW なら契約リンク送付、
-  FAIL は送らず終了（1年後に自動削除）。
-- **B経路（契約後審査）**：FormRun申込 → CloudSign API送信 → 締結 → Webhook(doPost) で
-  Contracts 書戻し → 作品提出案内 → Gemini審査 → 是正。
+**1案件＝1つのSPLL番号（`License_Cases`）が唯一の業務上の主台帳・主キー**です（RP-002）。
+案件の現在地 `case_status` は状態遷移表（`12_license_state.gs`）を通してだけ変わります。
 
-締結 → 作品提出(Drive) → Gemini審査 → 利用報告(report.html) → 管理コンソール(admin.html) →
-半期バッチで計算書（仕入明細書・みなし合意）を生成・送信。
+```
+申込（SPLL番号発行）→ CloudSign FORM → 締結（Webhook）→ 作品提出待ち
+  → 作品提出 → AI一次審査 → 人手審査 CLEARED → 認証（Certificate）発行 → バッジ発行
+```
+
+- 認証は**作品の審査が完了してから**発行します（締結だけでは発行しない）。Certificate が正本、
+  Badge はその表示物です。
+- `Applications` / `Contracts` は移行期間の技術・証跡テーブル。提出・認証・バッジ・トークン・通知は
+  `license_id` を正本に持ち、`contract_id` は互換列です。
+- 請求・入金・清算は本システムの対象外。締結内容は `Finance_Handoffs`（外部連携のキュー）へ置くだけで、
+  経理側の受領状況は案件の現在地に影響しません。
 
 スプレッドシート（業務台帳）が業務の**単一の正本**。状態変更は `Events` へ追記し、
-提出原本・AI結果・発行済計算書は上書きしません。
+提出原本・AI結果は上書きしません。
 
 ## セットアップ・デプロイ（clasp）
 
@@ -131,10 +138,13 @@ GAS②契約・審査=限定＋Webhook、GAS③管理コンソール=社内GWS�
 
 | タブ | 取得 | 操作 |
 |---|---|---|
-| ダッシュボード | `admin_dashboard`（6KPI＋直近の要対応） | — |
-| 作品審査管理 | `admin_reviewQueue`（ジョブ単位に総合結果・経路A/B・主指摘を結合） | `admin_setHumanReview`（CLEARED／CORRECTION_REQUIRED／ESCALATED） |
-| 契約管理 | `admin_listContracts`（締結済＋締結待ちを結合・契約者名はマスク） | `admin_sendUploadLink`（B経路の提出案内送付） |
-| 入金・清算 | `admin_listPayments` / `admin_listSettlements` | `admin_recordPayment` / `admin_voidPayment` / `admin_approveStatement` |
+| ダッシュボード | `admin_dashboard`（`case_status` の集計＋要対応の統合一覧。SPLL番号で詳細へ） | — |
+| ライセンス | `admin_listLicenseCases(filters)`（検索・絞り込み）／`admin_getLicenseCase`（契約・原作・提出・審査・認証・履歴を1案件で） | `admin_issueGuideLink` / `admin_sendUploadLink`（SPLL番号で発行）／契約の例外対応（未紐付け・条件不一致・送信失敗・不達） |
+| 作品審査 | `admin_reviewQueue` | `admin_setHumanReview`（CLEARED で認証を発行／CORRECTION_REQUIRED／ESCALATED） |
+| 認証管理 | `admin_listCertifications`（Certificate が正本・Badge は表示物） | `admin_setCertEnabled`（未入金の停止／復帰）／`admin_requestCertChange` → `admin_approveCertChange`（失効・再有効化は別担当者の承認） |
+
+`admin_listContracts` は @deprecated（移行期間の参照用）。通常画面に契約ID・申込IDは出しません。
+ロールは SYSTEM_ADMIN / LEGAL_ADMIN / OPERATIONS / REVIEWER / AUDITOR（ACCOUNTING は廃止、旧行は `setup_migrateAdminRolesV2` で AUDITOR へ）。
 
 集計・結合（作品名・パートナー名・契約↔請求）はサーバー側で行い、UIは整形済みデータを描画します。
 シートが空でもエラーにならないよう防御的に実装しています（`readRows_` は未作成シートで空配列）。
@@ -193,8 +203,9 @@ GAS 上では `google.script.run` 経由で実データに切り替わるよう�
 ## セキュリティ・個人情報
 
 - 秘密情報は ScriptProperties。公開APIは返却列をホワイトリスト化（内部メモ・配分は返さない）。
-- 提出物は Drive の契約別フォルダに保存。契約者へ内部フォルダ閲覧権限は付与せず、
+- 提出物は Drive の案件フォルダ（`DRIVE_ROOT/SPLL-番号/`。旧案件は契約ID名のまま）に保存。契約者へ内部フォルダ閲覧権限は付与せず、
   トークン付きアップロード画面のみ提供。
+- 台帳と実体の整合は `auditLicenseConsistency_`（日次）で監査し、矛盾は `System_Errors`（LICENSE_INCONSISTENCY）へ残す。
 - A経路の落選データは `retention_until`（取得+1年）で自動削除（`batch_purgeRejected`）。
 - **個人情報（住所・口座・電話）は Gemini に送らない**（契約条件と作品データのみ）。
 - AI結果やパトロール未実施を理由に、既発生のパートナー配分を当然に消滅させない。

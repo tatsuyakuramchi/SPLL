@@ -313,6 +313,9 @@ function admin_linkContract(contractId, applicationId){ requireRole_(['OPERATION
 }
 
 // ---- バッチ手動起動（管理コンソールから・時間主導トリガーと共用） ----
+/** 台帳整合監査の手動起動（RP-002 §23 Step 8。日次トリガーでも実行） */
+function admin_auditLicenseConsistency(){ requireRole_(['SYSTEM_ADMIN','LEGAL_ADMIN']);
+  const r = auditLicenseConsistency_(); logEvent_('batch','auditLicenseConsistency',actor_(),null,r); return r; }
 /** QUEUEDのAI審査ジョブを実行 */
 function admin_runAiReviews(){ requireRole_(['OPERATIONS']); const r = batch_runAiReviews_(); logEvent_('batch','ai_reviews',actor_(),null,r); return r; }
 
