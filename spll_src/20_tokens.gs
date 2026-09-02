@@ -3,9 +3,11 @@
 // ---- 用途別アクセストークン（修正設計書 SEC-06/§9.1）----
 //   purpose: SUBMISSION（提出）/ GUIDE（締結後の手続き案内）/ BADGE_DOWNLOAD（バッジ取得）
 //   平文は発行時のみ返し、台帳にはハッシュのみ保存。期限・回数をサーバー側で検証。
-function issueToken_(contractId, purpose, days, maxUses){
+function issueToken_(contractId, purpose, days, maxUses, referenceId){
   const token = Utilities.getUuid() + randCode_(8);
+  // license_id を正本として併記する（contract_id は移行期間の互換列・RP-002 §7）
   appendRow_(ssOps_(),'Access_Tokens',{ token_id:Utilities.getUuid(), contract_id:contractId,
+    license_id: licenseIdOfContract_(contractId), reference_id: referenceId || '',
     purpose:purpose, token_hash:hash_(token), status:'OPEN', expires_at:addDaysIso_(days||30),
     // maxUses=0 は「回数無制限」（案内ページのように何度でも開くもの）。未指定は10回。
     max_uses:(maxUses === 0 ? 0 : (maxUses || 10)),

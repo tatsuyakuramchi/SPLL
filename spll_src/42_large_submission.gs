@@ -42,6 +42,7 @@ function web_openDriveSubmission(token, data){
     if(!String(data.title || '').trim()) throw new Error('VALIDATION_ERROR: 二次創作作品名は必須です。');
     submissionId = newId_('SUB');
     appendRow_(ssOps_(),'Submissions',{ submission_id:submissionId, contract_id:contractId,
+      license_id: licenseIdOfContract_(contractId),
       title:sanitizeCell_(String(data.title).slice(0,200)), status:'FOLDER_OPEN', submitted_at:now,
       submission_method:'DRIVE_FOLDER' });
   }else{

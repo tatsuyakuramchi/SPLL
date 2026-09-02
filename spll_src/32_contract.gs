@@ -257,7 +257,9 @@ function issueBadge_(contractId, verifyUrl){
   });
   try{ DriveApp.getFileById(presId).setTrashed(true); }catch(e){}   // 一時Slidesは破棄
 
+  const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.contract_id === contractId; }) || {};
   appendRow_(ssOps_(),'Badges', { badge_id:badgeId, contract_id:contractId,
+    license_id: licenseIdOfContract_(contractId), cert_id: cert.cert_id || '',   // バッジは認証の表示物（RP-002 §16）
     issued_at:issuedAt, png_l:files[0].file_id, png_m:files[1].file_id, png_s:files[2].file_id,
     token_hash:'', status:'ISSUED' });
   distributeBadge_(c, badgeId);
@@ -312,7 +314,7 @@ function fetchQrPng_(url){
 // ---- バッジ発行ジョブ（V2-014-8）：失敗時に再実行可能 ----
 function enqueueBadgeJob_(contractId, verifyUrl){
   const jobId = Utilities.getUuid();
-  appendRow_(ssOps_(),'Badge_Jobs',{ badge_job_id:jobId, contract_id:contractId, status:'QUEUED',
+  appendRow_(ssOps_(),'Badge_Jobs',{ badge_job_id:jobId, contract_id:contractId, license_id: licenseIdOfContract_(contractId), status:'QUEUED',
     retry_count:0, last_error:'', created_at:new Date().toISOString(), finished_at:'' });
   try{ runBadgeJob_(jobId, verifyUrl); }catch(e){ /* バッチ再試行に委ねる */ }
   return jobId;
@@ -376,7 +378,7 @@ function issueCert_(contractId){
   const certId = newId_('CERT');
   const code = randCode_(12);
   const now = new Date().toISOString();
-  appendRow_(ssOps_(),'Certificates',{ cert_id:certId, contract_id:contractId, status:'ACTIVE',
+  appendRow_(ssOps_(),'Certificates',{ cert_id:certId, contract_id:contractId, license_id: licenseIdOfContract_(contractId), status:'ACTIVE',
     reason_code:'ISSUED', reason_text:'締結により発行', requested_by:'system', approved_by:'system',
     legal_case_id:'', effective_at:now, check_code_hash:hash_(code), issued_at:now.slice(0,10) });
   logEvent_('certificate', certId, 'system', null, { contract_id:contractId, status:'ACTIVE' });

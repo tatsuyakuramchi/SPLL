@@ -1634,5 +1634,42 @@ ok(rows(OPS,'License_Cases').find(k=>k.license_id===cancelApp.license_id).case_s
 let cancelSigned=false; try{ G.transitionLicenseCase_(smApp.license_id,'APPLICATION_CANCELLED',{actor:'test'}); }catch(e){ cancelSigned=/STATE_ERROR/.test(String(e.message)); }
 ok(cancelSigned,'締結後の案件は取消できない（契約終了は別イベント）');
 
+// ============ RP-002 §5-§6：業務テーブルの license_id（dual-write と移行） ============
+// 210. 新規に書かれる行は license_id を持つ（contract_id は互換列）
+const fkLid=appP4.license_id, fkCid=cP4.contract_id;
+ok(rows(OPS,'Access_Tokens').some(t=>t.contract_id===fkCid&&t.license_id===fkLid),'Access_Tokens に license_id が入る');
+ok(rows(OPS,'Certificates').some(c=>c.contract_id===fkCid&&c.license_id===fkLid),'Certificates に license_id が入る');
+ok(rows(OPS,'Badges').some(b=>b.contract_id===fkCid&&b.license_id===fkLid&&b.cert_id),'Badges に license_id と cert_id が入る（認証の表示物）');
+ok(rows(OPS,'Badge_Jobs').some(j=>j.contract_id===fkCid&&j.license_id===fkLid),'Badge_Jobs に license_id が入る');
+ok(rows(OPS,'Notification_Queue').some(n=>n.contract_id===fkCid&&n.license_id===fkLid),'Notification_Queue に license_id が入る');
+const fkSub=rows(OPS,'Submissions').find(s=>s.contract_id===contract.contract_id);
+ok(fkSub&&fkSub.license_id===contract.license_id,'Submissions に license_id が入る');
+ok(rows(OPS,'Compliance_Alerts').every(a=>!a.contract_id||a.license_id||!rows(OPS,'Contracts').find(c=>c.contract_id===a.contract_id&&c.license_id)),
+  'Compliance_Alerts に license_id が入る（契約に番号があるもの）');
+ok(rows(OPS,'Certificate_Change_Requests').some(r=>r.contract_id===contract.contract_id&&r.license_id===contract.license_id),
+  'Certificate_Change_Requests に license_id が入る');
+
+// 211. 旧データの補完：contract_id → Contracts.license_id、無ければ Applications.license_id、それも無ければ未解決として記録
+G.appendRow_(OPS,'Access_Tokens',{token_id:'TK-LEGACY-1',contract_id:'CTR-LEGACY-1',purpose:'SUBMISSION',token_hash:'x',status:'OPEN',expires_at:'2099-01-01',max_uses:10,used_count:0});
+G.appendRow_(OPS,'Submissions',{submission_id:'SUB-LEGACY-1',contract_id:'CTR-LEGACY-1',title:'旧',status:'CLEARED',submitted_at:'2026-01-05'});
+G.appendRow_(OPS,'Compliance_Alerts',{alert_id:'ALR-LEGACY-1',contract_id:'',submission_id:'SUB-LEGACY-1',severity:'HIGH',status:'OPEN'});
+G.appendRow_(OPS,'Contracts',{contract_id:'CTR-LEGACY-2',cloudsign_document_id:'DOC-LEGACY-2',application_id:'APP-LEGACY-1',status:'SIGNED',link_status:'LINKED',signed_at:'2026-01-03'});  // license_id 無し・申込経由で解決
+G.appendRow_(OPS,'Badges',{badge_id:'BDG-LEGACY-2',contract_id:'CTR-LEGACY-2',issued_at:'2026-01-03',status:'ISSUED'});
+G.appendRow_(OPS,'Notification_Queue',{notification_id:'NQ-ORPHAN',contract_id:'CTR-NONE',type:'X',reference_id:'r',payload_json:'{}',status:'SENT',created_at:'2026-01-01'});
+G.updateLicenseCaseRaw_(legacyApp.license_id,{ case_status:'SIGNED' });   // 旧値のまま残っている行
+const fk1=G.setup_migrateLicenseForeignKeysV2();
+ok(fk1.status==='PARTIAL','解決できない行があれば PARTIAL');
+ok(fk1.unresolved.length===1&&fk1.unresolved[0]==='Notification_Queue:NQ-ORPHAN','未解決の行をIDで記録（勝手に補完しない）');
+ok(rows(OPS,'Access_Tokens').find(t=>t.token_id==='TK-LEGACY-1').license_id===legacyApp.license_id,'旧トークンに contract_id 経由で license_id を補完');
+ok(rows(OPS,'Submissions').find(s=>s.submission_id==='SUB-LEGACY-1').license_id===legacyApp.license_id,'旧提出に license_id を補完');
+ok(rows(OPS,'Compliance_Alerts').find(a=>a.alert_id==='ALR-LEGACY-1').license_id===legacyApp.license_id,'contract_id の無いアラートは submission_id 経由で補完');
+ok(rows(OPS,'Badges').find(b=>b.badge_id==='BDG-LEGACY-2').license_id===legacyApp.license_id,'契約に license_id が無くても申込経由で補完');
+ok(!rows(OPS,'Notification_Queue').find(n=>n.notification_id==='NQ-ORPHAN').license_id,'解決できない行は空のまま');
+ok(rows(OPS,'System_Errors').some(e=>e.error_code==='MIGRATION_UNRESOLVED_LICENSE'&&/NQ-ORPHAN/.test(String(e.detail))),'未解決は System_Errors に対象IDつきで残る');
+ok(rows(OPS,'Migration_Runs').some(r=>r.migration_name==='migrateLicenseForeignKeysV2'&&r.status==='PARTIAL'),'Migration_Runs に PARTIAL 記録');
+ok(rows(OPS,'License_Cases').find(k=>k.license_id===legacyApp.license_id).case_status==='AWAITING_SUBMISSION','旧 case_status（SIGNED）を現行値へ正規化');
+const fk2=G.setup_migrateLicenseForeignKeysV2();
+ok(fk2.updated===0&&fk2.normalized===0&&fk2.unresolved.length===1,'再実行は補完0件（冪等）。未解決だけが残り続ける');
+
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

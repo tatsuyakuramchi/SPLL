@@ -41,22 +41,24 @@ const SCHEMA_OPS = {
   // 清算は契約時スナップショットを正本とする（V2-011）：権利者・登録番号・料率・配分方式まで固定
   Contract_Works:       ['contract_work_id','contract_id','work_id','work_name_snapshot','publisher_snapshot','credit_snapshot','partner_id_snapshot','partner_name_snapshot','invoice_reg_number_snapshot','allocation_scheme_snapshot','royalty_rate_snapshot','handling_fee_rate_snapshot'],
   // 用途別アクセストークン（SEC-06/§9.1）：SUBMISSION / BADGE_DOWNLOAD
-  Access_Tokens:        ['token_id','contract_id','purpose','token_hash','status','expires_at','max_uses','used_count','last_used_at','issued_at','revoked_at'],
+  // license_id が正本。contract_id は移行期間の互換列。reference_id は用途に応じた参照（提出ID等・任意）
+  Access_Tokens:        ['token_id','contract_id','purpose','token_hash','status','expires_at','max_uses','used_count','last_used_at','issued_at','revoked_at','license_id','reference_id'],
   // submission_method: UPLOAD（20MBまでの直接アップロード）/ DRIVE_FOLDER（大容量・専用Driveフォルダ受渡）
-  Submissions:          ['submission_id','contract_id','title','status','submitted_at','submission_method'],
+  Submissions:          ['submission_id','contract_id','title','status','submitted_at','submission_method','license_id'],
   // DRIVE_FOLDER の版は、フォルダ払出し（OPEN）→クリエーターが投入→提出完了（確定）で成立する
   Submission_Versions:  ['version_id','submission_id','version_no','status','submitted_at','submission_method','drive_folder_id','folder_status','folder_opened_at','folder_closed_at','file_count','total_bytes'],
   Submission_Files:     ['submission_file_id','version_id','drive_file_id','mime_type','size','sha256','original_filename','magic_valid'],
   AI_Review_Jobs:       ['ai_review_id','submission_id','version_id','model','prompt_version','status','retry_count','overall_result','risk_score','human_review_required','response_file_id','started_at','completed_at','last_error'],
   AI_Findings:          ['finding_id','ai_review_id','work_id','rule_id','severity','result','page','evidence','recommended_action','confidence'],
   Human_Reviews:        ['human_review_id','submission_id','version_id','reviewer','result','comments','reviewed_at'],
-  Compliance_Alerts:    ['alert_id','contract_id','submission_id','severity','status','settlement_block'],
+  Compliance_Alerts:    ['alert_id','contract_id','submission_id','severity','status','settlement_block','license_id'],
   // ※利用報告・請求・入金・清算（Usage_Reports/Invoices/Payments/Settlements系）は
   //   本システムの管理対象外（経理は独自運用）。既存シートがあっても触らない。
   Partners:             ['partner_id','name','invoice_reg_number','is_qualified_issuer','bank','contact'],
-  Badges:               ['badge_id','contract_id','issued_at','png_l','png_m','png_s','token_hash','status'],
+  // Badge は Certificate の表示物。認証の有効性は Certificates で判断する（RP-002 §16）
+  Badges:               ['badge_id','contract_id','issued_at','png_l','png_m','png_s','token_hash','status','license_id','cert_id'],
   // 認証：状態＋変更理由・承認記録
-  Certificates:         ['cert_id','contract_id','status','reason_code','reason_text','requested_by','approved_by','legal_case_id','effective_at','check_code_hash','issued_at'],
+  Certificates:         ['cert_id','contract_id','status','reason_code','reason_text','requested_by','approved_by','legal_case_id','effective_at','check_code_hash','issued_at','license_id'],
   Events:               ['event_id','entity_type','entity_id','actor','before','after','occurred_at'],
   Config:               ['config_key','value','environment','updated_at'],
   // ---- 修正設計書 §15.1 追加テーブル ----
@@ -80,12 +82,12 @@ const SCHEMA_OPS = {
   Application_Consents: ['consent_id','application_id','document_type','legal_document_id','legal_document_version','content_hash','display_hash','consent_session_id','accepted','accepted_at','consented_at','consent_method','evidence_version'],
   // 通知キュー（§10）：メール非保持方針下の「誰に何を通知すべきか」の記録
   // 自動送信（GUIDE_READY等）：MANUAL_REQUIRED→SENT／SEND_FAILED。attempts で再試行を制御
-  Notification_Queue:   ['notification_id','contract_id','type','reference_id','payload_json','status','created_at','sent_at','handled_by','attempts','last_error','sent_to_domain'],
+  Notification_Queue:   ['notification_id','contract_id','type','reference_id','payload_json','status','created_at','sent_at','handled_by','attempts','last_error','sent_to_domain','license_id'],
   // スキーマ移行（V2-003）
   // バッジ発行ジョブ（V2-014）：QUEUED→GENERATING→ISSUED／ERROR→RETRY_WAIT
-  Badge_Jobs:           ['badge_job_id','contract_id','status','retry_count','last_error','created_at','finished_at'],
+  Badge_Jobs:           ['badge_job_id','contract_id','status','retry_count','last_error','created_at','finished_at','license_id'],
   // 認証状態変更の職務分離（V2-018）：申請→承認→適用
-  Certificate_Change_Requests: ['request_id','cert_id','contract_id','requested_status','reason_code','reason_text','legal_case_id','requested_by','requested_at','approved_by','approved_at','status','emergency_override'],
+  Certificate_Change_Requests: ['request_id','cert_id','contract_id','requested_status','reason_code','reason_text','legal_case_id','requested_by','requested_at','approved_by','approved_at','status','emergency_override','license_id'],
   Schema_Versions:      ['schema_name','version','applied_at','applied_by','checksum'],
   Migration_Runs:       ['migration_run_id','migration_name','started_at','finished_at','status','before_snapshot','after_snapshot','error_detail']
 };
@@ -241,7 +243,7 @@ function setup_seedSamples_(){
 }
 
 // ---- スキーマ移行（修正設計書v2 V2-003）----
-const SCHEMA_VERSION = 10;  // v10: 申込の契約書経路（template_route）。v9: 案内メールの自動送信（通知の送信状態）。v8: 連絡先メール。v7: 大容量提出
+const SCHEMA_VERSION = 11;  // v11: 業務テーブルへ license_id（RP-002：SPLL番号を主キーへ）。v10: 申込の契約書経路（template_route）。v9: 案内メールの自動送信（通知の送信状態）。v8: 連絡先メール。v7: 大容量提出
 
 /**
  * 既存スプレッドシートへ不足シート・不足列を追加する（既存列の削除・並び替えはしない）。
@@ -381,6 +383,9 @@ function setup_all(adminEmail){
   // 5) ライセンス台帳移行（RP-001）：既存申込・契約をSPLL番号（License_Cases）へ
   try{ const lm = setup_migrateLicenseCases(); report.steps.push('setup_migrateLicenseCases: ' + JSON.stringify(lm)); }
   catch(e){ report.steps.push('setup_migrateLicenseCases 失敗: ' + String(e && e.message || e)); }
+  // 5-2) 業務テーブルの license_id 補完・旧 case_status の正規化（RP-002）
+  try{ const fk = setup_migrateLicenseForeignKeysV2(); report.steps.push('setup_migrateLicenseForeignKeysV2: ' + JSON.stringify({ status:fk.status, updated:fk.updated, unresolved:fk.unresolved.length })); }
+  catch(e){ report.steps.push('setup_migrateLicenseCases 失敗: ' + String(e && e.message || e)); }
 
   // 6) 転記用プロパティ一覧（ScriptPropertiesはプロジェクトごとに独立）
   const P = function(k){ return sp.getProperty(k) || ''; };
@@ -454,3 +459,87 @@ function setup_migrateLicenseCases(){
   logEvent_('license_case', 'migrateLicenseCases', actor_(), null, { created: created, skipped: skipped });
   return { created: created, skipped: skipped };
 }
+
+/**
+ * 業務テーブルへ license_id を補完する（RP-002 §6・冪等）。
+ * 対象：Access_Tokens / Submissions / Certificates / Badges / Compliance_Alerts /
+ *       Notification_Queue / Certificate_Change_Requests / Badge_Jobs
+ * 解決：row.contract_id → Contracts.license_id → （無ければ）Contracts.application_id → Applications.license_id
+ *       Compliance_Alerts は submission_id → Submissions.license_id も試す
+ * 解決できない行は勝手に補完しない。Migration_Runs=PARTIAL と System_Errors（MIGRATION_UNRESOLVED_LICENSE）に
+ * 対象IDを残し、人が判断する。
+ * あわせて旧 case_status（APPLIED 等）を現行値へ正規化する。
+ */
+const LICENSE_FK_TABLES = [
+  { sheet:'Access_Tokens',               key:'token_id' },
+  { sheet:'Submissions',                 key:'submission_id' },
+  { sheet:'Certificates',                key:'cert_id' },
+  { sheet:'Badges',                      key:'badge_id' },
+  { sheet:'Badge_Jobs',                  key:'badge_job_id' },
+  { sheet:'Compliance_Alerts',           key:'alert_id' },
+  { sheet:'Notification_Queue',          key:'notification_id' },
+  { sheet:'Certificate_Change_Requests', key:'request_id' }
+];
+function setup_migrateLicenseForeignKeysV2(){
+  if(readRows_(ssOps_(),'Admin_Users').length > 0) requireRole_(['SYSTEM_ADMIN']);
+  const ops = ssOps_();
+  const runId = Utilities.getUuid();
+  appendRow_(ops,'Migration_Runs',{ migration_run_id:runId, migration_name:'migrateLicenseForeignKeysV2',
+    started_at:new Date().toISOString(), finished_at:'', status:'RUNNING',
+    before_snapshot:JSON.stringify(schemaSnapshot_()), after_snapshot:'', error_detail:'' });
+  // 列を先に揃える（旧シートに license_id が無いと updateRow_ が書けない）
+  LICENSE_FK_TABLES.forEach(function(t){ ensureSheetColumns_(ops, t.sheet, SCHEMA_OPS[t.sheet]); });
+
+  const byContract = {};
+  const appLicense = {}; readRows_(ops,'Applications').forEach(function(a){ if(a.license_id) appLicense[a.application_id] = String(a.license_id); });
+  readRows_(ops,'Contracts').forEach(function(c){
+    byContract[c.contract_id] = String(c.license_id || appLicense[c.application_id] || '');
+  });
+  const resolve = function(row){
+    if(row.license_id) return String(row.license_id);
+    if(row.contract_id && byContract[row.contract_id]) return byContract[row.contract_id];
+    return '';
+  };
+
+  let updated = 0, skipped = 0;
+  const unresolved = [];
+  LICENSE_FK_TABLES.forEach(function(t){
+    // Submissions を先に解決しておくと、Compliance_Alerts が submission_id から引ける
+    const bySubmission = {};
+    if(t.sheet === 'Compliance_Alerts')
+      readRows_(ops,'Submissions').forEach(function(s){ if(s.license_id) bySubmission[s.submission_id] = String(s.license_id); });
+    readRows_(ops, t.sheet).forEach(function(row){
+      if(row.license_id){ skipped++; return; }
+      let lid = resolve(row);
+      if(!lid && t.sheet === 'Compliance_Alerts' && row.submission_id) lid = bySubmission[row.submission_id] || '';
+      // 申込段階の通知は reference_id が申込ID
+      if(!lid && t.sheet === 'Notification_Queue' && row.reference_id) lid = appLicense[String(row.reference_id)] || '';
+      if(!lid){
+        // 参照先が無い行（旧データで契約に紐付かない通知など）も記録に残す
+        unresolved.push(t.sheet + ':' + String(row[t.key] || ''));
+        return;
+      }
+      updateRow_(ops, t.sheet, t.key, row[t.key], { license_id: lid });
+      updated++;
+    });
+  });
+
+  // 旧 case_status の正規化（遷移表を通さない生更新。値の読み替えだけで状態は変えない）
+  let normalized = 0;
+  readRows_(ops,'License_Cases').forEach(function(k){
+    const cur = String(k.case_status || '');
+    const norm = normalizeCaseStatus_(cur);
+    if(norm !== cur){ updateLicenseCaseRaw_(k.license_id, { case_status: norm }); normalized++; }
+  });
+
+  const status = unresolved.length ? 'PARTIAL' : 'DONE';
+  if(unresolved.length)
+    logError_('MIGRATION_UNRESOLVED_LICENSE','migrateLicenseForeignKeysV2',
+      'license_id を解決できない行があります（' + unresolved.length + '件）', { rows: unresolved.slice(0, 200) });
+  updateRow_(ops,'Migration_Runs','migration_run_id',runId,{ finished_at:new Date().toISOString(), status:status,
+    after_snapshot:JSON.stringify(schemaSnapshot_()),
+    error_detail: unresolved.length ? ('未解決: ' + unresolved.join(', ')).slice(0,500) : '' });
+  logEvent_('batch','migrateLicenseForeignKeysV2',actor_(),null,{ updated:updated, skipped:skipped, normalized:normalized, unresolved:unresolved.length });
+  return { status:status, updated:updated, skipped:skipped, normalized:normalized, unresolved:unresolved };
+}
+

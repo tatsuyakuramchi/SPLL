@@ -196,7 +196,9 @@ function enqueueNotification_(contractId, type, referenceId, payload){
     return n.type === type && String(n.reference_id) === String(referenceId||''); });
   if(dup) return null;
   const id = Utilities.getUuid();
+  // 契約が無い段階の通知（CloudSign送信失敗など）は reference_id が申込IDなので、そこから番号を引く
   appendRow_(ssOps_(),'Notification_Queue',{ notification_id:id, contract_id:contractId||'',
+    license_id: licenseIdOfContract_(contractId) || licenseIdOfApplication_(referenceId),
     type:type, reference_id:referenceId||'', payload_json:JSON.stringify(payload||{}).slice(0,2000),
     status:'MANUAL_REQUIRED', created_at:new Date().toISOString(), sent_at:'', handled_by:'' });
   return id;

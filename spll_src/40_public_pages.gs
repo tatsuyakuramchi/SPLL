@@ -102,6 +102,7 @@ function web_submitWork(token, data){
   if(!sub){
     submissionId = newId_('SUB');
     appendRow_(ssOps_(),'Submissions',{ submission_id:submissionId, contract_id:contractId,
+      license_id: licenseIdOfContract_(contractId),
       title:data.title||'', status:'SUBMITTED', submitted_at:now });
     logEvent_('submission', submissionId, 'licensee', null, {status:'SUBMITTED', contract_id:contractId});
   }else{

@@ -764,6 +764,7 @@ function admin_requestCertChange(contractId, requestedStatus, reasonCode, reason
   if(!cert) throw new Error('認証が見つかりません: ' + contractId);
   const reqId = Utilities.getUuid();
   appendRow_(ssOps_(),'Certificate_Change_Requests',{ request_id:reqId, cert_id:cert.cert_id, contract_id:contractId,
+    license_id: cert.license_id || licenseIdOfContract_(contractId),
     requested_status:requestedStatus, reason_code:reasonCode||'', reason_text:sanitizeCell_(String(reasonText)),
     legal_case_id:legalCaseId||'', requested_by:actor.email, requested_at:new Date().toISOString(),
     approved_by:'', approved_at:'', status:'REQUESTED', emergency_override:'' });

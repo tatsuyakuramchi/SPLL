@@ -242,6 +242,7 @@ function createComplianceAlert_(submissionId, overall){
   const sub = readRows_(ssOps_(),'Submissions').find(s => s.submission_id===submissionId) || {};
   appendRow_(ssOps_(),'Compliance_Alerts',{ alert_id:newId_('ALR'),
     contract_id: sub.contract_id||'', submission_id: submissionId||'',
+    license_id: sub.license_id || licenseIdOfContract_(sub.contract_id),
     severity:'HIGH', status:'OPEN', settlement_block:'' });
   logEvent_('compliance_alert', submissionId, 'system', null, {severity:'HIGH', overall_result:overall});
 }

@@ -220,6 +220,13 @@ function licenseIdOfContract_(contractId){
   return '';
 }
 
+/** 申込ID → SPLL番号（Applications.license_id）。申込段階の通知（送信失敗など）は契約が無いのでこちらで引く。 */
+function licenseIdOfApplication_(applicationId){
+  if(!applicationId) return '';
+  const a = readRows_(ssOps_(), 'Applications').find(function(x){ return x.application_id === String(applicationId); });
+  return a && a.license_id ? String(a.license_id) : '';
+}
+
 /** 案件の遷移履歴（Events の license_case エントリ）。管理画面のタイムライン用。 */
 function licenseTimeline_(licenseId){
   return readRows_(ssOps_(), 'Events')
