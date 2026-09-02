@@ -241,6 +241,19 @@ function createContractFolder_(contractId){
     .forEach(n=>f.createFolder(n));
   return f.getId();
 }
+/**
+ * 案件フォルダ（RP-002 §18）。新規案件は DRIVE_ROOT/SPLL-番号/ にまとめる（1案件1フォルダ）。
+ * 既に同名フォルダがあれば再利用（再締結・手動紐付けで二重に作らない）。
+ * SPLL番号が無い締結（未紐付け・旧データ）は従来どおり契約IDのフォルダ。既存フォルダは物理移動しない。
+ */
+function createCaseFolder_(licenseId, contractId){
+  if(!licenseId) return createContractFolder_(contractId);
+  const root = DriveApp.getFolderById(cfg_('DRIVE_ROOT'));
+  const it = root.getFoldersByName(licenseId);
+  const f = it.hasNext() ? it.next() : root.createFolder(licenseId);
+  ['01_Contract','02_Submissions','03_AI_Reviews','04_Human_Reviews'].forEach(function(n){ getOrCreateChildFolder_(f, n); });
+  return f.getId();
+}
 
 /** 契約フォルダ配下の指定サブフォルダを取得（無ければ作成） */
 function contractSubFolder_(contract, name){

@@ -16,10 +16,12 @@ function serveUpload_(e){
 function web_getSubmitContext(token){
   const tok = resolveToken_(token, 'SUBMISSION');
   if(!tok) throw new Error('提出用リンクが無効か、有効期限が切れています。');
-  const contractId = tok.contract_id;
+  // 正本はSPLL番号（tok.license_id）。旧トークンは contract_id から補う
+  const ref = tokenLicenseRef_(tok);
+  const contractId = ref.contractId;
   const versions = readRows_(ssOps_(),'Submission_Versions');
   const reviews  = readRows_(ssOps_(),'Human_Reviews');
-  const subs = readRows_(ssOps_(),'Submissions').filter(s => s.contract_id===contractId).map(function(s){
+  const subs = readRows_(ssOps_(),'Submissions').filter(s => belongsToLicense_(s, ref)).map(function(s){
     const vs = versions.filter(v => v.submission_id===s.submission_id)
       .sort(function(a,b){ return num_(a.version_no)-num_(b.version_no); })
       .map(function(v){ return { version_no:v.version_no, status:v.status, submitted_at:String(v.submitted_at||''),
@@ -38,14 +40,17 @@ function web_getSubmitContext(token){
       method:s.submission_method || 'UPLOAD' };
   });
   // バッジ取得導線（V2-014-7）：提出トークンのままバッジページを開ける（表示毎の再発行はしない）
-  const badge = readRows_(ssOps_(),'Badges').find(function(b){ return b.contract_id === contractId && String(b.status) === 'ISSUED'; });
+  const badge = readRows_(ssOps_(),'Badges').find(function(b){ return belongsToLicense_(b, ref) && String(b.status) === 'ISSUED'; });
   // 配信元は WORKFLOW_URL（Cloud Run）を正とする。ScriptApp.getService().getUrl() は
   // 実行中のGASプロジェクトのURLを返すため、画面を外へ出したあとは行き先が食い違う。
   const badgeUrl = badge ? userPageUrl_('badge','token',token) : '';
-  const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.contract_id === contractId; });
+  const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return belongsToLicense_(x, ref); });
+  const kase = ref.licenseId ? (readRows_(ssOps_(),'License_Cases').find(function(k){ return k.license_id === ref.licenseId; }) || {}) : {};
   const remaining = Math.max(0, num_(tok.max_uses) - num_(tok.used_count));
   const lim = submitFolderLimits_();
-  return { contract_id:contractId, works:contractWorkNames_(contractId), submissions:subs,
+  return { license_id: ref.licenseId, contract_id:contractId,   // 表示はSPLL番号。contract_id は互換
+    works:contractWorkNames_(contractId), submissions:subs,
+    case_status: kase.case_status || '', review_status: kase.review_status || '',
     badge_url:badgeUrl, cert_status:(cert ? cert.status : 'NONE'),
     expires_at:String(tok.expires_at||'').slice(0,10), remaining_uploads:remaining,
     // 大容量提出（専用Driveフォルダ）の案内値
@@ -91,20 +96,21 @@ function web_submitWork(token, data){
   data = data || {};
   if(!data.dataBase64) throw new Error('作品ファイルが添付されていません。');
   const checked = validateUpload_(data);                       // サーバー側検証（SEC-05）
-  const contractId = tok.contract_id;
-  const contract = readRows_(ssOps_(),'Contracts').find(x => x.contract_id===contractId) || {};
+  const ref = tokenLicenseRef_(tok);
+  const contractId = ref.contractId, contract = ref.contract;
+  const licenseId = ref.licenseId;
 
-  // 提出（新規 or 既存）
+  // 提出（新規 or 既存）。所属はSPLL番号で判定する
   let submissionId = data.submission_id || '';
   let sub = submissionId ? readRows_(ssOps_(),'Submissions').find(s => s.submission_id===submissionId) : null;
-  if(sub && sub.contract_id !== contractId) throw new Error('この提出は対象の契約に属していません。');
+  if(sub && !belongsToLicense_(sub, ref)) throw new Error('この提出は対象のライセンスに属していません。');
   const now = new Date().toISOString();
   if(!sub){
     submissionId = newId_('SUB');
     appendRow_(ssOps_(),'Submissions',{ submission_id:submissionId, contract_id:contractId,
-      license_id: licenseIdOfContract_(contractId),
+      license_id: licenseId,
       title:data.title||'', status:'SUBMITTED', submitted_at:now });
-    logEvent_('submission', submissionId, 'licensee', null, {status:'SUBMITTED', contract_id:contractId});
+    logEvent_('submission', submissionId, 'licensee', null, {status:'SUBMITTED', license_id:licenseId, contract_id:contractId});
   }else{
     updateRow_(ssOps_(),'Submissions','submission_id',submissionId,{ status:'SUBMITTED' });
     if(data.title) updateRow_(ssOps_(),'Submissions','submission_id',submissionId,{ title:data.title });
@@ -128,7 +134,6 @@ function web_submitWork(token, data){
   consumeToken_(tok);                                          // 提出回数を消費（SEC-06）
 
   // 台帳の現在地を審査中へ（AI起票の前に。AIが同期で完走しても順序が崩れないように）
-  const licenseId = licenseIdOfContract_(contractId);
   if(licenseId) transitionLicenseCase_(licenseId, 'SUBMISSION_CREATED', { actor:'licensee', reason: submissionId + ' v' + versionNo });
 
   // AI一次審査を起票（→人手審査必須）
@@ -146,9 +151,10 @@ function serveBadge_(e){
   let tok = resolveToken_(token, 'BADGE_DOWNLOAD');
   if(tok){ consumeToken_(tok); }
   else { tok = resolveToken_(token, 'SUBMISSION') || resolveToken_(token, 'GUIDE'); }   // 提出・案内トークンのまま閲覧可（再発行不要）
-  const b = tok ? readRows_(ssOps_(),'Badges').find(function(x){ return x.contract_id === tok.contract_id && String(x.status) === 'ISSUED'; }) : null;
+  const b = tok ? badgeForToken_(token, false) : null;
   if(!b) return HtmlService.createHtmlOutput('<p style="font-family:sans-serif">リンクが無効か、有効期限が切れています。</p>').setTitle('SPLL 認証バッジ');
   const workNames = contractWorkNames_(b.contract_id).join('、');   // 契約単位（複数原作）
+  const licenseLabel = b.license_id || licenseIdOfContract_(b.contract_id) || b.contract_id;   // 表示は必ずSPLL番号
   const rows = [['大 (L)', b.png_l], ['中 (M)', b.png_m], ['小 (S)', b.png_s]].map(function(p){
     let dataUri = '';
     try{
@@ -160,7 +166,7 @@ function serveBadge_(e){
       '<a href="' + dataUri + '" download="SPLL_badge_' + esc_(b.badge_id) + '_' + p[0].slice(-3,-1) + '.png" style="display:inline-block;margin-top:6px">PNGをダウンロード</a></div>';
   }).join('');
   const html = '<div style="font-family:sans-serif;max-width:720px;margin:0 auto;padding:24px">' +
-    '<h2>SPLL 認証バッジ</h2><p>' + esc_(workNames) + ' ／ ライセンスID: ' + b.contract_id +
+    '<h2>SPLL 認証バッジ</h2><p>' + esc_(workNames) + ' ／ SPLL番号: ' + esc_(licenseLabel) +
     ' ／ 発行日: ' + b.issued_at + '</p>' + rows +
     '<p style="font-size:12px;color:#666">クレジット表記としてご利用ください。表示位置・改変の可否は利用規約に従います。</p></div>';
   return HtmlService.createHtmlOutput(html).setTitle('SPLL 認証バッジ');
@@ -191,7 +197,8 @@ function verifyCertificate_(certId, code){
     message: active ? 'このライセンスは有効です。' : 'このライセンスは現在有効ではありません（' + cert.status + '）。',
     work_names: contractWorkNames_(cert.contract_id),
     credit_texts: contractCreditTexts_(cert.contract_id),   // 契約書は「別途指定」。実際の文言はここで示す
-    license_id: cert.contract_id, issued_at: cert.issued_at, status: cert.status
+    license_id: cert.license_id || licenseIdOfContract_(cert.contract_id) || cert.contract_id,   // 表示はSPLL番号
+    issued_at: cert.issued_at, status: cert.status
   };
 }
 /** 公開Web（Cloud Run）から呼ぶ照会API。表示はCloud Run側で組む。 */
@@ -204,7 +211,7 @@ function serveVerify_(e){
   if(v.state === 'INPUT') return verifyInputHtml_();
   if(v.state === 'LIMITED' || v.state === 'MISMATCH') return verifyHtml_('gray', v.title, v.message, '');
   const meta = '対象原作：' + (v.work_names.length ? esc_(v.work_names.join('、')) : '—') +
-    '<br>ライセンスID：' + esc_(v.license_id) + '<br>発行日：' + esc_(v.issued_at) +
+    '<br>SPLL番号：' + esc_(v.license_id) + '<br>発行日：' + esc_(v.issued_at) +
     '<br>状態：' + esc_(v.status) +
     ((v.credit_texts && v.credit_texts.length)
       ? '<br>指定のクレジット表記：' + esc_(v.credit_texts.join(' ／ ')) : '');
@@ -218,7 +225,7 @@ function serveVerify_(e){
 function web_getBadgeContext(token){
   const b = badgeForToken_(token, true);
   if(!b) return null;
-  return { license_id:b.contract_id, badge_id:b.badge_id, issued_at:b.issued_at,
+  return { license_id: b.license_id || licenseIdOfContract_(b.contract_id) || b.contract_id, badge_id:b.badge_id, issued_at:b.issued_at,
     work_names: contractWorkNames_(b.contract_id).join('、'),
     sizes: [{ key:'l', label:'大 (L)' }, { key:'m', label:'中 (M)' }, { key:'s', label:'小 (S)' }] };
 }
@@ -237,14 +244,15 @@ function badgeForToken_(token, consume){
   if(tok){ if(consume) consumeToken_(tok); }
   else { tok = resolveToken_(token, 'SUBMISSION') || resolveToken_(token, 'GUIDE'); }
   if(!tok) return null;
-  return readRows_(ssOps_(),'Badges').find(function(x){ return x.contract_id === tok.contract_id && String(x.status) === 'ISSUED'; }) || null;
+  const ref = tokenLicenseRef_(tok);
+  return readRows_(ssOps_(),'Badges').find(function(x){ return belongsToLicense_(x, ref) && String(x.status) === 'ISSUED'; }) || null;
 }
 
 function verifyInputHtml_(){
   return htmlPage_('SPLL ライセンス認証', '<h2>SPLL ライセンス認証</h2>' +
     '<p>認証バッジのQRから開くと、正規ライセンスかどうかを確認できます。</p>' +
     '<form method="get"><input type="hidden" name="page" value="verify">' +
-    '<p>ライセンスID <input name="id" placeholder="CTR-…"> 照合コード <input name="c" placeholder="XXXXXX"></p>' +
+    '<p>認証ID <input name="id" placeholder="CERT-…"> 照合コード <input name="c" placeholder="XXXXXX"></p>' +
     '<button type="submit">確認する</button></form>');
 }
 function verifyHtml_(kind, title, msg, meta){

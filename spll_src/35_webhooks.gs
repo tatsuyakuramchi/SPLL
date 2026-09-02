@@ -171,7 +171,7 @@ function processCloudSignEvent_(body, e){
     cloudsign_title: sanitizeCell_((verifiedDoc && (verifiedDoc.title || verifiedDoc.name)) || extractDocTitle_(body)),
     application_id: app ? app.application_id : '', application_ref: ref || '',
     status:'SIGNED', link_status: linked ? 'LINKED' : 'UNLINKED',
-    signed_at:new Date().toISOString(), folder_id:createContractFolder_(contractId) });
+    signed_at:new Date().toISOString(), folder_id:createCaseFolder_(app ? app.license_id : '', contractId) });   // 案件フォルダはSPLL番号名
 
   // 締結済原本PDFの保存（FUN-04）。失敗しても契約処理は継続（後で再取得可能）。
   try{ saveSignedPdf_(contractId, docId, verifiedDoc); }

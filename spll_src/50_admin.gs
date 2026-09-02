@@ -188,14 +188,23 @@ function admin_listContracts(){ requireRole_([]);
  * B経路：締結済契約の作品提出リンクを発行して返す（当社からメール送信はしない）。
  * 旧トークンを失効し、Access_Tokens（SUBMISSION用途）を新規発行して返す。
  */
-function admin_sendUploadLink(contractId){ requireRole_(['OPERATIONS']);
-  const c = readRows_(ssOps_(),'Contracts').find(x => x.contract_id===contractId);
-  if(!c) throw new Error('契約が見つかりません: '+contractId);
-  revokeTokens_(contractId, 'SUBMISSION');            // 再発行時は旧トークンを失効（§9.1）
-  const token = prepareSubmissionToken_(contractId);
+/** 提出リンクの発行。SPLL番号（推奨）または契約IDを受ける。締結済の案件だけ。 */
+function admin_sendUploadLink(idOrLicense){ requireRole_(['OPERATIONS']);
+  const ref = resolveLicenseRef_(idOrLicense);
+  if(!ref.licenseId && !ref.contractId) throw new Error('DATA_NOT_FOUND: 案件が見つかりません: ' + idOrLicense);
+  if(ref.licenseId){
+    const kase = readRows_(ssOps_(),'License_Cases').find(function(k){ return k.license_id === ref.licenseId; });
+    if(!kase) throw new Error('DATA_NOT_FOUND: ライセンスがありません: ' + ref.licenseId);
+    if(String(kase.contract_status) !== 'SIGNED') throw new Error('DATA_CONFLICT: 締結済みの案件のみ提出リンクを発行できます（現在: ' + kase.contract_status + '）');
+  } else if(!readRows_(ssOps_(),'Contracts').some(function(x){ return x.contract_id === ref.contractId; })){
+    throw new Error('DATA_NOT_FOUND: 契約が見つかりません: ' + idOrLicense);
+  }
+  const key = ref.licenseId || ref.contractId;
+  revokeTokens_(key, 'SUBMISSION');            // 再発行時は旧トークンを失効（§9.1）
+  const token = prepareSubmissionToken_(key);
   const url = userPageUrl_('upload','t',token);   // クリエーター向けページはGAS②（WORKFLOW_URL）で配信
-  logEvent_('contract', contractId, actor_(), null, {upload_link_issued:true});
-  return { url:url, token:token };
+  logEvent_('license_case', key, actor_(), null, {upload_link_issued:true});
+  return { url:url, token:token, license_id: ref.licenseId };
 }
 
 // ---- 未紐付け締結の手動紐付け（ref突合できない場合のフォールバック） ----
@@ -508,15 +517,19 @@ function admin_saveGuideConfig(c){ const actor = requireRole_(['SYSTEM_ADMIN','O
  * 「今後のお手続き」案内ページのURLを発行（既存トークンは失効させて作り直す）。
  * 契約者へ渡す唯一の導線であり、振込先・提出・バッジをこの1枚に集約している。
  */
-function admin_issueGuideLink(contractId){ const actor = requireRole_(['OPERATIONS','LEGAL_ADMIN']);
-  const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === String(contractId||''); });
-  if(!c) throw new Error('DATA_NOT_FOUND: 契約が見つかりません: ' + contractId);
+/** 案内リンクの発行。SPLL番号（推奨）または契約IDを受ける。締結済の案件だけ。 */
+function admin_issueGuideLink(idOrLicense){ const actor = requireRole_(['OPERATIONS','LEGAL_ADMIN']);
+  const ref = resolveLicenseRef_(idOrLicense);
+  const c = ref.contractId ? (readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === ref.contractId; }) || null) : null;
+  if(!c) throw new Error('DATA_NOT_FOUND: 締結済みの契約が見つかりません: ' + idOrLicense);
   if(String(c.status) !== 'SIGNED') throw new Error('DATA_CONFLICT: 締結済みの契約のみ案内できます（現在: ' + c.status + '）');
-  revokeTokens_(c.contract_id, 'GUIDE');
-  const token = prepareGuideToken_(c.contract_id);
-  logEvent_('contract', c.contract_id, actor.email, null, { guide_link_issued:true });
-  return { url: userPageUrl_('guide','t',token), license_id: c.license_id || '', payment_configured: paymentConfigured_(),
-    contact_email: c.contact_email || '', contact_email_source: c.contact_email_source || '' };
+  const key = ref.licenseId || c.contract_id;
+  revokeTokens_(key, 'GUIDE');
+  const token = prepareGuideToken_(key);
+  logEvent_('license_case', key, actor.email, null, { guide_link_issued:true });
+  const kase = ref.licenseId ? (readRows_(ssOps_(),'License_Cases').find(function(k){ return k.license_id === ref.licenseId; }) || {}) : {};
+  return { url: userPageUrl_('guide','t',token), license_id: ref.licenseId || c.license_id || '', payment_configured: paymentConfigured_(),
+    contact_email: c.contact_email || kase.contact_email || '', contact_email_source: c.contact_email_source || '' };
 }
 
 // ---- 申込窓口の案内先（Config・環境ごとに切替可能） ----

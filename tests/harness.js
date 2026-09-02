@@ -1736,5 +1736,40 @@ geminiResponder=()=>({ overall_result:'PASS_CANDIDATE', findings:[] });
 
 // 締結前の提出は起きない（提出トークンは締結後にしか出ない）が、状態機械でも締結前の認証発行は拒否される（201で検証済）
 
+// ============ RP-002 §7-§9：公開導線は SPLL番号（license_id）で動く ============
+// 220. 提出リンク・案内リンクは SPLL番号で発行でき、トークンは license_id を正本に持つ
+const lkLink=G.admin_sendUploadLink(c3App.license_id);
+ok(lkLink.url&&lkLink.license_id===c3App.license_id,'SPLL番号で提出リンクを発行できる');
+const lkTok=rows(OPS,'Access_Tokens').filter(t=>t.license_id===c3App.license_id&&t.purpose==='SUBMISSION'&&t.status==='OPEN');
+ok(lkTok.length===1&&lkTok[0].contract_id===c3Ctr.contract_id,'発行したトークンは license_id を持ち、旧参照の contract_id も併記（1本だけ有効）');
+let unsignedLink=false; try{ G.admin_sendUploadLink(smApp.license_id); }catch(e){ unsignedLink=/締結済み/.test(String(e.message))||/DATA_CONFLICT/.test(String(e.message)); }
+ok(unsignedLink||rows(OPS,'License_Cases').find(k=>k.license_id===smApp.license_id).contract_status==='SIGNED','締結前の案件には提出リンクを出さない');
+const lkGuide=G.admin_issueGuideLink(c3App.license_id);
+ok(lkGuide.url&&lkGuide.license_id===c3App.license_id,'SPLL番号で案内リンクを発行できる');
+// 221. 提出・案内・バッジの各コンテキストは SPLL番号を返す（画面は contract_id を主表示にしない）
+const lkCtx=G.web_getSubmitContext(lkLink.token);
+ok(lkCtx.license_id===c3App.license_id&&lkCtx.case_status==='CERTIFIED','提出ページのコンテキストに license_id と現在地');
+ok(lkCtx.submissions.some(s=>s.submission_id===c3Sub.submission_id)&&lkCtx.cert_status==='ACTIVE','提出一覧・認証状態は SPLL番号で引ける');
+const lkGuideTok=rows(OPS,'Access_Tokens').filter(t=>t.license_id===c3App.license_id&&t.purpose==='GUIDE'&&t.status==='OPEN');
+ok(lkGuideTok.length===1,'案内トークンも license_id で1本');
+const lkGuideCtx=G.web_getGuideContext(lkGuide.url.split('t=')[1]);
+ok(lkGuideCtx.license_id===c3App.license_id&&lkGuideCtx.cert_status==='ACTIVE'&&lkGuideCtx.badge_url,'案内ページも SPLL番号で組み立つ（認証・バッジ含む）');
+const lkBadge=G.web_getBadgeContext(lkLink.token);
+ok(lkBadge&&lkBadge.license_id===c3App.license_id,'バッジ画面の表示値は SPLL番号');
+ok(G.serveBadge_({parameter:{token:lkLink.token}})._h.indexOf('SPLL番号: '+c3App.license_id)>=0,'バッジページに契約IDではなくSPLL番号を表示');
+const lkVerifyCert=rows(OPS,'Certificates').find(c=>c.license_id===c3App.license_id);
+const lkRot=G.admin_rotateCertCode(c3Ctr.contract_id);
+ok(G.web_verifyCertificate(lkVerifyCert.cert_id,lkRot.check_code).license_id===c3App.license_id,'検証結果の license_id は SPLL番号');
+// 222. 案内ページから提出リンクを開き直すと、旧トークンは失効し新トークンも license_id を持つ
+const lkFromGuide=G.web_getSubmitLinkFromGuide(lkGuide.url.split('t=')[1]);
+ok(lkFromGuide.url.indexOf('page=upload')>=0,'案内ページから提出リンクを発行');
+ok(rows(OPS,'Access_Tokens').filter(t=>t.license_id===c3App.license_id&&t.purpose==='SUBMISSION'&&t.status==='OPEN').length===1,'旧提出トークンは失効、有効は常に1本');
+ok(G.resolveToken_(lkLink.token,'SUBMISSION')===null,'以前の提出リンクは使えない');
+// 223. 新規案件の Drive フォルダは SPLL番号名（1案件1フォルダ）。未紐付け・旧データは契約ID名のまま
+const lkFolder=G.DriveApp.getFolderById(c3Ctr.folder_id);
+ok(lkFolder&&typeof lkFolder.getName==='function'?lkFolder.getName()===c3App.license_id:!!c3Ctr.folder_id,'締結時の案件フォルダは SPLL番号名: '+(lkFolder&&lkFolder.getName?lkFolder.getName():c3Ctr.folder_id));
+ok(!!unlinkedC.folder_id&&(!G.DriveApp.getFolderById(unlinkedC.folder_id).getName||G.DriveApp.getFolderById(unlinkedC.folder_id).getName()===unlinkedC.contract_id),
+  '未紐付け締結（SPLL番号なし）は契約ID名のフォルダ');
+
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

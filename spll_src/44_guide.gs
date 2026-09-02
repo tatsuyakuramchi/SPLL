@@ -36,8 +36,8 @@ function paymentConfigured_(){
  * 既定400日（1年契約＋更新手続きの余裕）。GUIDE_TOKEN_DAYS で変更可能。
  */
 function guideTokenDays_(){ return num_(getConfig_('GUIDE_TOKEN_DAYS','400')) || 400; }
-function prepareGuideToken_(contractId){
-  return issueToken_(contractId, 'GUIDE', guideTokenDays_(), 0);   // 回数制限なし（何度でも開ける）
+function prepareGuideToken_(idOrLicense){
+  return issueToken_(idOrLicense, 'GUIDE', guideTokenDays_(), 0);   // 回数制限なし（何度でも開ける）
 }
 
 function serveGuide_(e){
@@ -50,25 +50,27 @@ function serveGuide_(e){
 function web_getGuideContext(token){
   const tok = resolveToken_(token, 'GUIDE');
   if(!tok) throw new Error('案内リンクが無効か、有効期限が切れています。事務局へお問い合わせください。');
-  const contractId = tok.contract_id;
-  const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === contractId; }) || {};
-  const kase = c.license_id
-    ? (readRows_(ssOps_(),'License_Cases').find(function(k){ return k.license_id === c.license_id; }) || {}) : {};
+  // 正本はSPLL番号。契約（互換テーブル）は条件スナップショット・締結日の参照に使う
+  const ref = tokenLicenseRef_(tok);
+  const contractId = ref.contractId, c = ref.contract;
+  const kase = ref.licenseId
+    ? (readRows_(ssOps_(),'License_Cases').find(function(k){ return k.license_id === ref.licenseId; }) || {}) : {};
   let terms = {}; try{ terms = JSON.parse(c.terms_snapshot || '{}'); }catch(err){}
-  const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.contract_id === contractId; });
-  const badge = readRows_(ssOps_(),'Badges').find(function(b){ return b.contract_id === contractId && String(b.status) === 'ISSUED'; });
-  const subs = readRows_(ssOps_(),'Submissions').filter(function(s){ return s.contract_id === contractId; });
+  const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return belongsToLicense_(x, ref); });
+  const badge = readRows_(ssOps_(),'Badges').find(function(b){ return belongsToLicense_(b, ref) && String(b.status) === 'ISSUED'; });
+  const subs = readRows_(ssOps_(),'Submissions').filter(function(s){ return belongsToLicense_(s, ref); });
 
   return {
     guide_expires_at: String(tok.expires_at || '').slice(0,10),
-    license_id: c.license_id || '',
+    license_id: ref.licenseId || c.license_id || '',
+    case_status: kase.case_status || '', review_status: kase.review_status || '',
     party_name: kase.party_display_name || '',
     usage_category: c.usage_category || '',
     works: contractWorkNames_(contractId),
     // 契約書には具体的な文言を差し込まず「甲が別途指定する権利表記」としているため、
     // クリエーターが公開前に確認できるようここで示す
     credit_texts: contractCreditTexts_(contractId),
-    signed_at: String(c.signed_at || '').slice(0,10),
+    signed_at: String(kase.signed_at || c.signed_at || '').slice(0,10),
     fee_label: String(terms.fee_amount_or_rate || ''),
     payment_terms: String(terms.payment_terms || terms.payment_due || ''),
     payment: paymentConfigured_() ? paymentInfo_() : null,
@@ -90,8 +92,10 @@ function web_getSubmitLinkFromGuide(token){
   if(!tok) throw new Error('案内リンクが無効か、有効期限が切れています。');
   if(!rateLimit_('guideSubmit:' + tok.token_id, 20, 3600))
     throw new Error('操作回数が上限に達しました。時間をおいて再度お試しください。');
-  revokeTokens_(tok.contract_id, 'SUBMISSION');
-  const st = prepareSubmissionToken_(tok.contract_id);
-  logEvent_('contract', tok.contract_id, 'licensee', null, { submit_link_issued_from:'GUIDE' });
+  const ref = tokenLicenseRef_(tok);
+  const key = ref.licenseId || tok.contract_id;
+  revokeTokens_(key, 'SUBMISSION');
+  const st = prepareSubmissionToken_(key);
+  logEvent_('license_case', key, 'licensee', null, { submit_link_issued_from:'GUIDE' });
   return { url: userPageUrl_('upload','t',st) };
 }

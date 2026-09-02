@@ -31,18 +31,18 @@ function web_openDriveSubmission(token, data){
   if(!rateLimit_('openFolder:' + tok.token_id, 10, 3600))
     throw new Error('受け口の作成回数が上限に達しました。時間をおいて再度お試しください。');
   data = data || {};
-  const contractId = tok.contract_id;
-  const contract = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === contractId; }) || {};
+  const ref = tokenLicenseRef_(tok);
+  const contractId = ref.contractId, contract = ref.contract;
 
   let submissionId = String(data.submission_id || '');
   let sub = submissionId ? readRows_(ssOps_(),'Submissions').find(function(s){ return s.submission_id === submissionId; }) : null;
-  if(sub && sub.contract_id !== contractId) throw new Error('この提出は対象の契約に属していません。');
+  if(sub && !belongsToLicense_(sub, ref)) throw new Error('この提出は対象のライセンスに属していません。');
   const now = new Date().toISOString();
   if(!sub){
     if(!String(data.title || '').trim()) throw new Error('VALIDATION_ERROR: 二次創作作品名は必須です。');
     submissionId = newId_('SUB');
     appendRow_(ssOps_(),'Submissions',{ submission_id:submissionId, contract_id:contractId,
-      license_id: licenseIdOfContract_(contractId),
+      license_id: ref.licenseId,
       title:sanitizeCell_(String(data.title).slice(0,200)), status:'FOLDER_OPEN', submitted_at:now,
       submission_method:'DRIVE_FOLDER' });
   }else{
@@ -101,7 +101,8 @@ function web_finalizeDriveSubmission(token, versionId){
   const v = readRows_(ssOps_(),'Submission_Versions').find(function(x){ return x.version_id === String(versionId||''); });
   if(!v) throw new Error('DATA_NOT_FOUND: 提出の版が見つかりません。');
   const sub = readRows_(ssOps_(),'Submissions').find(function(s){ return s.submission_id === v.submission_id; });
-  if(!sub || sub.contract_id !== tok.contract_id) throw new Error('この提出は対象の契約に属していません。');
+  const ref = tokenLicenseRef_(tok);
+  if(!sub || !belongsToLicense_(sub, ref)) throw new Error('この提出は対象のライセンスに属していません。');
   if(String(v.folder_status) !== 'OPEN') throw new Error('DATA_CONFLICT: この版は既に提出が確定しています。');
 
   const scan = scanSubmissionFolder_(v.drive_folder_id);
@@ -126,7 +127,7 @@ function web_finalizeDriveSubmission(token, versionId){
       file_count:scan.files.length, total_bytes:scan.totalBytes });
   updateRow_(ssOps_(),'Submissions','submission_id',v.submission_id,{ status:'SUBMITTED' });
   consumeToken_(tok);
-  const licenseId = licenseIdOfContract_(sub.contract_id);
+  const licenseId = sub.license_id || ref.licenseId;
   if(licenseId) transitionLicenseCase_(licenseId, 'SUBMISSION_CREATED', { actor:'licensee', reason: v.submission_id + ' v' + num_(v.version_no) });
 
   // AI一次審査：スクリーニング可能なファイル（PDF/PNG/JPEG）があるときだけ起票し、
