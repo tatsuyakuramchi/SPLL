@@ -1006,23 +1006,25 @@ ok(gl.url.indexOf('https://script.google.com/macros/s/WORKFLOW-DEPLOY/exec?page=
 ok(G.admin_sendUploadLink(contract.contract_id).url.indexOf('WORKFLOW-DEPLOY/exec?page=upload')>0,'提出リンクもGAS②のURLで発行（旧実装はadminのURLを指していた）');
 const guideToken=gl.url.split('t=')[1];
 
-// 93. 案内ページの内容：契約情報・振込先・バッジ・検証
-G.admin_saveGuideConfig({ bank_name:'テスト銀行', branch:'本店', account_type:'普通', account_number:'1234567',
-  account_holder:'TRPGライツ事務局', holder_kana:'テスト', note:'振込名義にSPLL番号を添えてください', office_contact:'spll@example.com' });
+// 93. 案内ページの内容：契約情報・バッジ・検証
+G.admin_saveGuideConfig({ office_contact:'spll@example.com' });
 const gctx=G.web_getGuideContext(decodeURIComponent(guideToken));
 ok(gctx.license_id&&gctx.works.length===2,'案内ページにSPLL番号と対象原作を表示');
-ok(gctx.payment&&gctx.payment.bank_name==='テスト銀行'&&gctx.payment.account_number==='1234567','振込先を表示（設定画面から変更可能）');
 ok(/page=badge/.test(gctx.badge_url)&&/page=verify/.test(gctx.verify_url),'認証バッジ（QR入り）と検証ポータルへの導線');
 ok(gctx.cert_status==='ACTIVE'&&gctx.cert_id,'認証IDと状態を表示');
-// 口座を変えると、発行済みの同じURLでも新しい内容が出る（案内をメールに焼き付けない利点）
-G.admin_saveGuideConfig({ bank_name:'変更後銀行', account_number:'7654321' });
-ok(G.web_getGuideContext(decodeURIComponent(guideToken)).payment.bank_name==='変更後銀行','口座変更は発行済みURLにも即時反映');
 
-// 94. 振込先未設定なら支払欄を出さない（案内ページに空欄を見せない）
-const savedBank=G.getConfig_('PAYMENT_BANK_NAME','');
-G.admin_saveGuideConfig({ bank_name:'', account_number:'', account_holder:'' });
-ok(G.web_getGuideContext(decodeURIComponent(guideToken)).payment===null,'振込先未設定時はお支払い欄を出さない');
-G.admin_saveGuideConfig({ bank_name:savedBank, account_number:'7654321', account_holder:'TRPGライツ事務局' });
+// 94. 振込先はシステムに持たない（RP-002 §9.1：契約書本文にのみ記載）
+ok(gctx.payment===undefined,'案内ページの応答に振込先を含めない');
+G.admin_saveGuideConfig({ bank_name:'テスト銀行', account_number:'1234567', office_contact:'spll@example.com' });
+ok(G.getConfig_('PAYMENT_BANK_NAME','')===''&&G.getConfig_('PAYMENT_ACCOUNT_NUMBER','')==='','口座情報は設定として保存されない（未知キーは無視）');
+ok(G.admin_getGuideConfig().bank_name===undefined&&G.admin_getGuideConfig().configured===undefined,'設定APIに振込先の項目が無い');
+ok(gl.payment_configured===undefined,'案内リンク発行の応答に振込先の有無を返さない');
+const guideHtml=fs.readFileSync(path.join(__dirname,'..','spll_src','guide.html'),'utf8');
+ok(guideHtml.indexOf('payCard')<0&&guideHtml.indexOf('bank_name')<0&&/契約書（個別条件）に記載/.test(guideHtml),'案内ページに口座欄が無く「契約書に記載」と明示');
+const adminHtmlGuide=fs.readFileSync(path.join(__dirname,'..','spll_src','admin.html'),'utf8');
+ok(adminHtmlGuide.indexOf('gc-bank_name')<0&&adminHtmlGuide.indexOf('PAYMENT_BANK_NAME')<0,'管理画面に振込先入力欄が無い');
+const contractDoc=fs.readFileSync(path.join(__dirname,'..','docs','SPLL_利用許諾契約書_CloudSign_FORM対応_v4.1.md'),'utf8');
+ok(/振込先/.test(contractDoc)&&/本契約書にのみ記載/.test(contractDoc),'契約書ひな形に振込先の欄があり、契約書が唯一の記載場所と明記');
 
 // 95. 案内ページから提出ページへ（押された時だけ提出トークンを発行）
 const beforeSub=rows(OPS,'Access_Tokens').filter(t=>t.contract_id===contract.contract_id&&t.purpose==='SUBMISSION'&&t.status==='OPEN').length;
@@ -1101,15 +1103,14 @@ ok(cMail2&&cMail2.contact_email==='form-input@example.jp'&&cMail2.contact_email_
 // ============ 案内メールの自動送信 ============
 // 101. 締結→5分バッチで案内URLのみを送信（本文に口座情報を入れない）
 G.setConfig_('OFFICE_CONTACT','事務局 spll@example.com');
-G.admin_saveGuideConfig({ bank_name:'テスト銀行', account_number:'1111111', account_holder:'事務局',
-  mail_from_name:'TRPGライツ事務局', mail_reply_to:'spll@example.com' });
+G.admin_saveGuideConfig({ mail_from_name:'TRPGライツ事務局', mail_reply_to:'spll@example.com' });
 _sentMail.length=0;
 const mailRes=G.batch_sendGuideEmails_();
 ok(mailRes.processed>=1,'案内メールを自動送信: '+mailRes.processed+'件');
 const sentTo=_sentMail.find(m=>m.to==='licensee@example.com');
 ok(!!sentTo,'CloudSign送付先へ送信');
 ok(/SPLL-/.test(sentTo.subject)&&/page=guide/.test(sentTo.body),'件名にSPLL番号・本文に案内ページURL');
-ok(sentTo.body.indexOf('1111111')<0&&sentTo.body.indexOf('テスト銀行')<0,'本文に口座情報を含めない（振込先は案内ページのみ）');
+ok(!/銀行|口座番号|支店/.test(sentTo.body)&&/契約書（個別条件）に記載/.test(sentTo.body),'本文に口座情報を含めず「振込先は契約書に記載」と案内');
 ok(/口座情報をお知らせすることはありません/.test(sentTo.body),'なりすまし注意の記載を含む');
 ok(sentTo.name==='TRPGライツ事務局'&&sentTo.replyTo==='spll@example.com','差出人名・返信先を設定から反映');
 const sentNotif=rows(OPS,'Notification_Queue').find(n=>n.type==='GUIDE_READY'&&n.contract_id===cMail.contract_id);

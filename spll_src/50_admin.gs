@@ -519,24 +519,22 @@ function admin_getMailStatus(){ requireRole_([]);
   };
 }
 
-// ---- 締結後の手続き案内（振込先・案内ページ）----
-const PAYMENT_CONFIG_KEYS = [
-  ['bank_name','PAYMENT_BANK_NAME'], ['branch','PAYMENT_BRANCH'], ['account_type','PAYMENT_ACCOUNT_TYPE'],
-  ['account_number','PAYMENT_ACCOUNT_NUMBER'], ['account_holder','PAYMENT_ACCOUNT_HOLDER'],
-  ['holder_kana','PAYMENT_HOLDER_KANA'], ['note','PAYMENT_NOTE'], ['office_contact','OFFICE_CONTACT'],
+// ---- 締結後の手続き案内（案内ページ・メール・公開URL）----
+// 振込先は持たない。利用許諾料の振込先は契約書本文に記載する（RP-002 §9.1）
+const GUIDE_CONFIG_KEYS = [
+  ['office_contact','OFFICE_CONTACT'],
   ['workflow_url','WORKFLOW_URL'], ['public_base_url','PUBLIC_BASE_URL'], ['office_email_domain','OFFICE_EMAIL_DOMAIN'],
   ['mail_from_name','MAIL_FROM_NAME'], ['mail_reply_to','MAIL_REPLY_TO'],
   ['guide_email_auto_send','GUIDE_EMAIL_AUTO_SEND'], ['guide_email_subject','GUIDE_EMAIL_SUBJECT'], ['guide_email_body','GUIDE_EMAIL_BODY']
 ];
-/** 振込先・案内ページ設定の取得（振込先は口座情報のため SYSTEM_ADMIN/OPERATIONS/LEGAL_ADMIN のみ） */
+/** 案内ページ・案内メール設定の取得 */
 function admin_getGuideConfig(){ requireRole_(['SYSTEM_ADMIN','OPERATIONS','LEGAL_ADMIN']);
   const out = {};
-  PAYMENT_CONFIG_KEYS.forEach(function(x){ out[x[0]] = getConfig_(x[1],''); });
-  out.configured = paymentConfigured_();
+  GUIDE_CONFIG_KEYS.forEach(function(x){ out[x[0]] = getConfig_(x[1],''); });
   out.workflow_url_effective = workflowUrl_();
   return out;
 }
-/** 振込先・案内ページ設定の保存。口座情報の変更は監査ログに残す（金額そのものは記録しない）。 */
+/** 案内ページ・案内メール設定の保存。変更したキー名を監査ログに残す。 */
 function admin_saveGuideConfig(c){ const actor = requireRole_(['SYSTEM_ADMIN','OPERATIONS']);
   c = c || {};
   const url = String(c.workflow_url || '').trim();
@@ -549,21 +547,21 @@ function admin_saveGuideConfig(c){ const actor = requireRole_(['SYSTEM_ADMIN','O
   if(pub && /script\.google\.com|\.run\.app|localhost|^\d/i.test(pub.replace(/^https:\/\//i,'')))
     throw new Error('VALIDATION_ERROR: QRには実行基盤のURL・IPアドレスを設定できません（自社管理の独自ドメインを指定してください）');
   const before = {};
-  PAYMENT_CONFIG_KEYS.forEach(function(x){ before[x[0]] = getConfig_(x[1],''); });
-  PAYMENT_CONFIG_KEYS.forEach(function(x){
+  GUIDE_CONFIG_KEYS.forEach(function(x){ before[x[0]] = getConfig_(x[1],''); });
+  GUIDE_CONFIG_KEYS.forEach(function(x){
     if(c[x[0]] === undefined) return;
     // 本文テンプレートは長文・改行を含むため、サニタイズ短縮の対象外にする
     const raw = String(c[x[0]]);
     setConfig_(x[1], x[0] === 'guide_email_body' ? raw.slice(0,4000) : sanitizeCell_(raw.trim()).slice(0,300));
   });
-  const changed = PAYMENT_CONFIG_KEYS.filter(function(x){ return c[x[0]] !== undefined && String(c[x[0]]).trim() !== before[x[0]]; })
+  const changed = GUIDE_CONFIG_KEYS.filter(function(x){ return c[x[0]] !== undefined && String(c[x[0]]).trim() !== before[x[0]]; })
     .map(function(x){ return x[0]; });
-  logEvent_('config', 'GUIDE_PAYMENT', actor.email, null, { changed: changed });
+  logEvent_('config', 'GUIDE_CONFIG', actor.email, null, { changed: changed });
   return true;
 }
 /**
  * 「今後のお手続き」案内ページのURLを発行（既存トークンは失効させて作り直す）。
- * 契約者へ渡す唯一の導線であり、振込先・提出・バッジをこの1枚に集約している。
+ * 契約者へ渡す唯一の導線であり、作品提出・バッジ受け取りをこの1枚に集約している（振込先は契約書に記載）。
  */
 /** 案内リンクの発行。SPLL番号（推奨）または契約IDを受ける。締結済の案件だけ。 */
 function admin_issueGuideLink(idOrLicense){ const actor = requireRole_(['OPERATIONS','LEGAL_ADMIN']);
@@ -576,7 +574,7 @@ function admin_issueGuideLink(idOrLicense){ const actor = requireRole_(['OPERATI
   const token = prepareGuideToken_(key);
   logEvent_('license_case', key, actor.email, null, { guide_link_issued:true });
   const kase = ref.licenseId ? (readRows_(ssOps_(),'License_Cases').find(function(k){ return k.license_id === ref.licenseId; }) || {}) : {};
-  return { url: userPageUrl_('guide','t',token), license_id: ref.licenseId || c.license_id || '', payment_configured: paymentConfigured_(),
+  return { url: userPageUrl_('guide','t',token), license_id: ref.licenseId || c.license_id || '',
     contact_email: c.contact_email || kase.contact_email || '', contact_email_source: c.contact_email_source || '' };
 }
 

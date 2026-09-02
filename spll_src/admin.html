@@ -249,7 +249,7 @@
       <div class="subtab" data-p="fee">利用料条件</div>
       <div class="subtab" data-p="cloudsign">CloudSign API</div>
       <div class="subtab" data-p="formrun">FormRun</div>
-      <div class="subtab" data-p="guide">手続き案内・振込先</div>
+      <div class="subtab" data-p="guide">手続き案内</div>
       <div class="subtab" data-p="ai">AI審査</div>
       <div class="subtab" data-p="xbadge">X・認証バッジ</div>
       <div class="subtab" data-p="access">管理者・権限</div>
@@ -440,25 +440,12 @@
       <div class="note"><b>運用上の注意：</b>AI審査は一次スクリーニングであり、承認・適法性保証ではありません（最終判断は人手）。プロンプトを変更すると版が変わり、各審査ジョブの <span class="mono">prompt_version</span> に「ラベル:本文ハッシュ」で記録されるため、<b>どの文面で出た結果かを後から追えます</b>。モデル・GCPプロジェクト・リージョンは「作品マスタ→データソース接続」で設定します。</div>
     </div>
 
-    <!-- 締結後の手続き案内・振込先 -->
+    <!-- 締結後の手続き案内 -->
     <div class="setpane" id="p-guide">
       <div class="panel">
-        <div class="ph"><h3>振込先（利用許諾料）</h3><span class="hint">Config（台帳）／案内ページに即時反映</span></div>
+        <div class="ph"><h3>案内ページ・公開URL</h3><span class="hint">Config（台帳）／案内ページに即時反映</span></div>
         <div class="pbody">
-          <p class="setnote">締結後に契約者へお渡しする<b>「今後のお手続き」ページ</b>に表示されます。口座を変更した場合、過去に発行済みの案内URLでも<b>常に最新の内容が表示されます</b>（メール本文に口座情報を書かない運用のため、振込先を騙る偽装メールと区別しやすくなります）。</p>
-          <div class="grid2">
-            <div class="fld"><label>金融機関 <span class="h">PAYMENT_BANK_NAME</span></label><input id="gc-bank_name" placeholder="○○銀行"></div>
-            <div class="fld"><label>支店 <span class="h">PAYMENT_BRANCH</span></label><input id="gc-branch" placeholder="○○支店（店番 000）"></div>
-          </div>
-          <div class="grid2">
-            <div class="fld"><label>口座種別 <span class="h">PAYMENT_ACCOUNT_TYPE</span></label><input id="gc-account_type" placeholder="普通"></div>
-            <div class="fld"><label>口座番号 <span class="h">PAYMENT_ACCOUNT_NUMBER</span></label><input id="gc-account_number" placeholder="1234567"></div>
-          </div>
-          <div class="grid2">
-            <div class="fld"><label>口座名義 <span class="h">PAYMENT_ACCOUNT_HOLDER</span></label><input id="gc-account_holder" placeholder="株式会社○○"></div>
-            <div class="fld"><label>口座名義（カナ） <span class="h">PAYMENT_HOLDER_KANA</span></label><input id="gc-holder_kana" placeholder="カ)マルマル"></div>
-          </div>
-          <div class="fld"><label>お支払いに関する注記 <span class="h">PAYMENT_NOTE（振込手数料の負担、振込名義の指定など）</span></label><input id="gc-note" placeholder="振込手数料はご負担ください。振込名義にSPLL番号を添えてください。"></div>
+          <p class="setnote">締結後に契約者へお渡しする<b>「今後のお手続き」ページ</b>（作品提出・認証バッジの導線）の設定です。<b>利用許諾料の振込先はここでは扱いません。</b>振込先は契約書本文（個別条件）にのみ記載し、案内ページ・メールには載せません（正規の口座は契約書にだけあるため、振込先を騙る偽装メールと区別できます）。</p>
           <div class="fld"><label>事務局の問い合わせ先 <span class="h">OFFICE_CONTACT（案内ページ末尾に表示）</span></label><input id="gc-office_contact" placeholder="spll@example.com"></div>
           <div class="fld"><label>クリエーター向けページのURL <span class="h">WORKFLOW_URL（GAS②のウェブアプリURL /exec）</span></label><input id="gc-workflow_url" placeholder="https://script.google.com/macros/s/.../exec"></div>
           <div class="fld"><label>自社メールドメイン <span class="h">OFFICE_EMAIL_DOMAIN（CloudSignの送付先から自社アカウントを除外するため）</span></label><input id="gc-office_email_domain" placeholder="example.co.jp"></div>
@@ -466,12 +453,12 @@
           <div class="note" style="margin:0 0 10px"><b>QRは頒布物に印刷されて残ります。</b>ここに自社管理の独自ドメインを設定すると、検証URLは <span class="mono">https://（ドメイン）/v/（認証ID）</span> になり、将来システムの置き場所を変えてもDNSの向き先を変えるだけで過去のQRが生き続けます。<b>設定したドメインで検証ページが開ける状態にしてから</b>登録してください（設定後に発行する分から適用されます）。</div>
           <div class="note" id="gc-status" style="margin:0"></div>
         </div>
-        <div class="pfoot"><button class="save" onclick="saveGuideConfig()">振込先・案内設定を保存</button></div>
+        <div class="pfoot"><button class="save" onclick="saveGuideConfig()">案内設定を保存</button></div>
       </div>
       <div class="panel">
         <div class="ph"><h3>案内メールの自動送信</h3><span class="hint">Config／5分バッチが送信（GAS②）</span></div>
         <div class="pbody">
-          <p class="setnote">締結後、CloudSignが契約書を送付した宛先へ<b>案内ページのURLだけ</b>を自動送信します。<b>本文に口座情報は入りません</b>（振込先は案内ページで表示）。宛先が取得できない案件は送信されず、ダッシュボードの「要対応の通知」に残ります。</p>
+          <p class="setnote">締結後、CloudSignが契約書を送付した宛先へ<b>案内ページのURLだけ</b>を自動送信します。<b>本文に口座情報は入りません</b>（振込先は契約書本文に記載）。宛先が取得できない案件は送信されず、ダッシュボードの「要対応の通知」に残ります。</p>
           <label class="check" style="margin-bottom:10px;"><input type="checkbox" id="gc-guide_email_auto_send"><span>締結後に案内メールを自動送信する<span class="h" style="display:block">GUIDE_EMAIL_AUTO_SEND</span></span></label>
           <div class="grid2">
             <div class="fld"><label>差出人名 <span class="h">MAIL_FROM_NAME</span></label><input id="gc-mail_from_name" placeholder="TRPGライツ事務局"></div>
@@ -671,13 +658,11 @@ var _mDS = {SS_MASTER:"",SS_OPS:"",DRIVE_ROOT:"",GCP_PROJECT:"",GCP_REGION:"",GE
   defaults:{SS_MASTER:"PUT_WORKS_MASTER_SPREADSHEET_ID",SS_OPS:"PUT_OPS_SPREADSHEET_ID",DRIVE_ROOT:"PUT_SHARED_DRIVE_FOLDER_ID",GCP_PROJECT:"PUT_GCP_PROJECT_ID",GCP_REGION:"us-central1",GEMINI_MODEL:"gemini-2.5-flash"}};
 var _mAiDefault="あなたは審査者ではなく一次スクリーナーです。根拠箇所を示し、不明は不明としてください。\n本提出作品は、複数の原作を同時に利用している可能性があります。\n各指摘(finding)には、どの原作(work_id)のルールに関するものかを必ず付与してください。\n次の原作別ルールと契約条件に対する適合候補・要確認・高リスク候補を抽出してください。\n{{rules}}";
 var _mAiPrompt=_mAiDefault;
-var _mGuide = {bank_name:"三菱UFJ銀行",branch:"神田支店（店番 001）",account_type:"普通",account_number:"1234567",
-  account_holder:"TRPGライツ事務局",holder_kana:"ティーアールピージーライツジムキョク",
-  note:"振込手数料はご負担ください。振込名義にSPLL番号を添えてください。",office_contact:"spll@example.com",workflow_url:"",
+var _mGuide = {office_contact:"spll@example.com",workflow_url:"",
   office_email_domain:"example.co.jp",mail_from_name:"TRPGライツ事務局",mail_reply_to:"spll@example.com",
   guide_email_auto_send:"true",
   guide_email_subject:"【SPLL】ご契約ありがとうございます／今後のお手続きのご案内（{{license_id}}）",
-  guide_email_body:"{{party_name}} 様\n\nこのたびはSPLL利用許諾契約をご締結いただき、ありがとうございます。\n\n　SPLL番号：{{license_id}}\n　ご案内ページ：{{guide_url}}\n\n※ お振込先はご案内ページに掲載しています。当事務局がメール本文で口座情報をお知らせすることはありません。\n\n{{office_contact}}"};
+  guide_email_body:"{{party_name}} 様\n\nこのたびはSPLL利用許諾契約をご締結いただき、ありがとうございます。\n\n　SPLL番号：{{license_id}}\n　ご案内ページ：{{guide_url}}\n\n※ 利用許諾料のお振込先は契約書に記載しています。当事務局がメール本文やご案内ページで口座情報をお知らせすることはありません。\n\n{{office_contact}}"};
 var _mRouting = {form_url_standard_fixed:"",form_url_standard_rate:"",form_url_individual:"https://form.run/@spll-individual",
   form_url_manual_review:"",corporate_inquiry_url:"",corporate_inquiry_email:"spll-corporate@example.com",
   corporate_inquiry_note:"",
@@ -706,9 +691,9 @@ var MOCK = {
   admin_setCertEnabled:function(id,on){ _mContracts&&0; return { status:on?"ACTIVE":"PAYMENT_HOLD", changed:true }; },
   admin_getMailStatus:function(){ return {enabled:_mGuide.guide_email_auto_send!=="false",sent:12,pending:1,failed:0,remaining_quota:1487,from_name:_mGuide.mail_from_name,reply_to:_mGuide.mail_reply_to}; },
   admin_sendGuideEmailTest:function(to){ return {sent:true,to:to}; },
-  admin_getGuideConfig:function(){ return Object.assign({}, _mGuide, {configured:!!(_mGuide.bank_name||_mGuide.account_number), workflow_url_effective:_mGuide.workflow_url||"https://script.google.com/macros/s/WORKFLOW/exec"}); },
+  admin_getGuideConfig:function(){ return Object.assign({}, _mGuide, {workflow_url_effective:_mGuide.workflow_url||"https://script.google.com/macros/s/WORKFLOW/exec"}); },
   admin_saveGuideConfig:function(c){ Object.keys(c||{}).forEach(function(k){ _mGuide[k]=c[k]; }); return true; },
-  admin_issueGuideLink:function(id){ return { url:"https://script.google.com/macros/s/WORKFLOW/exec?page=guide&t=mock-guide-token", license_id:"SPLL-202608-0001", payment_configured:!!_mGuide.bank_name, contact_email:"taro.yamada@example.com", contact_email_source:"CLOUDSIGN" }; },
+  admin_issueGuideLink:function(id){ return { url:"https://script.google.com/macros/s/WORKFLOW/exec?page=guide&t=mock-guide-token", license_id:"SPLL-202608-0001", contact_email:"taro.yamada@example.com", contact_email_source:"CLOUDSIGN" }; },
   admin_getPortalRoutingConfig:function(){ return _mRouting; },
   admin_savePortalRoutingConfig:function(c){ Object.keys(c||{}).forEach(function(k){ _mRouting[k]=c[k]; }); return true; }
 };
@@ -910,8 +895,8 @@ function saveAiConfig(){
   });
 }
 
-// ---- 締結後の手続き案内・振込先 ----
-var GC_FIELDS=["bank_name","branch","account_type","account_number","account_holder","holder_kana","note","office_contact","workflow_url","public_base_url","office_email_domain",
+// ---- 締結後の手続き案内（振込先は契約書本文に記載するため設定を持たない）----
+var GC_FIELDS=["office_contact","workflow_url","public_base_url","office_email_domain",
   "mail_from_name","mail_reply_to","guide_email_subject","guide_email_body"];
 function loadGuideConfig(){
   call("admin_getGuideConfig",[],function(c){
@@ -920,10 +905,7 @@ function loadGuideConfig(){
     var au=$("gc-guide_email_auto_send"); if(au) au.checked=String(c.guide_email_auto_send||"true").toLowerCase()!=="false";
     loadMailStatus();
     var el=$("gc-status"); if(!el) return;
-    el.innerHTML=(c.configured
-      ? '<b style="color:var(--pass)">✓ 振込先が設定されています</b>'
-      : '<b style="color:var(--fail)">⚠ 振込先が未設定です</b>（案内ページにお支払い欄が表示されません）')+
-      '　／　クリエーター向けページURL：<span class="mono">'+esc(c.workflow_url_effective||"（未設定・adminのURLが使われます）")+'</span>';
+    el.innerHTML='クリエーター向けページURL：<span class="mono">'+esc(c.workflow_url_effective||"（未設定・adminのURLが使われます）")+'</span>';
   });
 }
 function saveGuideConfig(){
@@ -1208,12 +1190,11 @@ function showUploadLink(contractId, res){
 function showGuideLink(contractId, res){
   var url=(res&&res.url)||"";
   if(!url){ toast("案内リンクの発行に失敗しました"); return; }
-  if(res && res.payment_configured===false) toast("振込先が未設定のため、案内ページにお支払い欄が出ません（設定→手続き案内・振込先）", true);
   var to=(res&&res.contact_email)||"";
   var srcLabel={CLOUDSIGN:"CloudSign送付先",FORM:"申込フォーム入力"}[res&&res.contact_email_source]||"";
   window.prompt("SPLL番号 "+((res&&res.license_id)||contractId)+" の「今後のお手続き」案内リンク\n"+
     (to?("送付先："+to+(srcLabel?("（"+srcLabel+"）"):"")+"\n"):"送付先：未取得（CloudSign照会・フォーム入力とも取得できていません）\n")+
-    "（振込先・作品提出・認証バッジをまとめたページ。クリエーターへ共有してください）：", url);
+    "（作品提出・認証バッジをまとめたページ。振込先は契約書に記載。クリエーターへ共有してください）：", url);
 }
 
 // ---- 未紐付け締結の手動紐付け ----
@@ -1591,7 +1572,7 @@ MOCK.admin_listCertifications=function(){ return [
 ]; };
 MOCK.admin_setCertEnabled=function(){ return {status:"ACTIVE",changed:true}; };
 MOCK.admin_getCertStatus=function(){ return {status:"ACTIVE"}; };
-MOCK.admin_issueGuideLink=function(){ return { url:"https://script.example/exec?page=guide&t=mock-guide-token", license_id:"SPLL-202608-0001", payment_configured:true, contact_email:"taro.yamada@example.com", contact_email_source:"CLOUDSIGN" }; };
+MOCK.admin_issueGuideLink=function(){ return { url:"https://script.example/exec?page=guide&t=mock-guide-token", license_id:"SPLL-202608-0001", contact_email:"taro.yamada@example.com", contact_email_source:"CLOUDSIGN" }; };
 MOCK.admin_listCloudSignSendFailures=function(){ return _mCsSend; };
 MOCK.admin_markManualCloudSignSent=function(id){ _mCsSend=_mCsSend.filter(function(a){return a.application_id!==id;}); return true; };
 MOCK.admin_cancelApplication=function(id){ _mCsSend=_mCsSend.filter(function(a){return a.application_id!==id;}); return true; };

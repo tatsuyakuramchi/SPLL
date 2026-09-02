@@ -2,32 +2,11 @@
  * SPLL 44_guide ― 締結後の「今後のお手続き」案内ページ（トークンアクセス）
  *
  * CloudSign締結 → 業務台帳に載った時点で GUIDE トークンを発行し、案内ページのURLを払い出す。
- * ページには、SPLL番号・利用許諾料・振込先・作品提出の導線・認証バッジ（QR）・今後の流れを載せる。
+ * ページには、SPLL番号・契約条件の概要・クレジット表記・審査状況・作品提出の導線・認証バッジ（審査完了後）・今後の流れを載せる。
  *
- * 振込先をメール本文へ直接書かず、この1枚に集約する理由：
- *   ・口座変更時に過去の案内と食い違わない（常に最新のConfigを表示）
- *   ・振込先を騙る偽装メールとの区別がつきやすい（正規の導線が1つに定まる）
- *   ・作品提出用フォルダを「必要になった時だけ」開ける（編集リンクの開放期間を短くできる）
+ * 利用許諾料の振込先はここには載せない（RP-002 §9.1）。振込先は契約書本文に記載し、契約書が唯一の正本になる。
+ * 案内ページ・メールに口座情報を持たせないので、振込先を騙る偽装メールとの区別がつく（正規の口座は契約書にだけある）。
  */
-
-/** 振込先（管理コンソール「設定→手続き案内」で編集） */
-function paymentInfo_(){
-  return {
-    bank_name:      getConfig_('PAYMENT_BANK_NAME',''),
-    branch:         getConfig_('PAYMENT_BRANCH',''),
-    account_type:   getConfig_('PAYMENT_ACCOUNT_TYPE',''),
-    account_number: getConfig_('PAYMENT_ACCOUNT_NUMBER',''),
-    account_holder: getConfig_('PAYMENT_ACCOUNT_HOLDER',''),
-    holder_kana:    getConfig_('PAYMENT_HOLDER_KANA',''),
-    note:           getConfig_('PAYMENT_NOTE',''),
-    contact:        getConfig_('OFFICE_CONTACT','')
-  };
-}
-/** 振込先が1つでも入力されているか（未設定なら案内ページに枠を出さない） */
-function paymentConfigured_(){
-  const p = paymentInfo_();
-  return !!(p.bank_name || p.account_number || p.account_holder);
-}
 
 /**
  * 締結時にGUIDEトークンを発行する。
@@ -73,7 +52,6 @@ function web_getGuideContext(token){
     signed_at: String(kase.signed_at || c.signed_at || '').slice(0,10),
     fee_label: String(terms.fee_amount_or_rate || ''),
     payment_terms: String(terms.payment_terms || terms.payment_due || ''),
-    payment: paymentConfigured_() ? paymentInfo_() : null,
     cert_id: cert ? cert.cert_id : '',
     cert_status: cert ? cert.status : 'NONE',
     badge_url: badge ? userPageUrl_('badge','token',token) : '',   // バッジPNGに検証QRが焼き込まれている

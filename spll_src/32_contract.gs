@@ -94,11 +94,11 @@ function finishContractLinkage_(contractId){
  */
 function preparePostSigningWorkflow_(contractId){
   prepareSubmissionToken_(contractId);
-  // 締結直後に「今後のお手続き」案内ページのURLを払い出す（振込先・提出導線・審査後のバッジ受け取りをまとめた1枚）
+  // 締結直後に「今後のお手続き」案内ページのURLを払い出す（提出導線・審査後のバッジ受け取りをまとめた1枚。振込先は契約書本文に記載）
   const guideToken = prepareGuideToken_(contractId);
   enqueueNotification_(contractId, 'GUIDE_READY', contractId,
     { guide_url: userPageUrl_('guide','t',guideToken),
-      note:'締結完了。この案内ページURLを契約者へお伝えください（振込先・作品提出の導線。認証バッジは作品の審査完了後に発行されます）' });
+      note:'締結完了。この案内ページURLを契約者へお伝えください（作品提出の導線。振込先は契約書に記載。認証バッジは作品の審査完了後に発行されます）' });
 }
 /**
  * 経理向け引渡データの作成（RP-001 §10）。締結内容のスナップショットを

@@ -198,7 +198,7 @@ function setup_bootstrap(opts){
   if(!getConfig_('SUBMIT_FOLDER_MAX_FILES',''))   setConfig_('SUBMIT_FOLDER_MAX_FILES','50');                // 1版あたりの最大ファイル数
   if(!getConfig_('SUBMIT_FOLDER_MAX_GB',''))      setConfig_('SUBMIT_FOLDER_MAX_GB','5');                    // 1版あたりの合計サイズ上限（GB）
   if(!getConfig_('SUBMIT_FOLDER_OPEN_DAYS',''))   setConfig_('SUBMIT_FOLDER_OPEN_DAYS','14');                // 投入用リンクの開放日数（超過で共有解除）
-  // 締結後の案内メール（自動送信）。本文には振込先を書かず、案内ページURLのみを載せる
+  // 締結後の案内メール（自動送信）。本文には振込先を書かず、案内ページURLのみを載せる（振込先は契約書本文にのみ記載）
   if(!getConfig_('GUIDE_EMAIL_AUTO_SEND','')) setConfig_('GUIDE_EMAIL_AUTO_SEND','true');
   if(!getConfig_('GUIDE_EMAIL_SUBJECT',''))   setConfig_('GUIDE_EMAIL_SUBJECT', GUIDE_EMAIL_DEFAULT_SUBJECT);
   if(!getConfig_('GUIDE_EMAIL_BODY',''))      setConfig_('GUIDE_EMAIL_BODY', GUIDE_EMAIL_DEFAULT_BODY);

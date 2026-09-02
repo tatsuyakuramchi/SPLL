@@ -88,7 +88,7 @@ web_getSubmitContext         提出ページの内容
 web_submitWork               作品の提出（20MBまで）
 web_openDriveSubmission      大容量提出のフォルダ払出し
 web_finalizeDriveSubmission  大容量提出の確定
-web_getGuideContext          案内ページの内容（振込先・提出・バッジ）
+web_getGuideContext          案内ページの内容（提出・バッジ。振込先は契約書に記載）
 web_getSubmitLinkFromGuide   提出リンクの再発行
 web_verifyCertificate        認証の照会
 web_getBadgeContext          バッジのメタ情報

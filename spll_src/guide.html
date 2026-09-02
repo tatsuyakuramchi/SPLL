@@ -98,7 +98,7 @@
   <div id="loading" class="sub">読み込み中…</div>
   <div id="app" style="display:none;">
     <h1>ご契約ありがとうございます</h1>
-    <p class="sub">契約が成立しました。このページに、利用許諾料のお支払い・作品のご提出・認証バッジの受け取りまでをまとめています。<b>ブックマークしてご利用ください。</b></p>
+    <p class="sub">契約が成立しました。このページに、作品のご提出から認証バッジの受け取りまでをまとめています。<b>ブックマークしてご利用ください。</b></p>
 
     <div class="card">
       <h2>ご契約内容</h2>
@@ -114,24 +114,18 @@
       </div>
       <div class="note" id="gCreditNote" style="display:none;">上記のクレジット表記を、二次創作物に記載してください。表示位置・改変の可否は二次創作ガイドラインに従います。</div>
       <div class="note">SPLL番号は、お問い合わせ・お振込・作品提出のすべてで使う受付番号です。<span id="gExp"></span></div>
-    </div>
-
-    <div class="card" id="payCard" style="display:none;">
-      <h2>1. 利用許諾料のお支払い</h2>
-      <div class="kv" id="payKv"></div>
-      <div class="note" id="payTerms"></div>
-      <div class="warn">お振込先が記載されたメールが届いても、内容はこのページで必ずご確認ください。事務局が口座情報をメール本文でお知らせすることはありません。</div>
+      <div class="warn"><b>利用許諾料のお振込先は、締結した契約書（個別条件）に記載しています。</b>事務局がメール本文やこのページで口座情報をお知らせすることはありません。口座情報が書かれたメールが届いた場合は、振込を行わず事務局までご連絡ください。</div>
     </div>
 
     <div class="card">
-      <h2 id="submitHead">2. 作品のご提出</h2>
+      <h2 id="submitHead">1. 作品のご提出</h2>
       <p style="font-size:13.5px;margin:0 0 12px;">完成した二次創作作品をご提出ください。提出作品はAIによる一次確認と事務局の確認に付されます。<b>20MBを超える動画・音源・入稿データ等も、専用フォルダからご提出いただけます。</b></p>
       <button class="btn" id="toSubmit">作品提出ページを開く →</button>
       <div class="note" id="submitNote">ボタンを押すと、この契約専用の提出ページが開きます。<b>提出リンクは押すたびに新しく発行される</b>ため、作品の完成が数ヶ月先でもこのページから開き直せます。</div>
     </div>
 
     <div class="card">
-      <h2 id="badgeHead">3. 認証バッジ（QRコード付き）</h2>
+      <h2 id="badgeHead">2. 認証バッジ（QRコード付き）</h2>
       <p style="font-size:13.5px;margin:0 0 12px;">正規ライセンスであることを示す認証バッジです。<b>作品をご提出いただき、審査が完了した時点で発行されます。</b>QRコードから誰でも有効性を確認できます。作品のクレジット表記欄などにご利用ください。</p>
       <div id="badgeArea"></div>
       <div class="kv" style="margin-top:12px;">
@@ -144,7 +138,7 @@
     <div class="card">
       <h2>今後の流れ</h2>
       <ol class="steps">
-        <li><b>利用許諾料をお振込みください</b>お振込名義にはSPLL番号を添えていただけると確認がスムーズです。</li>
+        <li><b>利用許諾料をお振込みください</b>お振込先と時期は契約書の記載に従います。お振込名義にはSPLL番号を添えていただけると確認がスムーズです。</li>
         <li><b>作品が完成したらご提出ください</b>頒布・公開の前後どちらでも構いません（契約条件に定めがある場合はそれに従います）。</li>
         <li><b>認証バッジを表示してください</b>クレジット表記とあわせてご利用いただけます。</li>
         <li><b>是正のご連絡がある場合</b>提出ページに内容が表示されます。修正版を同じ提出の新しい版としてご提出ください。</li>
@@ -177,18 +171,7 @@ function render(c){
   $("gExp").textContent=c.guide_expires_at
     ? ("　このページのご利用期限："+c.guide_expires_at+"（作品のご提出はこの期間内であればいつでも可能です。期限後は事務局へご連絡ください）") : "";
 
-  if(c.payment){
-    $("payCard").style.display="";
-    var p=c.payment, rows=[["金融機関",p.bank_name],["支店",p.branch],["口座種別",p.account_type],
-      ["口座番号",p.account_number],["口座名義",p.account_holder+(p.holder_kana?("（"+p.holder_kana+"）"):"")]];
-    $("payKv").innerHTML=rows.filter(function(r){return r[1];})
-      .map(function(r){ return '<div class="k">'+esc(r[0])+'</div><div class="v mono">'+esc(r[1])+'</div>'; }).join("");
-    var terms=[c.payment_terms,p.note].filter(Boolean).join(" ／ ");
-    $("payTerms").textContent=terms||"お支払い時期は契約書の記載に従います。";
-  }else{
-    $("submitHead").textContent="1. 作品のご提出";
-    $("badgeHead").textContent="2. 認証バッジ（QRコード付き）";
-  }
+  // 振込先はこのページに出さない（契約書本文にのみ記載。RP-002 §9.1）
 
   if(c.badge_url){
     $("badgeArea").innerHTML='<a class="btn sec" href="'+esc(c.badge_url)+'" target="_blank" rel="noopener">🏅 認証バッジをダウンロード →</a>';

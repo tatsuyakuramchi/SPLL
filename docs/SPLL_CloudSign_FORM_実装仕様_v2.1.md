@@ -390,7 +390,7 @@ CloudSign公式案内では、CloudSign FORM powered by formrunは、Webフォ�
 締結すると `Notification_Queue` に `GUIDE_READY` が起票され、**GAS②の5分バッチ**が案内メールを送信する。
 締結Webhookの中で送らないのは、メール障害・送信上限で締結処理そのものを失敗させないため。
 
-**本文には案内ページのURLだけを載せ、口座情報は書かない。** 振込先は案内ページで表示する（§12の理由と同じ）。
+**本文には案内ページのURLだけを載せ、口座情報は書かない。** 振込先は**契約書本文に記載**する（RP-002 §9.1・2026-09-02 変更。以前は案内ページで表示していたが、口座情報の正本を契約書だけにした）。
 本文には「事務局がメール本文で口座情報を知らせることはない」旨の注意書きを含める。
 
 | 設定（Config） | 内容 |
@@ -399,7 +399,7 @@ CloudSign公式案内では、CloudSign FORM powered by formrunは、Webフォ�
 | `GUIDE_EMAIL_SUBJECT` / `GUIDE_EMAIL_BODY` | 件名・本文テンプレート（差込 `{{license_id}}` `{{party_name}}` `{{guide_url}}` `{{usage_category}}` `{{works}}` `{{office_contact}}`） |
 | `MAIL_FROM_NAME` / `MAIL_REPLY_TO` | 差出人名・返信先 |
 
-すべて管理コンソール「設定 → 手続き案内・振込先 → 案内メールの自動送信」から編集し、テスト送信もできる。
+すべて管理コンソール「設定 → 手続き案内 → 案内メールの自動送信」から編集し、テスト送信もできる。
 
 ### 送信されない場合の扱い
 

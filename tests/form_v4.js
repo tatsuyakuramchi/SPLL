@@ -51,7 +51,7 @@ ok(/転送項目/.test(patch) && /form_fields/.test(patch),'ポータルはサ�
 ok(/FORM_TRANSFER_KEYS/.test(adminHtml),'hidden項目ひな形は転送項目だけを出す');
 ok(/id="set-privacy"/.test(adminHtml)&&/id="set-guideline"/.test(adminHtml)&&/id="set-terms"/.test(adminHtml),'管理画面 同意文・規約に3文書の枠がある');
 ok(/loadLegalFile/.test(adminHtml)&&/previewLegal/.test(adminHtml),'HTMLファイル読込とプレビューを備える');
-ok(/id="gc-bank_name"/.test(adminHtml)&&/saveGuideConfig/.test(adminHtml),'管理画面に振込先の設定がある');
+ok(!/id="gc-bank_name"/.test(adminHtml)&&/saveGuideConfig/.test(adminHtml)&&/振込先は契約書本文/.test(adminHtml),'管理画面に振込先の設定が無く、契約書に記載する旨を明示');
 ok(/admin_issueGuideLink/.test(adminHtml),'契約管理から案内リンクを発行できる');
 ok(/gc-guide_email_auto_send/.test(adminHtml)&&/sendMailTest/.test(adminHtml),'管理画面に案内メールの自動送信設定がある');
 ok(/admin_setCertEnabled/.test(adminHtml),'契約管理に認証オン／オフのスイッチがある');

@@ -1555,16 +1555,16 @@ docs/SPLL_分断・簡素化実装計画_v1.0.md
 |---|---|---|---|
 | 3 | 認証発行を審査 CLEARED 後へ | 実装 | `41_certificate.gs` `completeCertification_`。締結後処理は `preparePostSigningWorkflow_` |
 | 4 | State Machine | 実装 | `12_license_state.gs` `transitionLicenseCase_`。旧 `updateLicenseCase_` は `updateLicenseCaseRaw_`（移行のみ）／状態列以外は `updateLicenseCaseInfo_` |
-| 4.4 | case_status 一覧 | 実装（1つ追加） | 提案に無い **HOLD**（締結したが条件不一致・法務確認待ち）を追加。契約は成立しているので MANUAL_REVIEW とは区別する |
+| 4.4 | case_status 一覧 | 実装（1つ追加・了承済） | 提案に無い **HOLD**（締結したが条件不一致・法務確認待ち）を追加。契約は成立しているので MANUAL_REVIEW とは区別する |
 | 5 | license_id 展開 | 実装 | 8テーブルに末尾追加・dual-write。`Badges.cert_id` も追加 |
 | 6 | migration | 実装 | `setup_migrateLicenseForeignKeysV2`（PARTIAL／System_Errors・冪等）。申込段階の通知は reference_id（申込ID）経由も解決 |
 | 7 | tokens | 実装 | `issueToken_` 等は SPLL番号でも契約IDでも受ける（`resolveLicenseRef_`）。`reference_id` 列追加 |
 | 8 | public pages | 実装 | `tokenLicenseRef_` / `belongsToLicense_`。表示値は SPLL番号。新規案件の Drive は `SPLL-番号/`（`createCaseFolder_`）、旧案件は移動しない |
-| 9.1 | GUIDE から振込先を削除 | **保留** | 現行の実装仕様 v2.1 は「メール本文に口座情報を書かず、振込先は案内ページで示す」設計。外すとクリエーターが支払先を知る手段が無くなるため、代替の支払案内が決まるまで残す |
+| 9.1 | GUIDE から振込先を削除 | 実装 | 振込先は**契約書本文に記載**する方針が決まったため（2026-09-02）。案内ページ・メール・管理画面の設定（PAYMENT_*）をすべて外し、口座情報の正本は契約書だけにした。CloudSign テンプレートへの振込先追記が必要 |
 | 9.2 | GUIDE に審査状況・認証状況 | 実装 | `review_status` を表示。認証は「審査完了後に発行」と案内 |
 | 10 | Contract_Documents 正本化 | 部分 | 詳細画面は Contract_Documents を表示。`currentSignedContract_` を追加。version の種別別採番は未着手（現状 ORIGINAL のみ運用） |
 | 11 | Admin API | 実装 | `admin_dashboard`（case_status 集計＋要対応統合）／`admin_listLicenseCases(filters)`／`admin_getLicenseCase`／`admin_listCertifications`／`admin_listContracts` は @deprecated |
-| 12 | admin.html | 実装（1点差異） | 契約管理タブ廃止・詳細ドロワー・認証管理タブ追加。**「原作・条件」タブは未分離**（設定タブ内の原作・料金表のまま。画面移動だけの変更なので後回し） |
+| 12 | admin.html | 実装（1点差異・了承済） | 契約管理タブ廃止・詳細ドロワー・認証管理タブ追加。**「原作・条件」タブは未分離**（設定タブ内の原作・料金表のまま） |
 | 13 | RBAC | 実装 | ACCOUNTING 廃止・REVIEWER 追加。`setup_migrateAdminRolesV2`（ACCOUNTING→AUDITOR） |
 | 14 | Fee 権限 | 実装 | `admin_saveFeeRow` は LEGAL_ADMIN |
 | 15 | Notification | 実装 | `enqueueLicenseNotification_`。旧名は互換ラッパー |
