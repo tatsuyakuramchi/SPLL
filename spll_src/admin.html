@@ -1366,8 +1366,15 @@ function renderLicenseDetail(d){
     kvRow("認証状態",certPill(L.certification_status)+(cert&&cert.reason_text?'　<span style="font-size:11px;color:var(--soft)">'+esc(cert.reason_text)+'</span>':""))+
     kvRow("認証ID",'<span class="id">'+esc(cert?cert.cert_id:"—")+'</span>')+
     kvRow("発行日",'<span class="id">'+esc(cert?cert.issued_at:"—")+'</span>')+
-    kvRow("バッジ",badge?pill({cls:"pass",label:"発行済 "+badge.issued_at}):pill({cls:"wait",label:cert?"生成中":"未発行（審査完了後）"}))+
+    kvRow("バッジ",badge?pill({cls:"pass",label:"発行済 "+badge.issued_at}):pill({cls:"wait",label:cert?(cert.status==="ACTIVE"?"生成中":"停止中は発行しません"):"未発行（審査完了後）"}))+
     '</div>';
+  // バッジは手動では発行できない（審査CLEARED→認証ACTIVE→ジョブの経路のみ）。失敗したジョブの再試行だけを出す
+  if((d.badgeJobs||[]).length){
+    h+='<table style="margin-top:10px"><thead><tr><th>バッジ生成ジョブ</th><th>状態</th><th>試行</th><th>エラー</th><th></th></tr></thead><tbody>'+
+      d.badgeJobs.map(function(j){ return '<tr><td class="id">'+esc(String(j.badge_job_id).slice(0,8))+'…</td><td>'+pill({cls:"fail",label:esc(j.status)})+'</td><td>'+esc(j.retry_count)+'</td><td style="font-size:11px">'+esc(j.last_error||"—")+'</td>'+
+        '<td><button class="btn" onclick="call(\'admin_retryBadgeJob\',[\''+esc(j.badge_job_id)+'\'],function(){ toast(\'バッジ生成を再試行しました\'); openLicense(\''+esc(lid)+'\'); })">再試行</button></td></tr>'; }).join("")+
+      '</tbody></table>';
+  }
   if((d.changeRequests||[]).length) h+='<table style="margin-top:10px"><thead><tr><th>申請</th><th>変更先</th><th>理由</th><th>申請者</th><th>状態</th></tr></thead><tbody>'+
     d.changeRequests.map(function(r){ return '<tr><td class="id">'+esc(String(r.request_id).slice(0,8))+'…</td><td>'+esc(r.requested_status)+'</td><td>'+esc(r.reason_text)+'</td><td>'+esc(r.requested_by)+'</td><td>'+esc(r.status)+'</td></tr>'; }).join("")+'</tbody></table>';
   h+='<div class="actions" style="margin-top:10px">'+certActionButtons(lid, cert?cert.status:"NONE", function(){ openLicense(lid); })+'</div></div>';
@@ -1563,7 +1570,7 @@ MOCK.admin_getLicenseCase=function(id){ return { license:{license_id:id,party_di
   works:[{work_id:"WRK-ARK00012",work_name_snapshot:"新クトゥルフ神話TRPG ルールブック",credit_snapshot:"指定のシリーズ権利表記を記載",fee_model_snapshot:"FLAT",fee_value_snapshot:"16500"}],
   submissions:[{submission_id:"SUB-202608-0007",title:"狂気山脈の夜想曲",status:"CLEARED",versions:[{version_no:1,status:"CORRECTION_REQUIRED"},{version_no:2,status:"CLEARED"}],latest_review:{result:"CLEARED",reviewer:"ops@example.com",comments:"問題なし",reviewed_at:"2026-08-20"}}],
   certificate:{cert_id:"CERT-202608-0003",status:"ACTIVE",reason_code:"ISSUED",reason_text:"審査完了により発行",issued_at:"2026-08-20"}, badge:{badge_id:"BDG-202608-0003",issued_at:"2026-08-20",status:"ISSUED"},
-  changeRequests:[], pendingNotifications:[],
+  badgeJobs:[], changeRequests:[], pendingNotifications:[],
   timeline:[{occurred_at:"2026-08-01T10:00:00Z",actor:"portal",event:"APPLICATION_CREATED",after:{case_status:"APPLICATION_RECEIVED"}},{occurred_at:"2026-08-10T09:00:00Z",actor:"cloudsign",event:"CLOUDSIGN_SIGNED",after:{case_status:"AWAITING_SUBMISSION"}},{occurred_at:"2026-08-18T12:00:00Z",actor:"licensee",event:"SUBMISSION_CREATED",after:{case_status:"REVIEWING"}},{occurred_at:"2026-08-20T15:00:00Z",actor:"ops@example.com",event:"CERTIFICATE_ISSUED",after:{case_status:"CERTIFIED"}}],
   legacy:{contract_id:"CTR-202608-0001",handoffs:[{handoff_version:1,status:"ACCEPTED"}]} }; };
 MOCK.admin_listCertifications=function(){ return [

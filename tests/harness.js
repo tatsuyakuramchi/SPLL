@@ -1191,7 +1191,10 @@ ok(G.serveVerify_({parameter:{page:'verify',id:rotSw.cert_id,c:rotSw.check_code}
   'オフの間はバッジQRの検証が「無効」になる');
 G.admin_setCertEnabled(cSw.contract_id,true,'入金確認');
 ok(certSw().status==='ACTIVE'&&certSw().reason_code==='PAYMENT_CLEARED','入金確認でオンへ戻せる（承認不要）');
-ok(G.serveVerify_({parameter:{page:'verify',id:rotSw.cert_id,c:rotSw.check_code}})._h.indexOf('確認済み')>=0,'戻すと検証も有効に');
+// 停止中のコード再発行で旧バッジは差し替え済なので、復帰時に有効なバッジを作り直す（照合コードは実行時に再発行）
+ok(rows(OPS,'Badges').some(b=>b.contract_id===cSw.contract_id&&b.status==='ISSUED'),'復帰時に有効なバッジが無ければ作り直す');
+const rotSw2=G.admin_rotateCertCode(cSw.contract_id);
+ok(G.serveVerify_({parameter:{page:'verify',id:rotSw2.cert_id,c:rotSw2.check_code}})._h.indexOf('確認済み')>=0,'戻すと検証も有効に');
 ok(G.admin_setCertEnabled(cSw.contract_id,true,'').changed===false,'既にオンなら何もしない（冪等）');
 // 失効・契約終了はこのスイッチの対象外（従来どおり申請→別担当者の承認）
 G.setup_setInitialAdmin('legal2@example.com','LEGAL_ADMIN');   // 承認者（申請者とは別担当）
@@ -1892,6 +1895,70 @@ ok(G.admin_dashboard().actions.some(a=>a.kind==='エラー'&&a.status==='LICENSE
 G.updateRow_(OPS,'Certificates','cert_id',rows(OPS,'Certificates').find(c=>c.license_id===c3App.license_id).cert_id,{ status:'ACTIVE' });
 G.updateLicenseCaseRaw_(c3App.license_id,{ review_status:'CLEARED' });
 ok(G.admin_auditLicenseConsistency().processed>0,'管理者は監査を手動で起動できる');
+
+// ============ P0-1 / P0-2：バッジは「審査CLEARED→認証ACTIVE→ジョブ」の経路でだけ作る。再試行でQRを失わない ============
+// 300. 手動発行の入口は無く、issueBadge_ 自身が前提を検証する
+ok(typeof G.admin_issueBadge==='undefined','管理APIにバッジの手動発行は無い');
+ok(/admin_retryBadgeJob/.test(adminHtml)&&!/admin_issueBadge/.test(adminHtml),'画面はバッジ生成の再試行だけを持つ');
+const bpApp=mkAppV4(['WRK-ARK00012'],'書籍');
+G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({submission_id:'FR-BP',columns:v4Cols(bpApp)})}});
+G.doPost({parameter:{},postData:{contents:JSON.stringify({document_id:'DOC-BP',status:'COMPLETED',application_ref:bpApp.application_ref})}});
+const bpCtr=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-BP');
+let bpNoCert=false; try{ G.issueBadge_(bpApp.license_id,'CERT-NONE','https://example.test/v'); }catch(e){ bpNoCert=/DATA_NOT_FOUND/.test(String(e.message)); }
+ok(bpNoCert,'認証の無い案件にはバッジを作れない（締結だけでは不可）');
+const otherActive=rows(OPS,'Certificates').find(c=>c.status==='ACTIVE'&&c.license_id&&c.license_id!==bpApp.license_id);
+let bpMismatch=false; try{ G.issueBadge_(bpApp.license_id,otherActive.cert_id,'https://example.test/v'); }catch(e){ bpMismatch=/DATA_CONFLICT/.test(String(e.message)); }
+ok(bpMismatch,'別案件の認証を指定してもバッジを作れない');
+const bpLink=G.admin_sendUploadLink(bpCtr.contract_id);
+const bpSub=G.web_submitWork(bpLink.token,{ title:'バッジ経路', filename:'b.pdf', mimeType:'application/pdf', dataBase64:b64 });
+G.admin_setHumanReview(bpSub.submission_id,'CLEARED','ok');
+const bpCert=()=>rows(OPS,'Certificates').find(c=>c.license_id===bpApp.license_id);
+const bpJobs=()=>rows(OPS,'Badge_Jobs').filter(j=>j.license_id===bpApp.license_id);
+const bpBadges=()=>rows(OPS,'Badges').filter(b=>b.license_id===bpApp.license_id&&b.status==='ISSUED');
+ok(bpJobs().length===1&&bpJobs()[0].status==='ISSUED'&&bpJobs()[0].cert_id===bpCert().cert_id,'Badge_Jobs は cert_id を持ち、CLEARED で ISSUED');
+ok(!('verify_url' in bpJobs()[0])&&!('check_code' in bpJobs()[0]),'Badge_Jobs に検証URL・平文コードは保存しない');
+ok(bpBadges().length===1&&bpBadges()[0].cert_id===bpCert().cert_id,'バッジは認証に紐づく');
+G.admin_setCertEnabled(bpApp.license_id,false,'未入金');
+let bpInactive=false; try{ G.issueBadge_(bpApp.license_id,bpCert().cert_id,'https://example.test/v'); }catch(e){ bpInactive=/ACTIVE の認証だけ/.test(String(e.message)); }
+ok(bpInactive,'停止中の認証にはバッジを作れない');
+G.admin_setCertEnabled(bpApp.license_id,true,'入金確認');
+G.updateLicenseCaseRaw_(bpApp.license_id,{ review_status:'AWAITING_SUBMISSION' });   // 旧フローの残骸（審査前に認証がある台帳）を模す
+let bpReview=false; try{ G.issueBadge_(bpApp.license_id,bpCert().cert_id,'https://example.test/v'); }catch(e){ bpReview=/審査完了/.test(String(e.message)); }
+ok(bpReview,'審査が完了していない台帳にはバッジを作れない（認証ACTIVEだけでは不十分）');
+G.updateLicenseCaseRaw_(bpApp.license_id,{ review_status:'CLEARED' });
+G.web_submitWork(bpLink.token,{ submission_id:bpSub.submission_id, title:'バッジ経路', filename:'b2.pdf', mimeType:'application/pdf', dataBase64:b64 });
+ok(bpBadges().length===1&&rows(OPS,'License_Cases').find(k=>k.license_id===bpApp.license_id).case_status==='REVIEWING','認証済の案件が新しい版を再審査中でも、有効な認証のバッジは維持される');
+G.admin_setHumanReview(bpSub.submission_id,'CLEARED','再確認');
+
+// 301. 初回生成に失敗しても、再試行は新しい照合コードを発行してQR付きバッジを作る
+const slidesCreateOrig=G.SlidesApp.create;
+G.SlidesApp.create=function(){ throw new Error('Slides quota exceeded'); };
+const rotFail=G.admin_rotateCertCode(bpApp.license_id);      // 旧バッジは SUPERSEDED、再生成ジョブは失敗する
+G.SlidesApp.create=slidesCreateOrig;
+const failJob=bpJobs().find(j=>j.badge_job_id===rotFail.badge_job_id);
+ok(failJob&&failJob.status==='RETRY_WAIT'&&Number(failJob.retry_count)===1,'生成失敗のジョブは RETRY_WAIT');
+ok(bpBadges().length===0,'失敗時にバッジは作られない（QR無しバッジも作らない）');
+const hashAfterRotate=bpCert().check_code_hash;
+const rr=G.retryBadgeJobs_();
+ok(rr.completed>=1&&bpJobs().find(j=>j.badge_job_id===failJob.badge_job_id).status==='ISSUED','5分バッチの再試行で ISSUED');
+ok(bpBadges().length===1&&bpBadges()[0].cert_id===bpCert().cert_id,'再試行で作ったバッジも認証に紐づく');
+ok(bpCert().check_code_hash!==hashAfterRotate,'再試行では照合コードを新しく発行する（平文を保存していないため）');
+ok(G.web_verifyCertificate(bpCert().cert_id,rotFail.check_code).state==='MISMATCH','再試行前のコードはもう使えない（QR無しの古い状態に依存しない）');
+ok(rows(OPS,'Events').some(e=>e.entity_type==='certificate'&&e.entity_id===bpCert().cert_id&&/badge_job/.test(String(e.after))),'ジョブによるコード再発行は Events に残る');
+
+// 302. 管理画面からの再試行は失敗したジョブだけ。ERROR まで落ちたジョブも人が再試行できる
+let retryDone=false; try{ G.admin_retryBadgeJob(failJob.badge_job_id); }catch(e){ retryDone=/失敗したジョブだけ/.test(String(e.message)); }
+ok(retryDone,'成功済ジョブは再試行できない');
+G.SlidesApp.create=function(){ throw new Error('Slides down'); };
+const rot2=G.admin_rotateCertCode(bpApp.license_id);
+G.retryBadgeJobs_(); G.retryBadgeJobs_();
+const errJob=()=>bpJobs().find(j=>j.badge_job_id===rot2.badge_job_id);
+ok(errJob().status==='ERROR'&&Number(errJob().retry_count)===3,'3回失敗で ERROR（バッチは拾わない）');
+G.SlidesApp.create=slidesCreateOrig;
+const manualRetry=G.admin_retryBadgeJob(rot2.badge_job_id);
+ok(manualRetry.badge_id&&errJob().status==='ISSUED','管理画面からの再試行で発行');
+ok(bpBadges().length===1,'有効バッジは常に1枚');
+ok(G.admin_getLicenseCase(bpApp.license_id).badgeJobs.length===0,'詳細の失敗ジョブ一覧は解消後に空');
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

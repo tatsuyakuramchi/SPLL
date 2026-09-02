@@ -231,14 +231,45 @@ function extractApplicationRef_(body, e){
 const BADGE_SIZES = [{ key:'L', size:'LARGE' }, { key:'M', size:'MEDIUM' }, { key:'S', size:'SMALL' }];
 
 // 認証・バッジの実体。発行のタイミングは審査 CLEARED 後（41_certificate の completeCertification_）。
+//
+// バッジは「ACTIVE の認証」の表示物であり、それ以外の経路では作れない（RP-002 P0-1）。
+//   人手審査 CLEARED → Certificate ACTIVE → Badge_Job → Badge
+// 入口は runBadgeJob_ だけ。管理画面の手動発行は無く、失敗したジョブの再試行（admin_retryBadgeJob）だけがある。
+// issueBadge_ 自身も前提を検証するので、UI を外しただけの「穴」にはならない。
 
-/** バッジ発行（契約単位・冪等）。BADGE_TEMPLATE_IDがあればテンプレ差込、無ければ自動組版。 */
-function issueBadge_(contractId, verifyUrl){
-  const existing = readRows_(ssOps_(),'Badges').find(function(b){ return b.contract_id === contractId && b.status === 'ISSUED'; });
+/** 案件の ISSUED バッジ（認証の表示物）。license_id が正本、旧行は contract_id で引く。 */
+function issuedBadgeForLicense_(licenseId, contractId){
+  const ref = { licenseId: String(licenseId || ''), contractId: String(contractId || '') };
+  return readRows_(ssOps_(),'Badges').find(function(b){ return belongsToLicense_(b, ref) && String(b.status) === 'ISSUED'; }) || null;
+}
+
+/**
+ * バッジ発行（案件単位・冪等）。BADGE_TEMPLATE_IDがあればテンプレ差込、無ければ自動組版。
+ * 前提（どれか欠けたら例外）：案件がある／認証が案件に属し ACTIVE／案件の審査が CLEARED。
+ * verifyUrl は平文の照合コードを含む検証URL（バッジQRへ焼き込む）。呼ぶのは runBadgeJob_ だけ。
+ */
+function issueBadge_(licenseId, certId, verifyUrl){
+  const kase = readRows_(ssOps_(),'License_Cases').find(function(k){ return k.license_id === String(licenseId || ''); });
+  if(!kase) throw new Error('DATA_NOT_FOUND: ライセンス案件がありません: ' + licenseId);
+  const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.cert_id === String(certId || ''); });
+  if(!cert) throw new Error('DATA_NOT_FOUND: 認証がありません: ' + certId);
+  const certLicense = cert.license_id || licenseIdOfContract_(cert.contract_id);
+  if(String(certLicense) !== String(licenseId)) throw new Error('DATA_CONFLICT: 認証とライセンスが一致しません（' + certId + ' / ' + licenseId + '）');
+  if(String(cert.status) !== 'ACTIVE') throw new Error('STATE_ERROR: ACTIVE の認証だけがバッジを発行できます（現在: ' + cert.status + '）');
+  // 審査が完了していない案件には作らない。認証済の案件が新しい版を再審査中（REVIEWING 等）のときは、
+  // 認証そのものは有効なのでバッジの維持・作り直しはできる（審査で問題が出れば認証側が止まる）
+  const reReviewing = certLive_(kase.certification_status) &&
+    ['REVIEWING','CORRECTION_REQUIRED','MANUAL_REVIEW'].indexOf(normalizeCaseStatus_(kase.case_status)) >= 0;
+  if(String(kase.review_status) !== 'CLEARED' && !reReviewing)
+    throw new Error('STATE_ERROR: 審査完了（CLEARED）前にはバッジを発行できません（review_status=' + kase.review_status + '）');
+  if(!verifyUrl) throw new Error('VALIDATION_ERROR: 検証URLが無いバッジは発行できません（QRが焼き込めない）');
+
+  const contractId = cert.contract_id || resolveLicenseRef_(licenseId).contractId;
+  const existing = issuedBadgeForLicense_(licenseId, contractId);
   if(existing) return { badge_id: existing.badge_id, reused:true };
 
   const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === contractId; });
-  if(!c) throw new Error('契約が見つかりません: ' + contractId);
+  if(!c) throw new Error('DATA_NOT_FOUND: 契約が見つかりません: ' + contractId);
   // 表示・クレジットは契約時スナップショットから生成（V2-014-1）
   const cws = readRows_(ssOps_(),'Contract_Works').filter(function(x){ return x.contract_id === contractId; });
   const names = cws.map(function(x){ return x.work_name_snapshot || x.work_id; });
@@ -257,13 +288,12 @@ function issueBadge_(contractId, verifyUrl){
   });
   try{ DriveApp.getFileById(presId).setTrashed(true); }catch(e){}   // 一時Slidesは破棄
 
-  const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.contract_id === contractId; }) || {};
   appendRow_(ssOps_(),'Badges', { badge_id:badgeId, contract_id:contractId,
-    license_id: licenseIdOfContract_(contractId), cert_id: cert.cert_id || '',   // バッジは認証の表示物（RP-002 §16）
+    license_id: String(licenseId), cert_id: cert.cert_id,   // バッジは認証の表示物（RP-002 §16）
     issued_at:issuedAt, png_l:files[0].file_id, png_m:files[1].file_id, png_s:files[2].file_id,
     token_hash:'', status:'ISSUED' });
   distributeBadge_(c, badgeId);
-  logEvent_('badge', badgeId, 'system', null, { contract_id:contractId, files:files });
+  logEvent_('badge', badgeId, 'system', null, { license_id:String(licenseId), cert_id:cert.cert_id, contract_id:contractId, files:files });
   return { badge_id:badgeId, files:files };
 }
 
@@ -312,20 +342,60 @@ function fetchQrPng_(url){
 }
 
 // ---- バッジ発行ジョブ（V2-014-8）：失敗時に再実行可能 ----
-function enqueueBadgeJob_(contractId, verifyUrl){
+// ジョブは「どの認証（cert_id）のバッジか」だけを持つ。検証URL・平文コードは保存しない（P0-2）。
+// 初回は呼び出し側が直前に発行した平文コードの検証URLを渡して同期実行する。
+// 再試行（5分バッチ・手動）では平文が残っていないので、そのとき新しい照合コードを発行して焼き込む。
+// バッジが正常発行されていない段階なので、コードが変わっても失われるQRは無い。
+function enqueueBadgeJob_(licenseId, certId, verifyUrl){
   const jobId = Utilities.getUuid();
-  appendRow_(ssOps_(),'Badge_Jobs',{ badge_job_id:jobId, contract_id:contractId, license_id: licenseIdOfContract_(contractId), status:'QUEUED',
-    retry_count:0, last_error:'', created_at:new Date().toISOString(), finished_at:'' });
-  try{ runBadgeJob_(jobId, verifyUrl); }catch(e){ /* バッチ再試行に委ねる */ }
-  return jobId;
+  const contractId = resolveLicenseRef_(licenseId).contractId;
+  appendRow_(ssOps_(),'Badge_Jobs',{ badge_job_id:jobId, contract_id:contractId, license_id:String(licenseId||''), cert_id:String(certId||''),
+    status:'QUEUED', retry_count:0, last_error:'', created_at:new Date().toISOString(), finished_at:'' });
+  let result = null;
+  try{ result = runBadgeJob_(jobId, verifyUrl); }catch(e){ /* バッチ再試行に委ねる */ }
+  return { badge_job_id:jobId, result:result };
 }
+/** ジョブの認証行。cert_id が正本、旧ジョブ（cert_id 無し）は案件から引く。 */
+function badgeJobCert_(job, licenseId){
+  const certs = readRows_(ssOps_(),'Certificates');
+  if(job.cert_id){ return certs.find(function(x){ return x.cert_id === job.cert_id; }) || null; }
+  const ref = { licenseId: String(licenseId||''), contractId: String(job.contract_id||'') };
+  return certs.find(function(x){ return belongsToLicense_(x, ref); }) || null;
+}
+/**
+ * ジョブ実行。ACTIVE の認証にだけバッジを作る。
+ * verifyUrl を渡されなければ（再試行）照合コードを新しく発行して検証URLを組む。
+ * 戻り値 { badge_id, reused?, check_code?（この実行で発行したときだけ）, verify_url? }
+ */
 function runBadgeJob_(jobId, verifyUrl){
   const job = readRows_(ssOps_(),'Badge_Jobs').find(function(j){ return j.badge_job_id === jobId; });
-  if(!job || job.status === 'ISSUED') return;
+  if(!job || job.status === 'ISSUED') return null;
   updateRow_(ssOps_(),'Badge_Jobs','badge_job_id',jobId,{ status:'GENERATING' });
   try{
-    issueBadge_(job.contract_id, verifyUrl);
-    updateRow_(ssOps_(),'Badge_Jobs','badge_job_id',jobId,{ status:'ISSUED', finished_at:new Date().toISOString(), last_error:'' });
+    const licenseId = job.license_id || licenseIdOfContract_(job.contract_id);
+    if(!licenseId) throw new Error('DATA_NOT_FOUND: SPLL番号の無い案件です（setup_migrateLicenseForeignKeysV2 を実行）');
+    const cert = badgeJobCert_(job, licenseId);
+    if(!cert) throw new Error('DATA_NOT_FOUND: 認証がありません（cert_id=' + (job.cert_id || '—') + '）');
+    if(String(cert.status) !== 'ACTIVE') throw new Error('STATE_ERROR: ACTIVE の認証がありません（現在: ' + cert.status + '）');
+    let out;
+    const existing = issuedBadgeForLicense_(licenseId, cert.contract_id || job.contract_id);
+    if(existing){
+      out = { badge_id: existing.badge_id, reused:true };   // 既に有効なバッジがある。コードを変えて無効にしない
+    }else{
+      let code = null, url = verifyUrl || '';
+      if(!url){
+        // 再試行：平文コードは残っていないので新しく発行（旧QRを持つバッジは存在しない）
+        code = randCode_(12);
+        updateRow_(ssOps_(),'Certificates','cert_id',cert.cert_id,{ check_code_hash:hash_(code) });
+        logEvent_('certificate', cert.cert_id, 'system', null, { code_rotated:true, by:'badge_job', badge_job_id:jobId });
+        url = verifyUrl_(cert.cert_id, code);
+      }
+      const r = issueBadge_(licenseId, cert.cert_id, url);
+      out = { badge_id:r.badge_id, reused:!!r.reused, check_code:code, verify_url:url };
+    }
+    updateRow_(ssOps_(),'Badge_Jobs','badge_job_id',jobId,{ status:'ISSUED', finished_at:new Date().toISOString(), last_error:'',
+      cert_id: cert.cert_id, license_id: licenseId });
+    return out;
   }catch(err){
     const retry = num_(job.retry_count) + 1;
     updateRow_(ssOps_(),'Badge_Jobs','badge_job_id',jobId,

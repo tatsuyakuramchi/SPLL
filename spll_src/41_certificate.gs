@@ -75,9 +75,12 @@ function completeCertification_(licenseId, submissionId, actor){
     return { issued:false, reused:true, cert_id: existing.cert_id, status: existing.status };
   }
   const cert = issueCert_(contract.contract_id);   // 平文の照合コードはここでだけ得られる（バッジQRへ焼き込む）
-  if(prop_('BADGE_AUTO') !== 'false') enqueueBadgeJob_(contract.contract_id, cert && cert.verify_url);
   transitionLicenseCase_(licenseId, 'CERTIFICATE_ISSUED', { actor: actor || 'system', reason: '審査CLEARED: ' + submissionId });
+  // バッジは認証 ACTIVE・審査 CLEARED が揃った後にだけ作る（issueBadge_ が再検証する）。失敗は5分バッチが再試行
+  let badge = null;
+  if(prop_('BADGE_AUTO') !== 'false') badge = enqueueBadgeJob_(licenseId, cert.cert_id, cert.verify_url);
   logEvent_('certificate', cert.cert_id, actor || 'system', null,
-    { issued:true, license_id: licenseId, submission_id: submissionId, contract_id: contract.contract_id });
-  return { issued:true, cert_id: cert.cert_id, verify_url: cert.verify_url };
+    { issued:true, license_id: licenseId, submission_id: submissionId, contract_id: contract.contract_id,
+      badge_job_id: badge ? badge.badge_job_id : '' });
+  return { issued:true, cert_id: cert.cert_id, verify_url: cert.verify_url, badge_job_id: badge ? badge.badge_job_id : '' };
 }

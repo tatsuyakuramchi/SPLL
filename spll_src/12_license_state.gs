@@ -136,7 +136,11 @@ const LICENSE_TRANSITIONS = {
     guard: function(ctx, cur){ return certExists_(cur.certification_status) ? '' : '認証が発行されていません（certification_status=' + cur.certification_status + '）'; },
     to: function(ctx, cur){
       const patch = { certification_status:'ACTIVE' };
-      if(['CERTIFIED','SUSPENDED','TERMINATED'].indexOf(cur.case_status) >= 0) patch.case_status = 'CERTIFIED';
+      if(['CERTIFIED','SUSPENDED','TERMINATED'].indexOf(cur.case_status) >= 0){
+        // 新しい版の再審査が進行中なら現在地は審査側（HUMAN_REVIEW_CLEARED で認証の状態へ戻る）
+        const byReview = { IN_REVIEW:'REVIEWING', PENDING:'REVIEWING', CORRECTION_REQUIRED:'CORRECTION_REQUIRED', ESCALATED:'MANUAL_REVIEW' };
+        patch.case_status = byReview[cur.review_status] || 'CERTIFIED';
+      }
       return patch;
     }
   },

@@ -741,9 +741,25 @@ function admin_saveBadgeConfig(c){ requireRole_(['SYSTEM_ADMIN']);
   logEvent_('config', 'BADGE', actor_(), null, { saved:true });
   return true;
 }
-/** バッジ手動発行 */
-function admin_issueBadge(contractId){ requireRole_(['OPERATIONS']); const r = issueBadge_(contractId); logEvent_('badge', r.badge_id || contractId, actor_(), null, { manual:true }); return r; }
-/** 照合コードの再発行（LEGAL_ADMIN）。旧QRは無効になる。平文は1回だけ返す。 */
+/**
+ * バッジの手動発行は無い（P0-1）。バッジは 人手審査CLEARED → 認証ACTIVE → Badge_Job の経路でだけ作られる。
+ * 失敗したジョブ（RETRY_WAIT / ERROR）だけを、ここから再試行できる。
+ */
+function admin_retryBadgeJob(badgeJobId){
+  const actor = requireRole_(['OPERATIONS','LEGAL_ADMIN']);
+  const job = readRows_(ssOps_(),'Badge_Jobs').find(function(j){ return j.badge_job_id === String(badgeJobId || ''); });
+  if(!job) throw new Error('DATA_NOT_FOUND: バッジジョブが見つかりません: ' + badgeJobId);
+  if(['RETRY_WAIT','ERROR'].indexOf(String(job.status)) < 0)
+    throw new Error('DATA_CONFLICT: 再試行できるのは失敗したジョブだけです（現在: ' + job.status + '）');
+  updateRow_(ssOps_(),'Badge_Jobs','badge_job_id',job.badge_job_id,{ status:'RETRY_WAIT', retry_count:0 });
+  logEvent_('badge_job', job.badge_job_id, actor.email, { status:job.status }, { retry:true });
+  const r = runBadgeJob_(job.badge_job_id);   // 失敗はそのまま例外（画面に理由を出す）
+  return { badge_job_id: job.badge_job_id, badge_id: r ? r.badge_id : '', reused: !!(r && r.reused) };
+}
+/**
+ * 照合コードの再発行（LEGAL_ADMIN）。旧QRは無効になる。平文は1回だけ返す。
+ * 認証が ACTIVE ならバッジも作り直す（旧バッジは SUPERSEDED）。停止中はコードだけ変え、バッジは復帰時に作る。
+ */
 function admin_rotateCertCode(contractId){
   const actor = requireRole_(['LEGAL_ADMIN']);
   const cert = certForRef_(contractId);
@@ -753,11 +769,13 @@ function admin_rotateCertCode(contractId){
   logEvent_('certificate', cert.cert_id, actor.email, null, { code_rotated:true });
   const url = verifyUrl_(cert.cert_id, code);
   // 旧QRを含むバッジを差し替え（V2-015）。バッジは認証の表示物なので同じ案件の分を全部
-  const ref = resolveLicenseRef_(cert.license_id || cert.contract_id);
+  const licenseId = cert.license_id || licenseIdOfContract_(cert.contract_id);
+  const ref = resolveLicenseRef_(licenseId || cert.contract_id);
   readRows_(ssOps_(),'Badges').filter(function(b){ return belongsToLicense_(b, ref) && b.status === 'ISSUED'; })
     .forEach(function(b){ updateRow_(ssOps_(),'Badges','badge_id',b.badge_id,{ status:'SUPERSEDED' }); });
-  enqueueBadgeJob_(cert.contract_id, url);
-  return { cert_id:cert.cert_id, check_code:code, verify_url:url };
+  let job = null;
+  if(licenseId && String(cert.status) === 'ACTIVE') job = enqueueBadgeJob_(licenseId, cert.cert_id, url);
+  return { cert_id:cert.cert_id, check_code:code, verify_url:url, badge_job_id: job ? job.badge_job_id : '' };
 }
 
 /**
@@ -819,6 +837,11 @@ function admin_setCertEnabled(contractId, enabled, reason){
   const status = on ? 'ACTIVE' : 'PAYMENT_HOLD';
   applyCertStatus_(contractId, status, on ? 'PAYMENT_CLEARED' : 'PAYMENT_HOLD',
     sanitizeCell_(String(reason || (on ? '入金確認により再有効化' : ''))).slice(0,300), '', actor.email);
+  // 復帰時に有効なバッジが無ければ（停止中にコード再発行で差し替えた等）作り直す。照合コードは実行時に再発行される
+  if(on){
+    const licenseId = cert.license_id || licenseIdOfContract_(cert.contract_id);
+    if(licenseId && !issuedBadgeForLicense_(licenseId, cert.contract_id)) enqueueBadgeJob_(licenseId, cert.cert_id);
+  }
   return { status:status, changed:true };
 }
 
@@ -1222,6 +1245,9 @@ function admin_getLicenseCase(licenseId){ requireRole_([]);
     certificate: cert ? { cert_id:cert.cert_id, status:cert.status, reason_code:cert.reason_code||'', reason_text:cert.reason_text||'',
       issued_at:cert.issued_at||'', effective_at:String(cert.effective_at||'').slice(0,10) } : null,
     badge: badge ? { badge_id:badge.badge_id, issued_at:badge.issued_at, status:badge.status } : null,
+    // 失敗したバッジ生成ジョブ（画面から再試行できる。手動発行は無い）
+    badgeJobs: readRows_(ssOps_(),'Badge_Jobs').filter(function(j){ return belongsToLicense_(j, ref) && ['RETRY_WAIT','ERROR'].indexOf(String(j.status)) >= 0; })
+      .map(function(j){ return { badge_job_id:j.badge_job_id, status:j.status, retry_count:num_(j.retry_count), last_error:String(j.last_error||''), created_at:String(j.created_at||'').slice(0,10) }; }),
     changeRequests: readRows_(ssOps_(),'Certificate_Change_Requests').filter(function(r){ return belongsToLicense_(r, ref); })
       .map(function(r){ return { request_id:r.request_id, requested_status:r.requested_status, reason_text:r.reason_text,
         requested_by:r.requested_by, requested_at:String(r.requested_at||'').slice(0,10), status:r.status }; }),
