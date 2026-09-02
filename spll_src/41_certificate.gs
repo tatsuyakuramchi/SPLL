@@ -60,27 +60,44 @@ function certificationBlockers_(licenseId, submissionId){
  * 人手審査 CLEARED を受けて認証を発行する。
  * 既に ACTIVE の認証がある案件（再提出の再審査など）は再発行せず、そのまま返す。
  * 停止中（PAYMENT_HOLD 等）の認証は審査通過だけでは復帰させない（未入金の判断は別）。
+ *
+ * 認証の行と台帳（License_Cases）は一緒に変わるべきものなので、
+ *   ロック → 前提の再確認 → 台帳遷移の事前検証 → 認証の行を作成 → 台帳を遷移 → Events
+ * の順で行う（P1-2）。事前検証で拒否されれば何も書かない。台帳が後段で失敗して
+ * 「認証だけ ACTIVE」になる経路を作らない。バッジ生成はこの外（失敗しても認証には影響しない）。
  */
 function completeCertification_(licenseId, submissionId, actor){
-  const why = certificationBlockers_(licenseId, submissionId);
-  if(why){
-    logEvent_('certificate', licenseId, actor || 'system', null, { issued:false, reason: why, submission_id: submissionId });
-    return { issued:false, reason: why };
-  }
-  const contract = currentSignedContract_(licenseId);
-  const existing = readRows_(ssOps_(),'Certificates').find(function(c){
-    return String(c.license_id || licenseIdOfContract_(c.contract_id)) === String(licenseId); });
-  if(existing){
-    // 発行済。停止中なら復帰は別途の判断、有効なら何もしない
-    return { issued:false, reused:true, cert_id: existing.cert_id, status: existing.status };
-  }
-  const cert = issueCert_(contract.contract_id);   // 平文の照合コードはここでだけ得られる（バッジQRへ焼き込む）
-  transitionLicenseCase_(licenseId, 'CERTIFICATE_ISSUED', { actor: actor || 'system', reason: '審査CLEARED: ' + submissionId });
+  const who = actor || 'system';
+  const ctx = { actor: who, reason: '審査CLEARED: ' + submissionId };
+  const r = withLicenseLock_(function(){
+    const why = certificationBlockers_(licenseId, submissionId);
+    if(why){
+      logEvent_('certificate', licenseId, who, null, { issued:false, reason: why, submission_id: submissionId });
+      return { issued:false, reason: why };
+    }
+    const contract = currentSignedContract_(licenseId);
+    const existing = readRows_(ssOps_(),'Certificates').find(function(c){
+      return String(c.license_id || licenseIdOfContract_(c.contract_id)) === String(licenseId); });
+    if(existing){
+      // 発行済。停止中なら復帰は別途の判断、有効なら何もしない
+      return { issued:false, reused:true, cert_id: existing.cert_id, status: existing.status };
+    }
+    // 台帳が受け付けない状態（現在地が取消等）なら認証の行も作らない
+    try{ validateLicenseTransition_(licenseId, 'CERTIFICATE_ISSUED', ctx); }
+    catch(e){
+      const reason = String(e && e.message || e);
+      logEvent_('certificate', licenseId, who, null, { issued:false, reason: reason, submission_id: submissionId });
+      return { issued:false, reason: reason };
+    }
+    const cert = issueCert_(contract.contract_id);   // 平文の照合コードはここでだけ得られる（バッジQRへ焼き込む）
+    transitionLicenseCase_(licenseId, 'CERTIFICATE_ISSUED', ctx);
+    logEvent_('certificate', cert.cert_id, who, null,
+      { issued:true, license_id: licenseId, submission_id: submissionId, contract_id: contract.contract_id });
+    return { issued:true, cert_id: cert.cert_id, verify_url: cert.verify_url, contract_id: contract.contract_id };
+  });
+  if(!r.issued) return r;
   // バッジは認証 ACTIVE・審査 CLEARED が揃った後にだけ作る（issueBadge_ が再検証する）。失敗は5分バッチが再試行
   let badge = null;
-  if(prop_('BADGE_AUTO') !== 'false') badge = enqueueBadgeJob_(licenseId, cert.cert_id, cert.verify_url);
-  logEvent_('certificate', cert.cert_id, actor || 'system', null,
-    { issued:true, license_id: licenseId, submission_id: submissionId, contract_id: contract.contract_id,
-      badge_job_id: badge ? badge.badge_job_id : '' });
-  return { issued:true, cert_id: cert.cert_id, verify_url: cert.verify_url, badge_job_id: badge ? badge.badge_job_id : '' };
+  if(prop_('BADGE_AUTO') !== 'false') badge = enqueueBadgeJob_(licenseId, r.cert_id, r.verify_url);
+  return { issued:true, cert_id: r.cert_id, verify_url: r.verify_url, badge_job_id: badge ? badge.badge_job_id : '' };
 }

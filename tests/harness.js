@@ -2007,5 +2007,38 @@ const bpRe=G.admin_requestCertChange(bpApp.license_id,'ACTIVE','REACTIVATE','誤
 G.Session=SessLegal2; G.admin_approveCertChange(bpRe.request_id,true,''); G.Session=SessP0;
 ok(bpCert().status==='ACTIVE'&&bpBadges().length===1&&G.web_getBadgeContext(bpLink2.token).license_id===bpApp.license_id,'契約が有効なら失効から再有効化でき、バッジを作り直して再び配布できる');
 
+// ============ P1-2：認証の行と台帳は「ロック → 事前検証 → 書き込み」で一緒に変える ============
+// 320. 台帳が受け付けない状態では認証の行も作らない（部分書き込みを残さない）
+const pfApp=mkAppV4(['WRK-ARK00012'],'書籍');
+G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({submission_id:'FR-PF',columns:v4Cols(pfApp)})}});
+G.doPost({parameter:{},postData:{contents:JSON.stringify({document_id:'DOC-PF',status:'COMPLETED',application_ref:pfApp.application_ref})}});
+const pfLink=G.admin_sendUploadLink(pfApp.license_id);
+const pfSub=G.web_submitWork(pfLink.token,{ title:'事前検証', filename:'p.pdf', mimeType:'application/pdf', dataBase64:b64 });
+const pfCase=()=>rows(OPS,'License_Cases').find(k=>k.license_id===pfApp.license_id);
+const pfCerts=()=>rows(OPS,'Certificates').filter(c=>c.license_id===pfApp.license_id);
+// ロックの取得・解放を数える（GAS の ScriptLock は同一実行内で再入できる。newId_ の採番ロックが内側で取られる）
+let lockWaits=0, lockHeld=0, lockMaxHeld=0;
+const lockOrig=G.LockService.getScriptLock;
+G.LockService.getScriptLock=function(){ return { waitLock:function(){ lockWaits++; lockHeld++; lockMaxHeld=Math.max(lockMaxHeld,lockHeld); }, releaseLock:function(){ lockHeld--; } }; };
+// 人手審査 CLEARED の直前に台帳が取消（CANCELLED）へ変わっていた、という食い違いを模す
+G.appendRow_(OPS,'Human_Reviews',{ human_review_id:'HRV-PF-1', submission_id:pfSub.submission_id, version_id:G.latestVersionId_(pfSub.submission_id), reviewer:'x', result:'CLEARED', comments:'', reviewed_at:new Date().toISOString() });
+G.updateLicenseCaseRaw_(pfApp.license_id,{ case_status:'CANCELLED', review_status:'CLEARED' });
+const pfRes=G.completeCertification_(pfApp.license_id,pfSub.submission_id,'test');
+ok(pfRes.issued===false&&/STATE_ERROR/.test(pfRes.reason),'台帳が CERTIFICATE_ISSUED を受け付けない状態では発行しない: '+pfRes.reason);
+ok(pfCerts().length===0&&pfCase().certification_status==='NOT_ISSUED','認証の行も台帳も何も変わらない（部分書き込み無し）');
+ok(lockWaits>=1&&lockHeld===0,'発行処理はロックの中で行い、拒否時も解放する');
+// 正常系：ロックの中で 認証の行 と 台帳 が揃って変わる
+G.updateLicenseCaseRaw_(pfApp.license_id,{ case_status:'REVIEWING' });
+const pfLocks0=lockWaits;
+const pfOk=G.admin_setHumanReview(pfSub.submission_id,'CLEARED','ok');
+ok(pfOk.certification.issued===true&&pfCerts().length===1&&pfCerts()[0].status==='ACTIVE'&&pfCase().case_status==='CERTIFIED'&&pfCase().certification_status==='ACTIVE','認証の行と台帳が揃って ACTIVE / CERTIFIED');
+ok(lockWaits>pfLocks0&&lockHeld===0&&lockMaxHeld>=2,'発行はロックの中で行う（採番ロックはその内側で再入）。終了時に全て解放');
+// 状態変更（applyCertStatus_）もロックの中。台帳が拒否する変更は認証の行に書かない
+const pfLocks1=lockWaits;
+G.admin_setCertEnabled(pfApp.license_id,false,'未入金');
+ok(lockWaits>pfLocks1&&lockHeld===0&&pfCerts()[0].status!=='ACTIVE'&&pfCase().certification_status===pfCerts()[0].status,'状態変更もロックの中で認証の行と台帳を揃える');
+G.LockService.getScriptLock=lockOrig;
+G.admin_setCertEnabled(pfApp.license_id,true,'入金確認');
+
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

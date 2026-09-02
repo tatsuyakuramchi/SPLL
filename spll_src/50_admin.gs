@@ -795,29 +795,31 @@ function certForRef_(idOrLicense){
 /** 状態変更の実適用（内部）。承認済み申請または非重要状態からのみ呼ばれる。 */
 function applyCertStatus_(contractId, status, reasonCode, reasonText, legalCaseId, actorEmail){
   if(CERT_STATES.indexOf(status) < 0) throw new Error('不正な状態: ' + status);
-  const cert = certForRef_(contractId);
-  if(!cert) throw new Error('認証が見つかりません: ' + contractId);
-  const before = cert.status;
-  // ライセンス台帳の認証状態も追随させる（一覧・検証の表示が実体とずれないように）。
-  // 状態列は遷移表を通す：認証の状態値から対応するイベントを選び、書き込みの前に遷移できるかを確かめる。
-  // 台帳が拒否する変更（終了した契約の再有効化など）は認証の行にも書かない（P0-3 / P1-2）
-  const licenseId = cert.license_id || licenseIdOfContract_(cert.contract_id);
-  let event = '';
-  const ctx = { actor: actorEmail, status: status, reason: reasonCode || '' };
-  if(licenseId){
-    const kase = readRows_(ssOps_(),'License_Cases').find(function(k){ return k.license_id === licenseId; }) || {};
-    event = certificateEventFor_(status, kase.certification_status);
-    validateLicenseTransition_(licenseId, event, ctx);
-  }
-  updateRow_(ssOps_(),'Certificates','cert_id',cert.cert_id,{
-    status:status, reason_code:reasonCode||'', reason_text:reasonText||'',
-    requested_by:actorEmail, approved_by:actorEmail, legal_case_id:legalCaseId||'',
-    effective_at:new Date().toISOString() });
-  logEvent_('certificate', cert.cert_id, actorEmail, {status:before}, {status:status, reason_code:reasonCode||''});
-  if(licenseId) transitionLicenseCase_(licenseId, event, ctx);
-  // 失効・終了した認証の表示物は残さない（一時停止は残す。配布は distributableBadgeFor_ が止める）
-  if(status === 'REVOKED' || status === 'TERMINATED') supersedeBadges_(licenseId, cert.contract_id, 'cert:' + status);
-  return true;
+  // 認証の行と台帳は一緒に変える：ロック → 現在値の再読込 → 台帳遷移の事前検証 → 認証の行 → 台帳 → Events（P1-2）
+  return withLicenseLock_(function(){
+    const cert = certForRef_(contractId);
+    if(!cert) throw new Error('認証が見つかりません: ' + contractId);
+    const before = cert.status;
+    // 状態列は遷移表を通す：認証の状態値から対応するイベントを選び、書き込みの前に遷移できるかを確かめる。
+    // 台帳が拒否する変更（終了した契約の再有効化など）は認証の行にも書かない（P0-3）
+    const licenseId = cert.license_id || licenseIdOfContract_(cert.contract_id);
+    let event = '';
+    const ctx = { actor: actorEmail, status: status, reason: reasonCode || '' };
+    if(licenseId){
+      const kase = readRows_(ssOps_(),'License_Cases').find(function(k){ return k.license_id === licenseId; }) || {};
+      event = certificateEventFor_(status, kase.certification_status);
+      validateLicenseTransition_(licenseId, event, ctx);
+    }
+    updateRow_(ssOps_(),'Certificates','cert_id',cert.cert_id,{
+      status:status, reason_code:reasonCode||'', reason_text:reasonText||'',
+      requested_by:actorEmail, approved_by:actorEmail, legal_case_id:legalCaseId||'',
+      effective_at:new Date().toISOString() });
+    logEvent_('certificate', cert.cert_id, actorEmail, {status:before}, {status:status, reason_code:reasonCode||''});
+    if(licenseId) transitionLicenseCase_(licenseId, event, ctx);
+    // 失効・終了した認証の表示物は残さない（一時停止は残す。配布は distributableBadgeFor_ が止める）
+    if(status === 'REVOKED' || status === 'TERMINATED') supersedeBadges_(licenseId, cert.contract_id, 'cert:' + status);
+    return true;
+  });
 }
 
 /**

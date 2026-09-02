@@ -222,6 +222,18 @@ function validateLicenseTransition_(licenseId, event, ctx){
   return { before: cur, after: after, patch: patch, changed: changed };
 }
 
+/**
+ * 台帳と実体（Certificates 等）を一緒に変える処理の排他。
+ * SPLL は低トラフィックなので ScriptLock で十分。ロックは再入不可なので、fn の中で二重に取らない。
+ *   withLicenseLock_(function(){ 事前検証 → 実体の更新 → 台帳の遷移 → Events })
+ */
+function withLicenseLock_(fn){
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try{ return fn(); }
+  finally{ lock.releaseLock(); }
+}
+
 /** 状態列以外の更新。状態列を渡したら拒否（直接更新の抜け道を残さない）。 */
 function updateLicenseCaseInfo_(licenseId, patch){
   patch = patch || {};
