@@ -145,6 +145,12 @@ function admin_setHumanReview(submissionId, result, comment, reviewer, versionId
   const ntype = result === 'CORRECTION_REQUIRED' ? 'CORRECTION_REQUEST' : 'REVIEW_RESULT';
   enqueueNotification_(sub.contract_id, ntype, targetVersion, { submission_id:submissionId, result:result, comment:String(comment||'').slice(0,300) });
   logEvent_('human_review', submissionId, actor.email, {status:sub.status}, {result:result, version_id:targetVersion});
+  // 台帳の現在地（12_license_state）。判断の種類でイベントを分ける
+  const licenseId = sub.license_id || licenseIdOfContract_(sub.contract_id);
+  if(licenseId){
+    const ev = result === 'CLEARED' ? 'HUMAN_REVIEW_CLEARED' : (result === 'CORRECTION_REQUIRED' ? 'CORRECTION_REQUIRED' : 'REVIEW_ESCALATED');
+    transitionLicenseCase_(licenseId, ev, { actor: actor.email, reason: submissionId + ' ' + targetVersion });
+  }
   return true;
 }
 
@@ -713,9 +719,14 @@ function applyCertStatus_(contractId, status, reasonCode, reasonText, legalCaseI
     requested_by:actorEmail, approved_by:actorEmail, legal_case_id:legalCaseId||'',
     effective_at:new Date().toISOString() });
   logEvent_('certificate', cert.cert_id, actorEmail, {status:before}, {status:status, reason_code:reasonCode||''});
-  // ライセンス台帳の認証状態も追随させる（一覧・検証の表示が実体とずれないように）
-  const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === contractId; });
-  if(c && c.license_id) updateLicenseCase_(c.license_id, { certification_status: status });
+  // ライセンス台帳の認証状態も追随させる（一覧・検証の表示が実体とずれないように）。
+  // 状態列は遷移表を通す：認証の状態値から対応するイベントを選ぶ
+  const licenseId = cert.license_id || licenseIdOfContract_(contractId);
+  if(licenseId){
+    const kase = readRows_(ssOps_(),'License_Cases').find(function(k){ return k.license_id === licenseId; }) || {};
+    transitionLicenseCase_(licenseId, certificateEventFor_(status, kase.certification_status),
+      { actor: actorEmail, status: status, reason: reasonCode || '' });
+  }
   return true;
 }
 
@@ -909,6 +920,7 @@ function admin_cancelApplication(applicationId, reason){
   updateRow_(ssOps_(),'Applications','application_id',app.application_id,
     { status:'CANCELLED', cloudsign_send_status:'CANCELLED' });
   logEvent_('application', app.application_id, actor.email, { status:app.status }, { status:'CANCELLED', reason:String(reason) });
+  if(app.license_id) transitionLicenseCase_(app.license_id, 'APPLICATION_CANCELLED', { actor: actor.email, reason: String(reason) });
   return true;
 }
 /** 条件不一致（TERMS_MISMATCH）契約の一覧。 */
@@ -930,6 +942,9 @@ function admin_confirmContractTerms(contractId, note){
       terms_verification_detail: sanitizeCell_(String(c.terms_verification_detail||'') + ' / 確認: ' + String(note||'')) });
   logEvent_('contract', c.contract_id, actor.email, { terms_verification_status:'TERMS_MISMATCH' },
     { terms_verification_status:'MANUAL_CONFIRMED', note:String(note||'') });
+  // 条件不一致の保留（HOLD）を解いて、締結として前進させたうえで後続処理へ
+  const licenseId = licenseIdOfContract_(c.contract_id);
+  if(licenseId) transitionLicenseCase_(licenseId, 'CLOUDSIGN_SIGNED', { actor: actor.email, reason: '条件確認済み: ' + String(note||'') });
   finishContractLinkage_(c.contract_id);
   return true;
 }
@@ -969,7 +984,7 @@ function admin_createReplacementApplication(applicationId, reason){
   // RP-001：再申込も1案件＝1SPLL番号。旧caseは引き継がず新規採番（旧caseはCLOSEDへ）
   const kaseOld = old.license_id ? readRows_(ssOps_(),'License_Cases').find(function(k){ return k.license_id === old.license_id; }) : null;
   const newLicenseId = createLicenseCase_(newId, newRef, old.usage_category, workIdsNew, (kaseOld && kaseOld.party_type) || '');
-  if(old.license_id) updateLicenseCase_(old.license_id, { case_status:'CLOSED' });
+  if(old.license_id) transitionLicenseCase_(old.license_id, 'APPLICATION_CANCELLED', { actor: actor.email, reason: '再申込（訂正）で置換: ' + String(reason) });
   // v4申込は個別条件ハッシュに license_id / application_ref を含むため、新番号で再計算する（旧ハッシュの流用は改変検知に必ず落ちる）
   let newTermsHash = old.terms_hash, newFormFields = null;
   if(/^v4:/.test(String(old.terms_hash || '')) && typeof contractFormFieldsV4_ === 'function'){

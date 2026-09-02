@@ -114,6 +114,9 @@ function web_createApplicationV4(params){
   updateRow_(ssOps_(),'Applications','application_id',appId,{ status:'FORM_PENDING', cloudsign_send_status:'NOT_STARTED',
     template_route:finalRoute,
     manual_review_reason:finalRoute === 'MANUAL_REVIEW' ? sanitizeCell_(reasons.join('、')) : '' });
+  // 個別確認へ回る申込は、台帳の現在地もそれに合わせる（事務局の要対応一覧に出る）
+  if(finalRoute === 'MANUAL_REVIEW')
+    transitionLicenseCase_(licenseId, 'MANUAL_REVIEW_REQUIRED', { actor:'portal', reason: reasons.join('、') });
   logEvent_('license_case', licenseId, 'portal', null,
     { application_ref:ref, form_version:CONTRACT_FORM_V4_VERSION, guideline_hash:guidelineHash,
       terms_snapshot_hash:snapshotHash, route:finalRoute, reasons:reasons, form_url_length:urlLength });

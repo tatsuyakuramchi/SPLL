@@ -276,20 +276,25 @@ function processFormrunEvent_(body){
   if(app.license_id){
     const partyName = canon.company_name || canon.party_name || canon.name || '';
     const rawType = String(canon.party_type || '');
-    const casePatch = { case_status: 'CONTRACTING' };
+    const casePatch = {};
     if(partyName) casePatch.party_display_name = sanitizeCell_(String(partyName).slice(0, 100));
     // フォームで取得したメールは暫定の連絡先（正は締結時のCloudSign送付先）
     const formMail = normalizeEmail_(canon.contact_email || canon.email || canon.mail || '');
     if(formMail) casePatch.contact_email = formMail;
     if(rawType) casePatch.party_type = /法人/.test(rawType) ? 'CORPORATION'
       : (/個人事業/.test(rawType) ? 'SOLE_PROPRIETOR' : (/個人/.test(rawType) ? 'INDIVIDUAL' : sanitizeCell_(rawType).slice(0, 20)));
-    updateLicenseCase_(app.license_id, casePatch);
+    if(Object.keys(casePatch).length) updateLicenseCaseInfo_(app.license_id, casePatch);
   }
   // 逆行禁止：FORM_PENDING/APPLICATION_CREATED からのみ前進
   if(app.status === 'APPLICATION_CREATED' || app.status === 'FORM_PENDING'){
     sendPatch.status = 'CONTRACT_PENDING';
     updateRow_(ssOps_(),'Applications','application_id',app.application_id, sendPatch);
     logEvent_('application', app.application_id, 'formrun', {status:app.status}, { status:'CONTRACT_PENDING', application_ref:ref });
+    // 台帳の現在地：フォーム送信 → CloudSign へ契約書が送られる（FORMは送信まで自動）
+    if(app.license_id){
+      transitionLicenseCase_(app.license_id, 'FORM_SUBMITTED', { actor:'formrun', reason: submissionId });
+      transitionLicenseCase_(app.license_id, 'CLOUDSIGN_SENT', { actor:'formrun' });
+    }
   } else {
     updateRow_(ssOps_(),'Applications','application_id',app.application_id, sendPatch);
   }

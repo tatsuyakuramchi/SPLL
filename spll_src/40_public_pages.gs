@@ -126,6 +126,10 @@ function web_submitWork(token, data){
     original_filename:sanitizeCell_(String(data.filename||'').slice(0,200)), magic_valid:'true' });
   consumeToken_(tok);                                          // 提出回数を消費（SEC-06）
 
+  // 台帳の現在地を審査中へ（AI起票の前に。AIが同期で完走しても順序が崩れないように）
+  const licenseId = licenseIdOfContract_(contractId);
+  if(licenseId) transitionLicenseCase_(licenseId, 'SUBMISSION_CREATED', { actor:'licensee', reason: submissionId + ' v' + versionNo });
+
   // AI一次審査を起票（→人手審査必須）
   const aiId = enqueueAiReview_(submissionId, versionId);
   logEvent_('submission', submissionId, 'licensee', null, {version_no:versionNo, ai_review_id:aiId});

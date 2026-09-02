@@ -433,15 +433,19 @@ function currentPeriod_(){ const d=new Date(); return d.getFullYear()+(d.getMont
 function createLicenseCase_(appId, applicationRef, usageCategory, workIds, partyType){
   const licenseId = newId_('SPLL');
   const now = new Date().toISOString();
+  // 初期状態は状態遷移表の APPLICATION_CREATED と同じ（12_license_state）
   appendRow_(ssOps_(), 'License_Cases', {
     license_id: licenseId, application_ref: applicationRef,
     party_type: sanitizeCell_(String(partyType || '')), party_display_name: '',
     usage_category: sanitizeCell_(String(usageCategory || '')),
-    case_status: 'APPLIED', contract_status: 'NOT_STARTED',
+    case_status: 'APPLICATION_RECEIVED', contract_status: 'NOT_STARTED',
     cloudsign_document_id: '', signed_at: '', signed_pdf_file_id: '', signed_pdf_hash: '',
-    review_status: 'NOT_REQUIRED', certification_status: 'NOT_ISSUED',
+    review_status: 'NOT_STARTED', certification_status: 'NOT_ISSUED',
     finance_handoff_status: 'NOT_REQUIRED', created_at: now, updated_at: now,
   });
+  logEvent_('license_case', licenseId, 'portal', { transition_event:'APPLICATION_CREATED' },
+    { transition_event:'APPLICATION_CREATED', case_status:'APPLICATION_RECEIVED', contract_status:'NOT_STARTED',
+      review_status:'NOT_STARTED', certification_status:'NOT_ISSUED', application_ref: applicationRef });
   // 対象原作＋契約条件スナップショット（費用＝契約形態（利用目的）×原作構造で自動確定・原則5）
   const master = readRows_(ssMaster_(), 'Works_Master');
   const rule = (typeof feeRuleFor_ === 'function') ? feeRuleFor_(usageCategory) : null;
@@ -459,8 +463,12 @@ function createLicenseCase_(appId, applicationRef, usageCategory, workIds, party
   });
   return licenseId;
 }
-/** ライセンス案件の更新（updated_at自動）。 */
-function updateLicenseCase_(licenseId, patch){
+/**
+ * ライセンス案件の生更新（updated_at自動）。
+ * 状態列（case_status 等）の変更は transitionLicenseCase_、それ以外は updateLicenseCaseInfo_ を使う。
+ * ここを業務処理から直接呼ばない（12_license_state と移行処理だけが使う）。
+ */
+function updateLicenseCaseRaw_(licenseId, patch){
   if(!licenseId) return false;
   patch = patch || {};
   patch.updated_at = new Date().toISOString();

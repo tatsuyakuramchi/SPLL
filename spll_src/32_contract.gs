@@ -96,8 +96,9 @@ function finishLicenseActivation_(contractId){
   enqueueNotification_(contractId, 'GUIDE_READY', contractId,
     { guide_url: userPageUrl_('guide','t',guideToken),
       note:'締結完了。この案内ページURLを契約者へお伝えください（振込先・作品提出・認証バッジを含みます）' });
-  const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === contractId; });
-  if(c && c.license_id) updateLicenseCase_(c.license_id, { certification_status:'ACTIVE', review_status:'PENDING' });
+  // 認証発行を台帳へ反映。審査前の発行は RP-002 §3 で改める（allow_unreviewed は移行期間の互換）
+  const licenseId = licenseIdOfContract_(contractId);
+  if(licenseId) transitionLicenseCase_(licenseId, 'CERTIFICATE_ISSUED', { actor:'system', allow_unreviewed:true, reason:'締結により発行' });
 }
 /**
  * 経理向け引渡データの作成（RP-001 §10）。締結内容のスナップショットを
@@ -147,7 +148,7 @@ function createFinanceHandoff_(contractId){
     billing_terms_json: JSON.stringify(billingTerms_(c.terms_snapshot)), contract_status: 'ACTIVE',
     status: 'READY', created_at: new Date().toISOString(), accepted_at: '',
   });
-  updateLicenseCase_(licenseId, { finance_handoff_status:'READY' });
+  updateLicenseCaseInfo_(licenseId, { finance_handoff_status:'READY' });
   logEvent_('finance_handoff', handoffId, 'system', null, { license_id:licenseId, version:version, contract_id:contractId });
   return handoffId;
 }
@@ -180,7 +181,7 @@ function captureContactEmail_(contractId, verifiedDoc, app){
   }
   updateRow_(ssOps_(),'Contracts','contract_id',contractId,
     { contact_email: sanitizeCell_(email), contact_email_source: source });
-  if(app && app.license_id) updateLicenseCase_(app.license_id, { contact_email: sanitizeCell_(email) });
+  if(app && app.license_id) updateLicenseCaseInfo_(app.license_id, { contact_email: sanitizeCell_(email) });
   // 監査ログにはドメインのみ残す（本文へアドレスを平文で積み上げない）
   logEvent_('contract', contractId, 'system', null,
     { contact_email_source: source, contact_email_domain: email.split('@')[1] || '' });
@@ -191,10 +192,12 @@ function captureContactEmail_(contractId, verifiedDoc, app){
 function syncLicenseOnSigning_(contractId, licenseId, caseStatus){
   if(!licenseId) return false;
   const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === contractId; }) || {};
-  updateLicenseCase_(licenseId, {
-    case_status: caseStatus || 'SIGNED', contract_status: 'SIGNED',
+  updateLicenseCaseInfo_(licenseId, {
     cloudsign_document_id: c.cloudsign_document_id || '', signed_at: c.signed_at || '',
     signed_pdf_file_id: c.contract_file_id || '', signed_pdf_hash: c.contract_file_hash || '' });
+  // 'HOLD' は条件不一致（契約は成立・自動処理は停止）。それ以外は締結として前進させる。
+  if(caseStatus === 'HOLD') transitionLicenseCase_(licenseId, 'TERMS_MISMATCH', { actor:'cloudsign', reason: contractId });
+  else transitionLicenseCase_(licenseId, 'CLOUDSIGN_SIGNED', { actor:'cloudsign', reason: contractId });
   appendContractDocument_(licenseId, 'ORIGINAL', c.cloudsign_document_id || '', 'SIGNED',
     c.signed_at || '', c.contract_file_id || '', c.contract_file_hash || '');
   return true;

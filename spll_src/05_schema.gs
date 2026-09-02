@@ -427,17 +427,21 @@ function setup_migrateLicenseCases(){
       .map(function(w){ return w.work_id; });
     const lid = createLicenseCase_(a.application_id, a.application_ref, a.usage_category, workIds, '');
     updateRow_(ops,'Applications','application_id',a.application_id,{ license_id: lid });
-    const st = { APPLICATION_CREATED:'APPLIED', FORM_PENDING:'APPLIED', CONTRACT_PENDING:'CONTRACTING',
-      SIGNED:'SIGNED', SUPERSEDED:'CLOSED', CANCELLED:'CLOSED' };
-    updateLicenseCase_(lid, { case_status: st[String(a.status)] || 'APPLIED' });
+    // 旧申込の状態を現行の case_status へ写す（移行なので遷移表は通さず生更新）
+    const st = { APPLICATION_CREATED:'APPLICATION_RECEIVED', FORM_PENDING:'APPLICATION_RECEIVED', CONTRACT_PENDING:'CONTRACT_PENDING',
+      SIGNED:'AWAITING_SUBMISSION', SUPERSEDED:'CANCELLED', CANCELLED:'CANCELLED' };
+    updateLicenseCaseRaw_(lid, { case_status: st[String(a.status)] || 'APPLICATION_RECEIVED' });
     const c = contracts.find(function(x){ return x.application_id === a.application_id; });
     if(c){
       updateRow_(ops,'Contracts','contract_id',c.contract_id,{ license_id: lid });
       syncLicenseOnSigning_(c.contract_id, lid, 'SIGNED');
       const cert = certs.find(function(x){ return x.contract_id === c.contract_id; });
-      updateLicenseCase_(lid, {
-        certification_status: cert ? String(cert.status) : 'NOT_ISSUED',
-        review_status: cert ? 'PENDING' : 'NOT_REQUIRED',
+      // 旧データで既に認証があるものは、審査を経たものとして CERTIFIED 系へ写す
+      const certStatus = cert ? String(cert.status) : 'NOT_ISSUED';
+      updateLicenseCaseRaw_(lid, {
+        certification_status: certStatus,
+        review_status: cert ? 'CLEARED' : 'AWAITING_SUBMISSION',
+        case_status: cert ? (certStatus === 'ACTIVE' ? 'CERTIFIED' : (certStatus === 'REVOKED' || certStatus === 'TERMINATED' ? 'TERMINATED' : 'SUSPENDED')) : 'AWAITING_SUBMISSION',
         finance_handoff_status: 'ACCEPTED' });
       const now = new Date().toISOString();
       appendRow_(ops,'Finance_Handoffs',{ handoff_id: Utilities.getUuid(), license_id: lid, handoff_version: 1,

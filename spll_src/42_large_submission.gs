@@ -125,6 +125,8 @@ function web_finalizeDriveSubmission(token, versionId){
       file_count:scan.files.length, total_bytes:scan.totalBytes });
   updateRow_(ssOps_(),'Submissions','submission_id',v.submission_id,{ status:'SUBMITTED' });
   consumeToken_(tok);
+  const licenseId = licenseIdOfContract_(sub.contract_id);
+  if(licenseId) transitionLicenseCase_(licenseId, 'SUBMISSION_CREATED', { actor:'licensee', reason: v.submission_id + ' v' + num_(v.version_no) });
 
   // AI一次審査：スクリーニング可能なファイル（PDF/PNG/JPEG）があるときだけ起票し、
   // 無ければ人手審査へ回送する（動画・音楽・立体データ等はAIの対象外）

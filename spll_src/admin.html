@@ -1224,7 +1224,11 @@ function loadLicense(){
   call("admin_listLicenseCases",[],function(rows){
     var tb=$("license-tbody"); tb.innerHTML=""; rows=rows||[];
     if(!rows.length){ emptyRow(tb,11,"ライセンス案件がありません"); return; }
-    var caseM={APPLIED:{cls:"wait",label:"申込受付"},CONTRACTING:{cls:"review",label:"契約手続中"},SIGNED:{cls:"pass",label:"締結済"},HOLD:{cls:"fail",label:"要確認"},CLOSED:{cls:"wait",label:"終了"}};
+    var caseM={APPLICATION_RECEIVED:{cls:"wait",label:"申込受付"},CONTRACT_PENDING:{cls:"review",label:"契約書送付待ち"},MANUAL_REVIEW:{cls:"fail",label:"個別確認"},
+      SIGNING:{cls:"review",label:"締結待ち"},HOLD:{cls:"fail",label:"条件確認中"},AWAITING_SUBMISSION:{cls:"pass",label:"作品提出待ち"},REVIEWING:{cls:"review",label:"審査中"},
+      CORRECTION_REQUIRED:{cls:"fail",label:"是正対応中"},CERTIFIED:{cls:"pass",label:"認証済"},SUSPENDED:{cls:"review",label:"認証停止"},TERMINATED:{cls:"wait",label:"終了"},CANCELLED:{cls:"wait",label:"取消"},
+      // 移行前の旧値
+      APPLIED:{cls:"wait",label:"申込受付"},CONTRACTING:{cls:"review",label:"契約手続中"},SIGNED:{cls:"pass",label:"締結済"},CLOSED:{cls:"wait",label:"終了"}};
     var certM={NOT_ISSUED:{cls:"wait",label:"—"},ACTIVE:{cls:"pass",label:"有効"},PAYMENT_HOLD:{cls:"review",label:"未入金で停止"},SUSPENDED:{cls:"review",label:"停止"},REVOKED:{cls:"fail",label:"失効"}};
     var hoM={NOT_REQUIRED:{cls:"wait",label:"—"},READY:{cls:"review",label:"引渡待ち"},SENT:{cls:"review",label:"送信済"},ACCEPTED:{cls:"pass",label:"受領済"},ERROR:{cls:"fail",label:"エラー"}};
     rows.forEach(function(k){

@@ -61,5 +61,11 @@ ok(wj.oauthScopes.indexOf('https://www.googleapis.com/auth/script.send_mail') >=
 ok(aj.oauthScopes.indexOf('https://www.googleapis.com/auth/script.send_mail') >= 0,
    'admin にメール送信スコープがある（テスト送信）');
 ok(!pj.oauthScopes.some(s => /send_mail/.test(s)), 'portal はメール送信スコープを持たない');
+// RP-002：状態遷移は3プロジェクトで同じ遷移表を使う（片方だけ古いと台帳の状態がずれる）
+['portal','workflow','admin'].forEach(function(app){
+  const c = combined(app);
+  ok(/function transitionLicenseCase_/.test(c), app + ' に状態遷移（transitionLicenseCase_）がある');
+  ok(!/function updateLicenseCase_\(/.test(c), app + ' に旧 updateLicenseCase_（状態列の直接更新）が残っていない');
+});
 console.log('\nSEC01 RESULT: ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

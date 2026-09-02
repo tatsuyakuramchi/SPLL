@@ -727,7 +727,8 @@ ok(wfAll2.steps.some(s=>/作成=\[\]/.test(s)),'setup_workflowAll: 再実行は�
 ok(/^SPLL-\d{6}-\d{4}$/.test(appP4.license_id),'申込でSPLL番号（license_id）発行: '+appP4.license_id);
 const kaseP4=()=>rows(OPS,'License_Cases').find(k=>k.license_id===appP4.license_id);
 ok(kaseP4().contract_status==='SIGNED'&&kaseP4().cloudsign_document_id==='DOC-P4-OK','締結でcase更新（契約状態・CloudSign書類ID）');
-ok(kaseP4().certification_status==='ACTIVE'&&kaseP4().case_status==='SIGNED'&&kaseP4().review_status==='PENDING','活性化で認証ACTIVE・審査PENDING');
+ok(kaseP4().certification_status==='ACTIVE'&&kaseP4().case_status==='CERTIFIED'&&kaseP4().review_status==='AWAITING_SUBMISSION',
+  '活性化で認証ACTIVE・現在地CERTIFIED（審査状態は偽らない）');
 const lwP4=rows(OPS,'License_Works').filter(w=>w.license_id===appP4.license_id);
 ok(lwP4.length===1&&lwP4[0].fee_model_snapshot==='FLAT'&&Number(lwP4[0].fee_value_snapshot)===16500,
   '費用は契約形態（利用目的）×原作構造で自動確定しLicense_Worksへスナップショット');
@@ -745,8 +746,8 @@ ok(/^SPLL-/.test(appParty.license_id)&&'form_url' in appParty,'申込応答にSP
 G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:appParty.application_ref,submission_id:'FR-RP-1',
   columns:v4Cols(appParty).concat([{name:'氏名',value:'山田太郎'},{name:'契約者区分',value:'個人'},{name:'handoff',value:appParty.handoff_token}])})}});
 const kaseParty=rows(OPS,'License_Cases').find(k=>k.license_id===appParty.license_id);
-ok(kaseParty.party_display_name==='山田太郎'&&kaseParty.party_type==='INDIVIDUAL'&&kaseParty.case_status==='CONTRACTING',
-  'フォーム回答から契約者名・区分を台帳へ反映（CONTRACTING）');
+ok(kaseParty.party_display_name==='山田太郎'&&kaseParty.party_type==='INDIVIDUAL'&&kaseParty.case_status==='SIGNING',
+  'フォーム回答から契約者名・区分を台帳へ反映（現在地はSIGNING）');
 delete scriptProps.FORMRUN_FIELD_MAP;
 
 // 75. 契約者区分：個人（個人事業主含む）のみ受付し、台帳へ区分を記録する
@@ -907,7 +908,7 @@ const repV4=G.admin_createReplacementApplication(v4d.application_id,'対象原�
 ok(/^SPLL-/.test(repV4.license_id)&&repV4.license_id!==v4d.license_id,'再申込にも新しいSPLL番号を発行（1案件1番号）');
 ok(/^v4:/.test(repV4.terms_snapshot_hash)&&repV4.terms_snapshot_hash!==v4d.terms_snapshot_hash,'新番号で個別条件ハッシュを再計算（旧ハッシュを流用しない）');
 ok(repV4.form_fields&&repV4.form_fields.license_id===repV4.license_id,'再申込のFORM引渡値も新番号で再生成');
-ok(rows(OPS,'License_Cases').find(k=>k.license_id===v4d.license_id).case_status==='CLOSED','旧案件はCLOSED');
+ok(rows(OPS,'License_Cases').find(k=>k.license_id===v4d.license_id).case_status==='CANCELLED','旧案件はCANCELLED（再申込で置換）');
 const repApp=rows(OPS,'Applications').find(a=>a.application_id===repV4.application_id);
 const whRep=G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({application_ref:repV4.application_ref,
   submission_id:'FR-V4-REP',columns:v4Cols(repV4)})}});
@@ -1553,6 +1554,85 @@ G.admin_savePortalRoutingConfig({ form_url_max_chars:'900' });
 ok(G.admin_getPortalRoutingConfig().form_url_max_chars==='900'&&G.formUrlMaxChars_()===900,'上限は設定画面から変更できる');
 G.admin_savePortalRoutingConfig({ form_url_max_chars:'850' });
 G.Session=SessFm;
+
+// ============ RP-002 §4：ライセンス案件の状態遷移（12_license_state） ============
+// 200. 4つの状態列は遷移表を通してだけ変わる。直接更新は拒否
+const smApp=mkAppV4(['WRK-ARK00012'],'書籍');
+const smCase=()=>rows(OPS,'License_Cases').find(k=>k.license_id===smApp.license_id);
+ok(smCase().case_status==='APPLICATION_RECEIVED'&&smCase().contract_status==='NOT_STARTED'&&
+   smCase().review_status==='NOT_STARTED'&&smCase().certification_status==='NOT_ISSUED','申込直後の初期状態は遷移表の APPLICATION_CREATED と一致');
+let directErr=false; try{ G.updateLicenseCaseInfo_(smApp.license_id,{ case_status:'CERTIFIED' }); }catch(e){ directErr=/transitionLicenseCase_/.test(String(e.message)); }
+ok(directErr,'状態列の直接更新は拒否（遷移表を通させる）');
+ok(G.updateLicenseCaseInfo_(smApp.license_id,{ party_display_name:'状態機械テスト' })&&smCase().party_display_name==='状態機械テスト',
+  '状態列以外は updateLicenseCaseInfo_ で更新できる');
+
+// 201. 不正な遷移は例外。申込受付から認証は発行できない／締結前に認証は発行できない
+let jumpErr=false; try{ G.transitionLicenseCase_(smApp.license_id,'CERTIFICATE_ISSUED',{actor:'test'}); }catch(e){ jumpErr=/STATE_ERROR/.test(String(e.message)); }
+ok(jumpErr,'APPLICATION_RECEIVED → CERTIFIED は拒否');
+G.transitionLicenseCase_(smApp.license_id,'FORM_SUBMITTED',{actor:'test'});
+G.transitionLicenseCase_(smApp.license_id,'CLOUDSIGN_SENT',{actor:'test'});
+ok(smCase().case_status==='SIGNING'&&smCase().contract_status==='SIGNING','フォーム送信→CloudSign送付で SIGNING');
+let preSignCert=false; try{ G.transitionLicenseCase_(smApp.license_id,'CERTIFICATE_ISSUED',{actor:'test',force:false,allow_unreviewed:true}); }catch(e){ preSignCert=/STATE_ERROR/.test(String(e.message)); }
+ok(preSignCert,'SIGNING → CERTIFIED は拒否（契約が成立していない）');
+let noCertSuspend=false; try{ G.transitionLicenseCase_(smApp.license_id,'CERTIFICATE_SUSPENDED',{actor:'test'}); }catch(e){ noCertSuspend=/認証が発行されていません/.test(String(e.message)); }
+ok(noCertSuspend,'認証が無いのに停止はできない');
+let unknownEv=false; try{ G.transitionLicenseCase_(smApp.license_id,'MAKE_IT_SO',{}); }catch(e){ unknownEv=/未定義のイベント/.test(String(e.message)); }
+ok(unknownEv,'未定義のイベントは拒否');
+
+// 202. 締結 → 提出待ち → 提出で審査中 → 是正 → 通過。認証は審査を通ってから
+G.transitionLicenseCase_(smApp.license_id,'CLOUDSIGN_SIGNED',{actor:'test'});
+ok(smCase().case_status==='AWAITING_SUBMISSION'&&smCase().contract_status==='SIGNED'&&smCase().review_status==='AWAITING_SUBMISSION'&&smCase().certification_status==='NOT_ISSUED',
+  '締結で AWAITING_SUBMISSION。認証は未発行のまま');
+let unreviewed=false; try{ G.transitionLicenseCase_(smApp.license_id,'CERTIFICATE_ISSUED',{actor:'test'}); }catch(e){ unreviewed=/審査が完了していません/.test(String(e.message)); }
+ok(unreviewed,'審査 CLEARED でなければ認証を発行できない');
+G.transitionLicenseCase_(smApp.license_id,'SUBMISSION_CREATED',{actor:'test'});
+ok(smCase().case_status==='REVIEWING'&&smCase().review_status==='IN_REVIEW','提出で REVIEWING');
+G.transitionLicenseCase_(smApp.license_id,'CORRECTION_REQUIRED',{actor:'test'});
+ok(smCase().case_status==='CORRECTION_REQUIRED','是正要求で CORRECTION_REQUIRED');
+G.transitionLicenseCase_(smApp.license_id,'SUBMISSION_CREATED',{actor:'test'});
+G.transitionLicenseCase_(smApp.license_id,'HUMAN_REVIEW_CLEARED',{actor:'test'});
+ok(smCase().review_status==='CLEARED'&&smCase().case_status==='REVIEWING'&&smCase().certification_status==='NOT_ISSUED',
+  '審査通過（CLEARED）。認証はまだ別イベント');
+G.transitionLicenseCase_(smApp.license_id,'CERTIFICATE_ISSUED',{actor:'test'});
+ok(smCase().case_status==='CERTIFIED'&&smCase().certification_status==='ACTIVE','審査通過後に認証発行で CERTIFIED');
+
+// 203. 認証の停止・復帰・失効。認証済の案件に新しい版が出て REVIEWING でも認証は操作できる
+G.transitionLicenseCase_(smApp.license_id,'CERTIFICATE_SUSPENDED',{actor:'test',status:'PAYMENT_HOLD'});
+ok(smCase().case_status==='SUSPENDED'&&smCase().certification_status==='PAYMENT_HOLD','未入金停止で SUSPENDED / PAYMENT_HOLD');
+G.transitionLicenseCase_(smApp.license_id,'CERTIFICATE_RESTORED',{actor:'test'});
+ok(smCase().case_status==='CERTIFIED'&&smCase().certification_status==='ACTIVE','復帰で CERTIFIED / ACTIVE');
+G.transitionLicenseCase_(smApp.license_id,'SUBMISSION_CREATED',{actor:'test'});
+ok(smCase().case_status==='REVIEWING'&&smCase().certification_status==='ACTIVE','認証済の再提出は REVIEWING、認証は維持');
+G.transitionLicenseCase_(smApp.license_id,'CERTIFICATE_SUSPENDED',{actor:'test',status:'SUSPENDED'});
+ok(smCase().case_status==='REVIEWING'&&smCase().certification_status==='SUSPENDED','審査中でも認証停止はできる（現在地は審査のまま）');
+G.transitionLicenseCase_(smApp.license_id,'HUMAN_REVIEW_CLEARED',{actor:'test'});
+ok(smCase().case_status==='SUSPENDED','再審査が通ると現在地は認証の状態（停止中）へ戻る');
+G.transitionLicenseCase_(smApp.license_id,'CERTIFICATE_REVOKED',{actor:'test'});
+ok(smCase().case_status==='TERMINATED'&&smCase().certification_status==='REVOKED','失効で TERMINATED');
+G.transitionLicenseCase_(smApp.license_id,'CERTIFICATE_RESTORED',{actor:'test'});
+ok(smCase().case_status==='CERTIFIED'&&smCase().certification_status==='ACTIVE','失効からの再有効化（承認済）は CERTIFIED へ戻る');
+
+// 204. 遷移は Events に before / event / after を残す（タイムライン）
+const tl=G.licenseTimeline_(smApp.license_id);
+ok(tl.length>=12&&tl[0].event==='APPLICATION_CREATED','タイムラインは申込から始まる: '+tl.length+'件');
+ok(tl.some(t=>t.event==='CERTIFICATE_ISSUED'&&t.before.certification_status==='NOT_ISSUED'&&t.after.certification_status==='ACTIVE'),
+  '各遷移に before / after が残る');
+ok(tl.every((t,i,a)=>i===0||a[i-1].occurred_at<=t.occurred_at),'タイムラインは時刻順');
+
+// 205. 旧値（APPLIED 等）の行も読み替えて遷移できる
+G.updateLicenseCaseRaw_(smApp.license_id,{ case_status:'CONTRACTING', contract_status:'NOT_STARTED', review_status:'NOT_REQUIRED', certification_status:'NOT_ISSUED' });
+G.transitionLicenseCase_(smApp.license_id,'CLOUDSIGN_SIGNED',{actor:'test'});
+ok(smCase().case_status==='AWAITING_SUBMISSION','移行前の旧値 CONTRACTING からも締結へ遷移できる');
+G.updateLicenseCaseRaw_(smApp.license_id,{ case_status:'SIGNED' });
+G.transitionLicenseCase_(smApp.license_id,'SUBMISSION_CREATED',{actor:'test'});
+ok(smCase().case_status==='REVIEWING','旧値 SIGNED は AWAITING_SUBMISSION として扱う');
+
+// 206. 取消は締結前だけ
+const cancelApp=mkAppV4(['WRK-BKK00019'],'書籍');
+G.admin_cancelApplication(cancelApp.application_id,'テスト取消');
+ok(rows(OPS,'License_Cases').find(k=>k.license_id===cancelApp.license_id).case_status==='CANCELLED','申込取消で台帳も CANCELLED');
+let cancelSigned=false; try{ G.transitionLicenseCase_(smApp.license_id,'APPLICATION_CANCELLED',{actor:'test'}); }catch(e){ cancelSigned=/STATE_ERROR/.test(String(e.message)); }
+ok(cancelSigned,'締結後の案件は取消できない（契約終了は別イベント）');
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);
