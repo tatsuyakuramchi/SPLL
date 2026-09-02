@@ -191,17 +191,26 @@ function publishedLegalDoc_(type){
  * 通知キュー（修正設計書 §10）：メール非保持方針のため、システムは「誰に何を通知すべきか」を
  * 記録し、管理コンソールで人手対応（MANUAL_REQUIRED）する。referenceId で重複起票を防止。
  */
-function enqueueNotification_(contractId, type, referenceId, payload){
+/**
+ * 通知キューへの起票（RP-002 §15）。SPLL番号を正本に持つ。
+ *   idOrLicense … SPLL番号（推奨）または契約ID（旧経路）。契約が無い段階の通知は reference_id が申込ID
+ * 同じ type + reference_id の通知は二重に起票しない。
+ */
+function enqueueLicenseNotification_(idOrLicense, type, referenceId, payload){
   const dup = readRows_(ssOps_(),'Notification_Queue').some(function(n){
     return n.type === type && String(n.reference_id) === String(referenceId||''); });
   if(dup) return null;
+  const ref = resolveLicenseRef_(idOrLicense);
   const id = Utilities.getUuid();
-  // 契約が無い段階の通知（CloudSign送信失敗など）は reference_id が申込IDなので、そこから番号を引く
-  appendRow_(ssOps_(),'Notification_Queue',{ notification_id:id, contract_id:contractId||'',
-    license_id: licenseIdOfContract_(contractId) || licenseIdOfApplication_(referenceId),
+  appendRow_(ssOps_(),'Notification_Queue',{ notification_id:id, contract_id: ref.contractId || '',
+    license_id: ref.licenseId || licenseIdOfApplication_(referenceId),
     type:type, reference_id:referenceId||'', payload_json:JSON.stringify(payload||{}).slice(0,2000),
     status:'MANUAL_REQUIRED', created_at:new Date().toISOString(), sent_at:'', handled_by:'' });
   return id;
+}
+/** 旧名。契約IDで起票していた経路の互換ラッパー（中身は enqueueLicenseNotification_）。 */
+function enqueueNotification_(contractId, type, referenceId, payload){
+  return enqueueLicenseNotification_(contractId, type, referenceId, payload);
 }
 
 /**

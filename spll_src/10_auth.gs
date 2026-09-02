@@ -31,11 +31,14 @@ function api_getViewerRole(){
 }
 
 // ============================================================
-// RBAC（修正設計書 SEC-02/§4）：全 admin_ 関数の入口で requireRole_() を実行
-//   ロール：SYSTEM_ADMIN / LEGAL_ADMIN / OPERATIONS / ACCOUNTING / AUDITOR
+// RBAC（修正設計書 SEC-02/§4・RP-002 §13）：全 admin_ 関数の入口で requireRole_() を実行
+//   ロール：SYSTEM_ADMIN（全操作・接続設定・管理者・移行）／LEGAL_ADMIN（契約例外・法務文書・料金表・認証の停止承認）
+//         ／OPERATIONS（通常案件・原作マスタ・案内・通知）／REVIEWER（作品審査の判断のみ）／AUDITOR（全参照・更新不可）
+//   ACCOUNTING は廃止（請求・入金・清算は本システムの対象外）。旧行は setup_migrateAdminRolesV2 で AUDITOR へ。
+//   移行前の ACCOUNTING 行が残っていても、許可リストに現れないので読取り以外は通らない（安全側）。
 //   SYSTEM_ADMIN は全操作可。AUDITOR ほか登録ロールは読取り関数（allowed=[]）のみ。
 // ============================================================
-const ADMIN_ROLES = ['SYSTEM_ADMIN','LEGAL_ADMIN','OPERATIONS','ACCOUNTING','AUDITOR'];
+const ADMIN_ROLES = ['SYSTEM_ADMIN','LEGAL_ADMIN','OPERATIONS','REVIEWER','AUDITOR'];
 
 /** メール→有効ロール（Admin_Users。後方互換で ADMIN_EMAILS 登録者は SYSTEM_ADMIN 扱い） */
 function roleOf_(email){

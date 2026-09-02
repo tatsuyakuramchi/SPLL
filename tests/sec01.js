@@ -75,5 +75,9 @@ ok(!pj.oauthScopes.some(s => /send_mail/.test(s)), 'portal はメール送信ス
   ok(post && !/issueCert_|enqueueBadgeJob_/.test(post), app + ' の締結後処理は認証・バッジを発行しない');
   ok(!/function finishLicenseActivation_/.test(c), app + ' に旧 finishLicenseActivation_（締結時発行）が残っていない');
 });
+// RP-002 §13：ACCOUNTING ロールは廃止（請求・入金・清算は本システムの対象外）
+ok(!/ADMIN_ROLES = \[[^\]]*ACCOUNTING/.test(a), 'admin のロール定義に ACCOUNTING が無い');
+ok(/ADMIN_ROLES = \[[^\]]*REVIEWER/.test(a), 'admin のロール定義に REVIEWER がある');
+ok(!/requireRole_\(\[[^\]]*ACCOUNTING/.test(a), 'admin の権限判定に ACCOUNTING を使う箇所が無い');
 console.log('\nSEC01 RESULT: ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

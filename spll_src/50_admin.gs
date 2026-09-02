@@ -164,7 +164,7 @@ function admin_reviewQueue(){ requireRole_([]);
 
 /** 人手判断の記録（CLEARED / CORRECTION_REQUIRED / ESCALATED）。版・提出状態も更新。 */
 function admin_setHumanReview(submissionId, result, comment, reviewer, versionId){
-  const actor = requireRole_(['OPERATIONS','LEGAL_ADMIN']);
+  const actor = requireRole_(['OPERATIONS','LEGAL_ADMIN','REVIEWER']);   // REVIEWER は審査の判断だけを担う（RP-002 §13）
   // 修正設計書 §9.4：列挙値・最新版・コメント必須をサーバー側で検証
   const ALLOWED = ['CLEARED','CORRECTION_REQUIRED','ESCALATED'];
   if(ALLOWED.indexOf(result) < 0) throw new Error('VALIDATION_ERROR: 不正な審査結果です: ' + result);
@@ -184,10 +184,10 @@ function admin_setHumanReview(submissionId, result, comment, reviewer, versionId
   markVersionStatus_(targetVersion, result);
   // 通知キュー（§10）：是正要求／審査結果をクリエーターへ伝えるべきことを記録（メール非保持のため人手対応）
   const ntype = result === 'CORRECTION_REQUIRED' ? 'CORRECTION_REQUEST' : 'REVIEW_RESULT';
-  enqueueNotification_(sub.contract_id, ntype, targetVersion, { submission_id:submissionId, result:result, comment:String(comment||'').slice(0,300) });
+  const licenseId = sub.license_id || licenseIdOfContract_(sub.contract_id);
+  enqueueLicenseNotification_(licenseId || sub.contract_id, ntype, targetVersion, { submission_id:submissionId, result:result, comment:String(comment||'').slice(0,300) });
   logEvent_('human_review', submissionId, actor.email, {status:sub.status}, {result:result, version_id:targetVersion});
   // 台帳の現在地（12_license_state）。判断の種類でイベントを分ける
-  const licenseId = sub.license_id || licenseIdOfContract_(sub.contract_id);
   let certification = null;
   if(licenseId){
     const ev = result === 'CLEARED' ? 'HUMAN_REVIEW_CLEARED' : (result === 'CORRECTION_REQUIRED' ? 'CORRECTION_REQUIRED' : 'REVIEW_ESCALATED');
@@ -350,7 +350,8 @@ const FEE_FIELDS = ['usage_category','fee_model','fee_value','fee_label','licens
 /** 料金表全件（無効行も含む・管理用） */
 function admin_getFeeSchedule(){ requireRole_([]); return readRows_(ssMaster_(),'Fee_Schedule'); }
 /** 料金表の1行を追加・更新（usage_category 一致でupsert） */
-function admin_saveFeeRow(row){ requireRole_(['ACCOUNTING','LEGAL_ADMIN']);
+// 料金条件は契約条件マスタ（Finance 操作ではない）。変更は LEGAL_ADMIN（RP-002 §14）
+function admin_saveFeeRow(row){ requireRole_(['LEGAL_ADMIN']);
   const r = {}; FEE_FIELDS.forEach(function(k){ if(row[k] !== undefined) r[k] = row[k]; });
   if(!r.usage_category) throw new Error('利用目的（usage_category）は必須です');
   if(r.active === undefined) r.active = 'true';
@@ -524,7 +525,7 @@ const PAYMENT_CONFIG_KEYS = [
   ['mail_from_name','MAIL_FROM_NAME'], ['mail_reply_to','MAIL_REPLY_TO'],
   ['guide_email_auto_send','GUIDE_EMAIL_AUTO_SEND'], ['guide_email_subject','GUIDE_EMAIL_SUBJECT'], ['guide_email_body','GUIDE_EMAIL_BODY']
 ];
-/** 振込先・案内ページ設定の取得（振込先は口座情報のため SYSTEM_ADMIN/ACCOUNTING/OPERATIONS のみ） */
+/** 振込先・案内ページ設定の取得（振込先は口座情報のため SYSTEM_ADMIN/OPERATIONS/LEGAL_ADMIN のみ） */
 function admin_getGuideConfig(){ requireRole_(['SYSTEM_ADMIN','OPERATIONS','LEGAL_ADMIN']);
   const out = {};
   PAYMENT_CONFIG_KEYS.forEach(function(x){ out[x[0]] = getConfig_(x[1],''); });
@@ -803,7 +804,7 @@ function applyCertStatus_(contractId, status, reasonCode, reasonText, legalCaseI
  * 失効（REVOKED）・契約終了（TERMINATED）や、それらからの復帰は従来どおり申請→別担当者の承認が必要。
  */
 function admin_setCertEnabled(contractId, enabled, reason){
-  const actor = requireRole_(['OPERATIONS','ACCOUNTING','LEGAL_ADMIN']);
+  const actor = requireRole_(['OPERATIONS','LEGAL_ADMIN']);
   const cert = certForRef_(contractId);
   if(!cert) throw new Error('DATA_NOT_FOUND: 認証が見つかりません: ' + contractId);
   if(['ACTIVE','PAYMENT_HOLD'].indexOf(String(cert.status)) < 0)
@@ -901,7 +902,7 @@ function admin_listNotifications(){ requireRole_([]);
 }
 /** 通知の対応済み記録（誰がいつ対応したか） */
 function admin_markNotificationHandled(notificationId){
-  const actor = requireRole_(['OPERATIONS','ACCOUNTING','LEGAL_ADMIN']);
+  const actor = requireRole_(['OPERATIONS','LEGAL_ADMIN']);
   updateRow_(ssOps_(),'Notification_Queue','notification_id',notificationId,
     { status:'SENT', sent_at:new Date().toISOString(), handled_by:actor.email });
   logEvent_('notification', notificationId, actor.email, null, { handled:true });

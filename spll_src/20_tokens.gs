@@ -3,19 +3,6 @@
 // ---- 用途別アクセストークン（修正設計書 SEC-06/§9.1）----
 //   purpose: SUBMISSION（提出）/ GUIDE（締結後の手続き案内）/ BADGE_DOWNLOAD（バッジ取得）
 //   平文は発行時のみ返し、台帳にはハッシュのみ保存。期限・回数をサーバー側で検証。
-/**
- * SPLL番号か契約IDのどちらを渡されても { licenseId, contractId } に揃える。
- * 正本は license_id。contract_id は移行期間の互換（Drive フォルダ等の旧参照に使う）。
- */
-function resolveLicenseRef_(idOrLicense){
-  const id = String(idOrLicense || '');
-  if(!id) return { licenseId:'', contractId:'' };
-  if(/^SPLL-/.test(id)){
-    const c = (typeof currentSignedContract_ === 'function') ? currentSignedContract_(id) : null;
-    return { licenseId:id, contractId: c ? c.contract_id : '' };
-  }
-  return { licenseId: licenseIdOfContract_(id), contractId: id };
-}
 /** 用途別トークンの発行。第1引数はSPLL番号（推奨）または契約ID（旧経路）。 */
 function issueToken_(idOrLicense, purpose, days, maxUses, referenceId){
   const ref = resolveLicenseRef_(idOrLicense);

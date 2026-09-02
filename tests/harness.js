@@ -450,10 +450,10 @@ ok(Array.isArray(G.admin_dashboard().alerts),'AUDITOR: 読取り関数は許可'
 let roleErr=false; try{ G.admin_runAiReviews(); }catch(e){ roleErr=/AUTHORIZATION_ERROR/.test(String(e.message)); }
 ok(roleErr,'AUDITOR: OPERATIONS専用のバッチ起動は拒否');
 G.Session={ getActiveUser:()=>({ getEmail:()=>'admin@example.com' }) };
-G.setup_setInitialAdmin('acct@example.com','ACCOUNTING');
+G.setup_setInitialAdmin('acct@example.com','REVIEWER');
 G.Session={ getActiveUser:()=>({ getEmail:()=>'acct@example.com' }) };
 let sysErr=false; try{ G.admin_saveAdminAccess({emails:'x'}); }catch(e){ sysErr=/AUTHORIZATION_ERROR/.test(String(e.message)); }
-ok(sysErr,'ACCOUNTING: SYSTEM_ADMIN専用の設定保存は拒否');
+ok(sysErr,'REVIEWER: SYSTEM_ADMIN専用の設定保存は拒否');
 // 管理画面スイッチ（3プロジェクト分割後は ADMIN_CONSOLE_URL を指す）
 scriptProps.ADMIN_CONSOLE_URL='https://script.google.com/macros/s/ADMIN-DEPLOY/exec';
 const vr=G.api_getViewerRole();
@@ -1822,6 +1822,47 @@ ok(!/data-v="contract"/.test(adminHtml)&&/data-v="cert"/.test(adminHtml),'タブ
 ok(!/<th>経理引渡<\/th>/.test(adminHtml),'ライセンス一覧に経理引渡列を出さない');
 ok(/admin_listCertifications/.test(adminHtml)&&/admin_getLicenseCase/.test(adminHtml),'画面は認証一覧・ライセンス詳細のAPIを使う');
 ok(!/call\("admin_listContracts"/.test(adminHtml),'画面は旧契約一覧（admin_listContracts）を呼ばない');
+
+// ============ RP-002 §13-§15・§17：Finance 残骸の整理 ============
+// 240. ACCOUNTING は廃止。登録は拒否し、旧行は AUDITOR へ落とす（自動で OPERATIONS にしない）
+let acctErr=false; try{ G.admin_saveAdminUser('x@example.com','ACCOUNTING','ACTIVE'); }catch(e){ acctErr=/不正なロール/.test(String(e.message)); }
+ok(acctErr,'ACCOUNTING ロールは新規登録できない');
+G.admin_saveAdminUser('reviewer2@example.com','REVIEWER','ACTIVE');
+ok(rows(OPS,'Admin_Users').some(u=>u.email==='reviewer2@example.com'&&u.role==='REVIEWER'),'REVIEWER ロールを登録できる');
+G.appendRow_(OPS,'Admin_Users',{admin_user_id:'AU-LEGACY-ACCT',email:'legacy-acct@example.com',role:'ACCOUNTING',status:'ACTIVE',added_by:'setup',added_at:'2026-01-01'});
+const roleMig=G.setup_migrateAdminRolesV2();
+ok(roleMig.changed===1&&rows(OPS,'Admin_Users').find(u=>u.email==='legacy-acct@example.com').role==='AUDITOR','旧 ACCOUNTING 行は AUDITOR へ（安全側）');
+ok(G.setup_migrateAdminRolesV2().changed===0,'ロール移行は冪等');
+// 241. 料金表は契約条件マスタ：LEGAL_ADMIN のみ。REVIEWER は審査の判断だけ
+const SessRole=G.Session;
+G.Session={ getActiveUser:()=>({ getEmail:()=>'reviewer2@example.com' }) };
+let feeErr=false; try{ G.admin_saveFeeRow({ usage_category:'テスト', fee_model:'FLAT', fee_value:'1000' }); }catch(e){ feeErr=/AUTHORIZATION_ERROR/.test(String(e.message)); }
+ok(feeErr,'REVIEWER は料金表を変更できない');
+let certOpErr=false; try{ G.admin_setCertEnabled(c3App.license_id,false,'x'); }catch(e){ certOpErr=/AUTHORIZATION_ERROR/.test(String(e.message)); }
+ok(certOpErr,'REVIEWER は認証を止められない');
+const rvJudge=G.admin_setHumanReview(c3Sub.submission_id,'CLEARED','審査担当による再確認');
+ok(rvJudge&&rvJudge.ok===true&&rows(OPS,'Human_Reviews').slice(-1)[0].reviewer==='reviewer2@example.com','REVIEWER は審査の判断ができる');
+G.Session={ getActiveUser:()=>({ getEmail:()=>'legal2@example.com' }) };
+G.Session=SessRole;
+G.admin_saveAdminUser('legal2@example.com','LEGAL_ADMIN','ACTIVE');
+G.Session={ getActiveUser:()=>({ getEmail:()=>'legal2@example.com' }) };
+let feeOk=false; try{ feeOk=!!G.admin_saveFeeRow({ usage_category:'テスト（法務）', fee_model:'FLAT', fee_value:'1000', fee_label:'1,000円', active:'true' }); }catch(e){ feeOk=false; }
+ok(feeOk,'LEGAL_ADMIN は料金表を変更できる');
+G.Session=SessRole;
+// 242. 通知はSPLL番号を正本に持つ（enqueueLicenseNotification_）。旧名は互換ラッパー
+const nid=G.enqueueLicenseNotification_(c3App.license_id,'TEST_LICENSE_NOTICE','tln-1',{ note:'x' });
+const nrow=rows(OPS,'Notification_Queue').find(n=>n.notification_id===nid);
+ok(nrow&&nrow.license_id===c3App.license_id&&nrow.contract_id===c3Ctr.contract_id,'SPLL番号で起票すると license_id と互換の contract_id が入る');
+ok(G.enqueueLicenseNotification_(c3App.license_id,'TEST_LICENSE_NOTICE','tln-1',{})===null,'同じ type+reference は二重に起票しない');
+const nid2=G.enqueueNotification_(c3Ctr.contract_id,'TEST_LICENSE_NOTICE','tln-2',{});
+ok(rows(OPS,'Notification_Queue').find(n=>n.notification_id===nid2).license_id===c3App.license_id,'旧名（契約ID）でも license_id が入る');
+ok(G.admin_listNotifications().every(n=>'license_id' in n),'通知一覧は SPLL番号を持つ');
+// 243. Finance_Handoffs は外部連携のキュー。経理側の受領状況が案件の現在地に影響しない
+const hoC3=rows(OPS,'Finance_Handoffs').find(h=>h.license_id===c3App.license_id);
+ok(hoC3&&hoC3.status==='READY','締結時に経理引渡が READY で置かれる');
+ok(rows(OPS,'License_Cases').find(k=>k.license_id===c3App.license_id).case_status==='CERTIFIED'&&
+   rows(OPS,'License_Cases').find(k=>k.license_id===c3App.license_id).finance_handoff_status==='READY',
+  '経理が未受領（READY）でも certification_status / case_status は CERTIFIED のまま');
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

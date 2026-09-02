@@ -110,6 +110,7 @@
         <div class="k">利用許諾料</div><div class="v" id="gFee">—</div>
         <div class="k">締結日</div><div class="v mono" id="gSigned">—</div>
         <div class="k">クレジット表記</div><div class="v" id="gCredit">—</div>
+        <div class="k">審査状況</div><div class="v" id="gReview">—</div>
       </div>
       <div class="note" id="gCreditNote" style="display:none;">上記のクレジット表記を、二次創作物に記載してください。表示位置・改変の可否は二次創作ガイドラインに従います。</div>
       <div class="note">SPLL番号は、お問い合わせ・お振込・作品提出のすべてで使う受付番号です。<span id="gExp"></span></div>
@@ -167,6 +168,9 @@ function render(c){
   $("gUsage").textContent=c.usage_category||"—";
   $("gFee").textContent=c.fee_label||"—";
   $("gSigned").textContent=c.signed_at||"—";
+  var rv={NOT_STARTED:"—",NOT_REQUIRED:"—",AWAITING_SUBMISSION:"作品のご提出をお待ちしています",IN_REVIEW:"審査中です",CLEARED:"審査完了",
+    CORRECTION_REQUIRED:"是正のご対応をお願いしています（提出ページをご確認ください）",ESCALATED:"事務局で確認中です",PENDING:"審査中です"};
+  $("gReview").textContent=rv[c.review_status]||c.review_status||"—";
   var credits=(c.credit_texts&&c.credit_texts.length)?c.credit_texts.join(" ／ "):"";
   $("gCredit").textContent=credits||"—";
   $("gCreditNote").style.display=credits?"":"none";

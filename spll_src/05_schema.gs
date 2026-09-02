@@ -385,6 +385,9 @@ function setup_all(adminEmail){
   catch(e){ report.steps.push('setup_migrateLicenseCases 失敗: ' + String(e && e.message || e)); }
   // 5-2) 業務テーブルの license_id 補完・旧 case_status の正規化（RP-002）
   try{ const fk = setup_migrateLicenseForeignKeysV2(); report.steps.push('setup_migrateLicenseForeignKeysV2: ' + JSON.stringify({ status:fk.status, updated:fk.updated, unresolved:fk.unresolved.length })); }
+  catch(e){ report.steps.push('setup_migrateLicenseForeignKeysV2 失敗: ' + String(e && e.message || e)); }
+  // 5-3) 廃止ロール ACCOUNTING → AUDITOR（RP-002 §13.3）
+  try{ const ar = setup_migrateAdminRolesV2(); report.steps.push('setup_migrateAdminRolesV2: ' + JSON.stringify(ar)); }
   catch(e){ report.steps.push('setup_migrateLicenseCases 失敗: ' + String(e && e.message || e)); }
 
   // 6) 転記用プロパティ一覧（ScriptPropertiesはプロジェクトごとに独立）
@@ -541,5 +544,22 @@ function setup_migrateLicenseForeignKeysV2(){
     error_detail: unresolved.length ? ('未解決: ' + unresolved.join(', ')).slice(0,500) : '' });
   logEvent_('batch','migrateLicenseForeignKeysV2',actor_(),null,{ updated:updated, skipped:skipped, normalized:normalized, unresolved:unresolved.length });
   return { status:status, updated:updated, skipped:skipped, normalized:normalized, unresolved:unresolved };
+}
+
+/**
+ * 管理者ロールの移行（RP-002 §13.3・冪等）。ACCOUNTING は廃止。
+ * 自動で OPERATIONS へ昇格させず、安全側の AUDITOR（全参照・更新不可）へ落とす。
+ * 必要な人だけ SYSTEM_ADMIN が改めて OPERATIONS 等へ設定する。
+ */
+function setup_migrateAdminRolesV2(){
+  if(readRows_(ssOps_(),'Admin_Users').length > 0) requireRole_(['SYSTEM_ADMIN']);
+  let changed = 0;
+  readRows_(ssOps_(),'Admin_Users').forEach(function(u){
+    if(String(u.role) !== 'ACCOUNTING') return;
+    updateRow_(ssOps_(),'Admin_Users','email',u.email,{ role:'AUDITOR' });
+    logEvent_('admin_user', u.email, actor_(), { role:'ACCOUNTING' }, { role:'AUDITOR', migration:'migrateAdminRolesV2' });
+    changed++;
+  });
+  return { changed: changed };
 }
 

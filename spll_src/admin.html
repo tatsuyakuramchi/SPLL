@@ -586,7 +586,7 @@
           <table><thead><tr><th>メール</th><th>ロール</th><th>状態</th><th>登録者</th><th>操作</th></tr></thead><tbody id="au-tbody"></tbody></table>
           <div class="grid2" style="margin-top:12px;">
             <div class="fld"><label>メールアドレス</label><input id="au-email" placeholder="user@example.com"></div>
-            <div class="fld"><label>ロール</label><select id="au-role"><option>SYSTEM_ADMIN</option><option>LEGAL_ADMIN</option><option>OPERATIONS</option><option>ACCOUNTING</option><option>AUDITOR</option></select></div>
+            <div class="fld"><label>ロール</label><select id="au-role"><option>SYSTEM_ADMIN</option><option>LEGAL_ADMIN</option><option>OPERATIONS</option><option>REVIEWER</option><option>AUDITOR</option></select></div>
           </div>
         </div>
         <div class="pfoot"><button class="save" onclick="saveAdminUser()">管理者を追加・更新</button></div>
@@ -1040,7 +1040,7 @@ function saveAdminAccess(){
   call("admin_saveAdminAccess",[{emails:$("ac-emails").value, enforce:$("ac-enforce").checked}],function(){ toast("管理者設定を保存しました"); });
 }
 // ---- Admin_Users（RBAC）----
-var ROLE_LABEL={SYSTEM_ADMIN:"全設定",LEGAL_ADMIN:"法務",OPERATIONS:"事務局",ACCOUNTING:"経理",AUDITOR:"閲覧のみ"};
+var ROLE_LABEL={SYSTEM_ADMIN:"全設定",LEGAL_ADMIN:"法務",OPERATIONS:"事務局",REVIEWER:"審査担当",AUDITOR:"閲覧のみ",ACCOUNTING:"経理（廃止・閲覧のみ）"};
 function loadAdminUsers(){
   call("admin_listAdminUsers",[],function(rows){
     var tb=$("au-tbody"); if(!tb) return; tb.innerHTML=""; rows=rows||[];
@@ -1617,7 +1617,7 @@ MOCK.admin_getAdminAccess=function(){ return _mAccess; };
 var _mAdminUsers=[
   {email:"admin@example.com",role:"SYSTEM_ADMIN",status:"ACTIVE",added_by:"setup",added_at:"2026-07-01"},
   {email:"legal@example.com",role:"LEGAL_ADMIN",status:"ACTIVE",added_by:"admin@example.com",added_at:"2026-07-02"},
-  {email:"keiri@example.com",role:"ACCOUNTING",status:"DISABLED",added_by:"admin@example.com",added_at:"2026-07-02"}
+  {email:"reviewer@example.com",role:"REVIEWER",status:"ACTIVE",added_by:"admin@example.com",added_at:"2026-07-02"}
 ];
 MOCK.admin_listAdminUsers=function(){ return _mAdminUsers; };
 var _mNotify=[

@@ -220,6 +220,23 @@ function licenseIdOfContract_(contractId){
   return '';
 }
 
+/**
+ * SPLL番号か契約IDのどちらを渡されても { licenseId, contractId } に揃える。
+ * 正本は license_id。contract_id は移行期間の互換（Drive フォルダ等の旧参照に使う）。
+ * SPLL番号から契約を引くときは SIGNED の最新契約（無ければ空）。
+ */
+function resolveLicenseRef_(idOrLicense){
+  const id = String(idOrLicense || '');
+  if(!id) return { licenseId:'', contractId:'' };
+  if(/^SPLL-/.test(id)){
+    const cs = readRows_(ssOps_(),'Contracts')
+      .filter(function(c){ return String(c.license_id) === id && String(c.status) === 'SIGNED'; })
+      .sort(function(a,b){ return String(b.signed_at||'').localeCompare(String(a.signed_at||'')); });
+    return { licenseId:id, contractId: cs[0] ? cs[0].contract_id : '' };
+  }
+  return { licenseId: licenseIdOfContract_(id), contractId: id };
+}
+
 /** 申込ID → SPLL番号（Applications.license_id）。申込段階の通知（送信失敗など）は契約が無いのでこちらで引く。 */
 function licenseIdOfApplication_(applicationId){
   if(!applicationId) return '';
