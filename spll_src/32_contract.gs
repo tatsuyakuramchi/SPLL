@@ -242,6 +242,32 @@ function issuedBadgeForLicense_(licenseId, contractId){
   const ref = { licenseId: String(licenseId || ''), contractId: String(contractId || '') };
   return readRows_(ssOps_(),'Badges').find(function(b){ return belongsToLicense_(b, ref) && String(b.status) === 'ISSUED'; }) || null;
 }
+/**
+ * クリエーターへ配布できるバッジ。ISSUED のバッジがあり、かつその認証が ACTIVE のときだけ返す（P0-4）。
+ * 一時停止（SUSPENDED 等）の間はファイル・行は残すが配布しない。失効・終了では applyCertStatus_ が SUPERSEDED にする。
+ * ref = { licenseId, contractId }
+ */
+function distributableBadgeFor_(ref){
+  const badge = readRows_(ssOps_(),'Badges').find(function(b){ return belongsToLicense_(b, ref) && String(b.status) === 'ISSUED'; });
+  if(!badge) return null;
+  const certs = readRows_(ssOps_(),'Certificates');
+  const cert = (badge.cert_id ? certs.find(function(c){ return c.cert_id === badge.cert_id; }) : null)
+    || certs.find(function(c){ return belongsToLicense_(c, ref); }) || null;
+  if(!cert || String(cert.status) !== 'ACTIVE') return null;
+  return badge;
+}
+/** 案件の ISSUED バッジを全部 SUPERSEDED にする（失効・終了・照合コード再発行）。件数を返す。 */
+function supersedeBadges_(licenseId, contractId, reason){
+  const ref = { licenseId: String(licenseId || ''), contractId: String(contractId || '') };
+  let n = 0;
+  readRows_(ssOps_(),'Badges').filter(function(b){ return belongsToLicense_(b, ref) && String(b.status) === 'ISSUED'; })
+    .forEach(function(b){
+      updateRow_(ssOps_(),'Badges','badge_id',b.badge_id,{ status:'SUPERSEDED' });
+      logEvent_('badge', b.badge_id, 'system', { status:'ISSUED' }, { status:'SUPERSEDED', reason: reason || '' });
+      n++;
+    });
+  return n;
+}
 
 /**
  * バッジ発行（案件単位・冪等）。BADGE_TEMPLATE_IDがあればテンプレ差込、無ければ自動組版。

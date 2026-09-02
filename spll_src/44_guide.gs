@@ -36,7 +36,7 @@ function web_getGuideContext(token){
     ? (readRows_(ssOps_(),'License_Cases').find(function(k){ return k.license_id === ref.licenseId; }) || {}) : {};
   let terms = {}; try{ terms = JSON.parse(c.terms_snapshot || '{}'); }catch(err){}
   const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return belongsToLicense_(x, ref); });
-  const badge = readRows_(ssOps_(),'Badges').find(function(b){ return belongsToLicense_(b, ref) && String(b.status) === 'ISSUED'; });
+  const badge = distributableBadgeFor_(ref);   // 認証が ACTIVE のときだけ配布導線を出す
   const subs = readRows_(ssOps_(),'Submissions').filter(function(s){ return belongsToLicense_(s, ref); });
 
   return {

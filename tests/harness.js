@@ -1960,5 +1960,52 @@ ok(manualRetry.badge_id&&errJob().status==='ISSUED','管理画面からの再試
 ok(bpBadges().length===1,'有効バッジは常に1枚');
 ok(G.admin_getLicenseCase(bpApp.license_id).badgeJobs.length===0,'詳細の失敗ジョブ一覧は解消後に空');
 
+// ============ P0-3 / P0-4：終了した契約の認証は戻せない・有効でない認証のバッジは配布しない ============
+const SessP0=G.Session, SessLegal2={ getActiveUser:()=>({ getEmail:()=>'legal2@example.com' }) };
+// 310. 一時停止中はバッジを配布しない（行・ファイルは残す）。復帰で再び配布できる
+const trApp=mkAppV4(['WRK-ARK00012'],'書籍');
+G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({submission_id:'FR-TR',columns:v4Cols(trApp)})}});
+G.doPost({parameter:{},postData:{contents:JSON.stringify({document_id:'DOC-TR',status:'COMPLETED',application_ref:trApp.application_ref})}});
+const trLink=G.admin_sendUploadLink(trApp.license_id);
+const trSub=G.web_submitWork(trLink.token,{ title:'終了検証', filename:'t.pdf', mimeType:'application/pdf', dataBase64:b64 });
+G.admin_setHumanReview(trSub.submission_id,'CLEARED','ok');
+const trCase=()=>rows(OPS,'License_Cases').find(k=>k.license_id===trApp.license_id);
+const trCert=()=>rows(OPS,'Certificates').find(c=>c.license_id===trApp.license_id);
+const trBadges=()=>rows(OPS,'Badges').filter(b=>b.license_id===trApp.license_id);
+ok(trCert().status==='ACTIVE'&&trBadges().some(b=>b.status==='ISSUED')&&G.web_getBadgeContext(trLink.token).license_id===trApp.license_id,'前提：認証ACTIVE・バッジISSUED・取得できる');
+G.admin_setCertEnabled(trApp.license_id,false,'未入金');
+ok(G.web_getBadgeContext(trLink.token)===null&&G.web_getBadgeImage(trLink.token,'l')===null,'停止中はバッジ画像を取得できない');
+ok(G.web_getSubmitContext(trLink.token).badge_url===''&&/リンクが無効/.test(G.serveBadge_({parameter:{token:trLink.token}})._h),'提出ページ・バッジページにも導線を出さない');
+ok(trBadges().some(b=>b.status==='ISSUED'),'一時停止ではバッジの行・ファイルは残す（復帰で再生成しない）');
+G.admin_setCertEnabled(trApp.license_id,true,'入金確認');
+ok(G.web_getBadgeContext(trLink.token)&&G.web_getBadgeContext(trLink.token).license_id===trApp.license_id,'復帰すれば同じバッジを再び取得できる');
+
+// 311. 契約終了（TERMINATED）：認証・台帳とも終了、バッジは SUPERSEDED。以後、再有効化の申請は承認しても適用されない
+const trReqT=G.admin_requestCertChange(trApp.license_id,'TERMINATED','CONTRACT_END','契約期間満了','');
+G.Session=SessLegal2; G.admin_approveCertChange(trReqT.request_id,true,''); G.Session=SessP0;
+ok(trCert().status==='TERMINATED'&&trCase().contract_status==='TERMINATED'&&trCase().case_status==='TERMINATED'&&trCase().certification_status==='TERMINATED','契約終了で認証・台帳とも TERMINATED');
+ok(trBadges().length>0&&trBadges().every(b=>b.status==='SUPERSEDED')&&G.web_getBadgeContext(trLink.token)===null,'契約終了でバッジは SUPERSEDED・配布停止');
+const trReqR=G.admin_requestCertChange(trApp.license_id,'ACTIVE','REACTIVATE','再開したい','');
+let trErr=false; G.Session=SessLegal2;
+try{ G.admin_approveCertChange(trReqR.request_id,true,''); }catch(e){ trErr=/終了済み|再有効化できません/.test(String(e.message)); }
+G.Session=SessP0;
+ok(trErr,'終了した契約の認証は再有効化できない（再開は新しい契約の締結）');
+ok(trCert().status==='TERMINATED'&&trCase().certification_status==='TERMINATED'&&trCase().case_status==='TERMINATED','拒否されたときは認証の行も台帳も変わらない（書き込み前に遷移を検証）');
+ok(rows(OPS,'Certificate_Change_Requests').find(r=>r.request_id===trReqR.request_id).status==='REQUESTED','申請は未処理のまま残る（誤って APPLIED にしない）');
+let trSm=false; try{ G.transitionLicenseCase_(trApp.license_id,'CERTIFICATE_RESTORED',{actor:'test'}); }catch(e){ trSm=/終了済み又は未成立/.test(String(e.message)); }
+ok(trSm,'状態機械：contract_status が SIGNED でなければ CERTIFICATE_RESTORED を許可しない');
+let trSusp=false; try{ G.transitionLicenseCase_(trApp.license_id,'CERTIFICATE_SUSPENDED',{actor:'test'}); }catch(e){ trSusp=/認証が発行されていません/.test(String(e.message)); }
+ok(trSusp,'終了した認証は停止操作の対象にもならない');
+
+// 312. 失効（REVOKED）でもバッジは SUPERSEDED・配布停止。契約が有効なら承認を経て再有効化でき、バッジは新しいコードで作り直す
+const bpLink2=G.admin_sendUploadLink(bpApp.license_id);
+const bpRev=G.admin_requestCertChange(bpApp.license_id,'REVOKED','MANUAL_REVOKE','権利者要請','');
+G.Session=SessLegal2; G.admin_approveCertChange(bpRev.request_id,true,''); G.Session=SessP0;
+ok(bpCert().status==='REVOKED'&&bpBadges().length===0&&G.web_getBadgeContext(bpLink2.token)===null,'失効でバッジ SUPERSEDED・配布停止');
+ok(rows(OPS,'Events').some(e=>e.entity_type==='badge'&&/cert:REVOKED/.test(String(e.after))),'差し替えの理由が Events に残る');
+const bpRe=G.admin_requestCertChange(bpApp.license_id,'ACTIVE','REACTIVATE','誤失効','');
+G.Session=SessLegal2; G.admin_approveCertChange(bpRe.request_id,true,''); G.Session=SessP0;
+ok(bpCert().status==='ACTIVE'&&bpBadges().length===1&&G.web_getBadgeContext(bpLink2.token).license_id===bpApp.license_id,'契約が有効なら失効から再有効化でき、バッジを作り直して再び配布できる');
+
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

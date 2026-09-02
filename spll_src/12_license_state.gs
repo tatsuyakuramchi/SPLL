@@ -130,10 +130,17 @@ const LICENSE_TRANSITIONS = {
       return patch;
     }
   },
-  // 復帰：停止からの再有効化に加え、失効（REVOKED）からの再有効化も申請→別担当者の承認を経て行える（V2-018）
+  // 復帰：停止からの再有効化に加え、失効（REVOKED）からの再有効化も申請→別担当者の承認を経て行える（V2-018）。
+  // ただし契約が終了（TERMINATED）した案件は戻せない。契約の無い認証は存在し得ないので、再開は新契約（再締結）で行う（P0-3）
   CERTIFICATE_RESTORED: {
     from: '*',
-    guard: function(ctx, cur){ return certExists_(cur.certification_status) ? '' : '認証が発行されていません（certification_status=' + cur.certification_status + '）'; },
+    guard: function(ctx, cur){
+      if(cur.contract_status !== 'SIGNED')
+        return '終了済み又は未成立の契約では認証を再有効化できません（contract_status=' + cur.contract_status + '）。再開は新しい契約の締結で行います';
+      if(['SUSPENDED','PAYMENT_HOLD','EXPIRED','REVOKED'].indexOf(cur.certification_status) < 0)
+        return '再有効化できる認証状態ではありません（certification_status=' + cur.certification_status + '）';
+      return '';
+    },
     to: function(ctx, cur){
       const patch = { certification_status:'ACTIVE' };
       if(['CERTIFIED','SUSPENDED','TERMINATED'].indexOf(cur.case_status) >= 0){
@@ -149,12 +156,12 @@ const LICENSE_TRANSITIONS = {
     guard: function(ctx, cur){ return certLive_(cur.certification_status) ? '' : '認証が発行されていません（certification_status=' + cur.certification_status + '）'; },
     to: { case_status:'TERMINATED', certification_status:'REVOKED' }
   },
+  // 契約終了。認証の行があれば（失効済も含め）TERMINATED に揃える。未発行（NOT_ISSUED）はそのまま
   CONTRACT_TERMINATED: {
     from: '*',
     to: function(ctx, cur){
-      const certWasLive = ['ACTIVE','SUSPENDED','PAYMENT_HOLD','EXPIRED'].indexOf(String(cur.certification_status)) >= 0;
       return { case_status:'TERMINATED', contract_status:'TERMINATED',
-        certification_status: certWasLive ? 'TERMINATED' : cur.certification_status };
+        certification_status: certExists_(cur.certification_status) ? 'TERMINATED' : cur.certification_status };
     }
   },
   APPLICATION_CANCELLED: {
@@ -173,9 +180,26 @@ const LICENSE_TRANSITIONS = {
 function transitionLicenseCase_(licenseId, event, ctx){
   if(!licenseId) return false;
   ctx = ctx || {};
+  const v = validateLicenseTransition_(licenseId, event, ctx);
+  // 同じ状態への遷移も記録は残す（誰がいつ何を試みたかは監査上の情報）が、書き込みは差分があるときだけ
+  if(v.changed) updateLicenseCaseRaw_(licenseId, v.patch);
+  logEvent_('license_case', licenseId, ctx.actor || 'system',
+    Object.assign({ transition_event: event }, v.before),
+    Object.assign({ transition_event: event, reason: ctx.reason || '' }, v.after));
+  return { before: v.before, after: v.after, event: event, changed: v.changed };
+}
+
+/**
+ * 遷移の事前検証（書き込みなし）。transitionLicenseCase_ と同じ判定を行い、
+ * 適用できなければ同じ例外を投げる。認証行の更新など「台帳と一緒に変える処理」は、
+ * 先にこれを通してから書き始める（後段の遷移だけが失敗して食い違う状態を作らない・P1-2）。
+ * 戻り値 { before, after, patch, changed }
+ */
+function validateLicenseTransition_(licenseId, event, ctx){
+  ctx = ctx || {};
   const def = LICENSE_TRANSITIONS[event];
   if(!def) throw new Error('STATE_ERROR: 未定義のイベントです: ' + event);
-  const row = readRows_(ssOps_(), 'License_Cases').find(function(k){ return k.license_id === licenseId; });
+  const row = readRows_(ssOps_(), 'License_Cases').find(function(k){ return k.license_id === String(licenseId || ''); });
   if(!row) throw new Error('DATA_NOT_FOUND: ライセンス案件がありません: ' + licenseId);
 
   const cur = {
@@ -194,13 +218,8 @@ function transitionLicenseCase_(licenseId, event, ctx){
   }
   const patch = typeof def.to === 'function' ? def.to(ctx, cur) : Object.assign({}, def.to);
   const after = Object.assign({}, cur, patch);
-  // 同じ状態への遷移も記録は残す（誰がいつ何を試みたかは監査上の情報）が、書き込みは差分があるときだけ
   const changed = LICENSE_STATE_COLUMNS.some(function(k){ return after[k] !== cur[k]; });
-  if(changed) updateLicenseCaseRaw_(licenseId, patch);
-  logEvent_('license_case', licenseId, ctx.actor || 'system',
-    Object.assign({ transition_event: event }, cur),
-    Object.assign({ transition_event: event, reason: ctx.reason || '' }, after));
-  return { before: cur, after: after, event: event, changed: changed };
+  return { before: cur, after: after, patch: patch, changed: changed };
 }
 
 /** 状態列以外の更新。状態列を渡したら拒否（直接更新の抜け道を残さない）。 */

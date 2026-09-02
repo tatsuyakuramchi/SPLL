@@ -39,8 +39,8 @@ function web_getSubmitContext(token){
     return { submission_id:s.submission_id, title:s.title, status:s.status, versions:vs, correction:correction,
       method:s.submission_method || 'UPLOAD' };
   });
-  // バッジ取得導線（V2-014-7）：提出トークンのままバッジページを開ける（表示毎の再発行はしない）
-  const badge = readRows_(ssOps_(),'Badges').find(function(b){ return belongsToLicense_(b, ref) && String(b.status) === 'ISSUED'; });
+  // バッジ取得導線（V2-014-7）：提出トークンのままバッジページを開ける（表示毎の再発行はしない）。認証が ACTIVE のときだけ
+  const badge = distributableBadgeFor_(ref);
   // 配信元は WORKFLOW_URL（Cloud Run）を正とする。ScriptApp.getService().getUrl() は
   // 実行中のGASプロジェクトのURLを返すため、画面を外へ出したあとは行き先が食い違う。
   const badgeUrl = badge ? userPageUrl_('badge','token',token) : '';
@@ -238,14 +238,16 @@ function web_getBadgeImage(token, size){
     return { base64: Utilities.base64Encode(DriveApp.getFileById(fileId).getBlob().getBytes()) };
   }catch(err){ return null; }
 }
-/** バッジ用トークンの解決。提出・案内のトークンでも閲覧できる（再発行を不要にするため）。 */
+/**
+ * バッジ用トークンの解決。提出・案内のトークンでも閲覧できる（再発行を不要にするため）。
+ * 認証が ACTIVE でなければ null（停止・失効・終了の後に「SPLL認証バッジ」の画像を新たに取得させない・P0-4）。
+ */
 function badgeForToken_(token, consume){
   let tok = resolveToken_(token, 'BADGE_DOWNLOAD');
   if(tok){ if(consume) consumeToken_(tok); }
   else { tok = resolveToken_(token, 'SUBMISSION') || resolveToken_(token, 'GUIDE'); }
   if(!tok) return null;
-  const ref = tokenLicenseRef_(tok);
-  return readRows_(ssOps_(),'Badges').find(function(x){ return belongsToLicense_(x, ref) && String(x.status) === 'ISSUED'; }) || null;
+  return distributableBadgeFor_(tokenLicenseRef_(tok));
 }
 
 function verifyInputHtml_(){
