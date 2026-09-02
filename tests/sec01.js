@@ -67,5 +67,13 @@ ok(!pj.oauthScopes.some(s => /send_mail/.test(s)), 'portal はメール送信ス
   ok(/function transitionLicenseCase_/.test(c), app + ' に状態遷移（transitionLicenseCase_）がある');
   ok(!/function updateLicenseCase_\(/.test(c), app + ' に旧 updateLicenseCase_（状態列の直接更新）が残っていない');
 });
+// RP-002 §3：認証は審査 CLEARED 後にだけ発行する。締結後処理から issueCert_ を呼ばない
+['workflow','admin'].forEach(function(app){
+  const c = combined(app);
+  ok(/function completeCertification_/.test(c), app + ' に審査後の認証発行（completeCertification_）がある');
+  const post = (c.match(/function preparePostSigningWorkflow_[\s\S]*?\n}/) || [''])[0];
+  ok(post && !/issueCert_|enqueueBadgeJob_/.test(post), app + ' の締結後処理は認証・バッジを発行しない');
+  ok(!/function finishLicenseActivation_/.test(c), app + ' に旧 finishLicenseActivation_（締結時発行）が残っていない');
+});
 console.log('\nSEC01 RESULT: ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

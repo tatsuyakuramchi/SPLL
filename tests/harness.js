@@ -225,10 +225,10 @@ ok(contract && contract.status==='SIGNED','contract SIGNED');
 ok(contract.application_ref===appRes.application_ref,'contract linked by application_ref');
 ok(rows(OPS,'Contract_Works').filter(x=>x.contract_id===contract.contract_id).length===2,'contract_works snapshot 2');
 ok(rows(OPS,'Applications')[0].status==='SIGNED','application SIGNED');
-const cert=rows(OPS,'Certificates')[0];
-ok(cert && cert.status==='ACTIVE' && cert.reason_code==='ISSUED','cert ACTIVE ISSUED');
-ok(cert.check_code_hash && !cert.check_code,'cert stores hash only (no plaintext)');
-ok(rows(OPS,'Badges').length===1,'badge issued at signing');
+// RP-002 §3：締結だけでは認証・バッジを発行しない（作品提出→審査 CLEARED の後）
+ok(rows(OPS,'Certificates').length===0,'締結時点で Certificate は作られない');
+ok(rows(OPS,'Badges').length===0,'締結時点で Badge は作られない');
+ok(rows(OPS,'License_Cases').find(k=>k.license_id===contract.license_id).case_status==='AWAITING_SUBMISSION','締結で case_status = AWAITING_SUBMISSION');
 ok(rows(OPS,'Access_Tokens').filter(t=>t.contract_id===contract.contract_id&&t.purpose==='SUBMISSION').length>=1,'SUBMISSION token prepared');
 
 // 5. get submit token (need raw token). prepareSubmissionToken_ stores only hash. Use admin_sendUploadLink to get raw token.
@@ -255,9 +255,18 @@ const ver1=rows(OPS,'Submission_Versions').find(v=>v.submission_id===sub1.submis
 ok(ver1.status==='AI_SCREENED','version AI_SCREENED');
 
 // 7. human review CLEARED
-G.admin_setHumanReview(sub1.submission_id,'CLEARED','ok','rev@example.com', ver1.version_id);
+ok(rows(OPS,'License_Cases').find(k=>k.license_id===contract.license_id).case_status==='REVIEWING','提出で case_status = REVIEWING（認証なし）');
+const hrv=G.admin_setHumanReview(sub1.submission_id,'CLEARED','ok','rev@example.com', ver1.version_id);
 ok(rows(OPS,'Submissions').find(s=>s.submission_id===sub1.submission_id).status==='CLEARED','submission CLEARED');
 ok(rows(OPS,'Human_Reviews')[0].version_id===ver1.version_id,'human review has version_id');
+// CLEARED で初めて認証・バッジが発行される
+ok(hrv&&hrv.certification&&hrv.certification.issued===true,'CLEARED の応答に認証発行が載る');
+const cert=rows(OPS,'Certificates').find(c=>c.contract_id===contract.contract_id);
+ok(cert && cert.status==='ACTIVE' && cert.reason_code==='ISSUED','CLEARED後に cert ACTIVE ISSUED');
+ok(cert.check_code_hash && !cert.check_code,'cert stores hash only (no plaintext)');
+ok(rows(OPS,'Badges').filter(b=>b.contract_id===contract.contract_id&&b.status==='ISSUED').length===1,'CLEARED後にバッジ発行');
+ok(rows(OPS,'Badge_Jobs').some(j=>j.contract_id===contract.contract_id&&j.status==='ISSUED'),'Badge_Jobs が ISSUED');
+ok(rows(OPS,'License_Cases').find(k=>k.license_id===contract.license_id).case_status==='CERTIFIED','case_status = CERTIFIED');
 
 // 8. resubmission -> v2 same submission
 const sub2=G.web_submitWork(link.token, { submission_id:sub1.submission_id, title:'二次創作X', filename:'x2.pdf', mimeType:'application/pdf', dataBase64:b64 });
@@ -353,7 +362,7 @@ G.admin_linkContract(unlinkedC.contract_id, app2.application_id);
 const relinked=rows(OPS,'Contracts').find(x=>x.contract_id===unlinkedC.contract_id);
 ok(relinked.application_id===app2.application_id && relinked.link_status==='LINKED','手動紐付けでLINKED');
 ok(rows(OPS,'Contract_Works').some(x=>x.contract_id===unlinkedC.contract_id && x.work_id==='WRK-BKK00019'),'紐付けで対象原作を固定');
-ok(rows(OPS,'Certificates').some(x=>x.contract_id===unlinkedC.contract_id && x.status==='ACTIVE'),'紐付けで認証ACTIVE発行');
+ok(!rows(OPS,'Certificates').some(x=>x.contract_id===unlinkedC.contract_id),'紐付けでは認証を発行しない（審査後）');
 ok(rows(OPS,'Access_Tokens').some(x=>x.contract_id===unlinkedC.contract_id&&x.purpose==='SUBMISSION'),'紐付けで提出トークン発行');
 ok(rows(OPS,'Applications').find(a=>a.application_id===app2.application_id).status==='SIGNED','紐付けで申込SIGNED');
 // 二重紐付け防止
@@ -660,7 +669,7 @@ ok(appFailRow().cloudsign_send_status==='MANUAL_SENT','手動送信のCloudSign�
 G.doPost({parameter:{},postData:{contents:JSON.stringify({document_id:'DOC-P4-OK',status:'COMPLETED',application_ref:appP4.application_ref})}});
 const cP4=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-P4-OK');
 ok(cP4&&cP4.terms_verification_status==='VERIFIED'&&cP4.route_type==='AUTO'&&cP4.form_submission_id==='FR-P4-1','照合VERIFIED＋route_type/form_submission_id記録');
-ok(rows(OPS,'Certificates').some(x=>x.contract_id===cP4.contract_id&&x.status==='ACTIVE'),'照合通過で認証発行');
+ok(!rows(OPS,'Certificates').some(x=>x.contract_id===cP4.contract_id),'照合通過でも認証は審査後（締結では発行しない）');
 const rcptP4=rows(OPS,'Webhook_Receipts').find(r=>r.document_id==='DOC-P4-OK');
 ok(rcptP4&&rcptP4.application_ref===appP4.application_ref&&String(rcptP4.response_code)==='200','受信台帳にevent_type/document_id/application_ref/response_code');
 
@@ -674,7 +683,8 @@ ok(!rows(OPS,'Certificates').some(x=>x.contract_id===cT().contract_id),'不一�
 ok(G.admin_listTermsMismatch().some(c=>c.contract_id===cT().contract_id),'条件不一致キューに表示');
 G.admin_confirmContractTerms(cT().contract_id,'締結PDFと台帳条件を照合し一致を確認');
 ok(cT().terms_verification_status==='MANUAL_CONFIRMED'&&cT().link_status==='LINKED','手動確認でMANUAL_CONFIRMED→LINKED');
-ok(rows(OPS,'Certificates').some(x=>x.contract_id===cT().contract_id),'確認後に認証発行');
+ok(!rows(OPS,'Certificates').some(x=>x.contract_id===cT().contract_id)&&rows(OPS,'Access_Tokens').some(t=>t.contract_id===cT().contract_id&&t.purpose==='SUBMISSION'),
+  '確認後は提出導線が開く（認証は審査後）');
 
 // 65. メール不達（§10.9）
 G.doPost({parameter:{},postData:{contents:JSON.stringify({document_id:'DOC-P4-OK',status:'signing_email_bounced'})}});
@@ -727,8 +737,8 @@ ok(wfAll2.steps.some(s=>/作成=\[\]/.test(s)),'setup_workflowAll: 再実行は�
 ok(/^SPLL-\d{6}-\d{4}$/.test(appP4.license_id),'申込でSPLL番号（license_id）発行: '+appP4.license_id);
 const kaseP4=()=>rows(OPS,'License_Cases').find(k=>k.license_id===appP4.license_id);
 ok(kaseP4().contract_status==='SIGNED'&&kaseP4().cloudsign_document_id==='DOC-P4-OK','締結でcase更新（契約状態・CloudSign書類ID）');
-ok(kaseP4().certification_status==='ACTIVE'&&kaseP4().case_status==='CERTIFIED'&&kaseP4().review_status==='AWAITING_SUBMISSION',
-  '活性化で認証ACTIVE・現在地CERTIFIED（審査状態は偽らない）');
+ok(kaseP4().certification_status==='NOT_ISSUED'&&kaseP4().case_status==='AWAITING_SUBMISSION'&&kaseP4().review_status==='AWAITING_SUBMISSION',
+  '締結で提出待ち。認証は未発行のまま（RP-002 §3）');
 const lwP4=rows(OPS,'License_Works').filter(w=>w.license_id===appP4.license_id);
 ok(lwP4.length===1&&lwP4[0].fee_model_snapshot==='FLAT'&&Number(lwP4[0].fee_value_snapshot)===16500,
   '費用は契約形態（利用目的）×原作構造で自動確定しLicense_Worksへスナップショット');
@@ -769,7 +779,7 @@ ok(G.setup_migrateLicenseCases().created===0,'移行の再実行はスキップ�
 
 // 77. ライセンス一覧・詳細（§18.2：SPLL番号で申込〜認証まで追跡）
 const lcList=G.admin_listLicenseCases();
-ok(lcList.some(k=>k.license_id===appP4.license_id&&k.legacy_contract_id===cP4.contract_id&&k.certification_status==='ACTIVE'),
+ok(lcList.some(k=>k.license_id===appP4.license_id&&k.legacy_contract_id===cP4.contract_id&&k.certification_status==='NOT_ISSUED'),
   'ライセンス一覧（SPLL番号・状態・旧契約ID併記）');
 const lcFee=lcList.find(k=>k.license_id===appP4.license_id);
 ok(lcFee&&/16,500円/.test(lcFee.fee),'ライセンス一覧に利用許諾料（締結時スナップショット）: '+lcFee.fee);
@@ -881,7 +891,7 @@ const cV4=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-V4-1');
 const tV4=JSON.parse(cV4.terms_snapshot||'{}');
 ok(tV4.terms_snapshot_hash===v4a.terms_snapshot_hash&&tV4.terms_snapshot_source==='SPLL_SNAPSHOT'&&tV4.terms_snapshot_hash_verified==='true',
   '締結スナップショットはSPLL内部の正本から復元しハッシュ一致を記録');
-ok(cV4.terms_verification_status==='VERIFIED'&&rows(OPS,'Certificates').some(x=>x.contract_id===cV4.contract_id),'条件照合VERIFIEDで認証発行');
+ok(cV4.terms_verification_status==='VERIFIED'&&!rows(OPS,'Certificates').some(x=>x.contract_id===cV4.contract_id),'条件照合VERIFIED。認証は審査後');
 ok(G.admin_listLicenseCases().find(k=>k.license_id===v4a.license_id).fee.indexOf('16,500')>=0,'ライセンス一覧の利用許諾料はv4スナップショットからも表示');
 // 経理引渡：契約書版が変わっても請求条件のキーは同じ形で渡す
 const hoV4=rows(OPS,'Finance_Handoffs').find(h=>h.license_id===v4a.license_id);
@@ -1163,7 +1173,11 @@ frPost(swApp,'FR-SW');
 G.doPost({parameter:{},postData:{contents:JSON.stringify({ document_id:'DOC-SW', status:'COMPLETED', application_ref:swApp.application_ref })}});
 const cSw=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-SW');
 const certSw=()=>rows(OPS,'Certificates').find(x=>x.contract_id===cSw.contract_id);
-ok(certSw().status==='ACTIVE','締結時の認証は既定オン（ACTIVE）');
+ok(!certSw(),'締結だけでは認証は無い');
+const swLink=G.admin_sendUploadLink(cSw.contract_id);
+const swSub=G.web_submitWork(swLink.token,{ title:'スイッチ検証', filename:'sw.pdf', mimeType:'application/pdf', dataBase64:b64 });
+G.admin_setHumanReview(swSub.submission_id,'CLEARED','ok');
+ok(certSw().status==='ACTIVE','審査CLEAREDで発行された認証は既定オン（ACTIVE）');
 let noReason=false; try{ G.admin_setCertEnabled(cSw.contract_id,false,''); }catch(e){ noReason=/理由/.test(String(e.message)); }
 ok(noReason,'オフにする理由は必須');
 G.admin_setCertEnabled(cSw.contract_id,false,'利用許諾料が未入金のため');
@@ -1636,7 +1650,7 @@ ok(cancelSigned,'締結後の案件は取消できない（契約終了は別イ
 
 // ============ RP-002 §5-§6：業務テーブルの license_id（dual-write と移行） ============
 // 210. 新規に書かれる行は license_id を持つ（contract_id は互換列）
-const fkLid=appP4.license_id, fkCid=cP4.contract_id;
+const fkLid=contract.license_id, fkCid=contract.contract_id;
 ok(rows(OPS,'Access_Tokens').some(t=>t.contract_id===fkCid&&t.license_id===fkLid),'Access_Tokens に license_id が入る');
 ok(rows(OPS,'Certificates').some(c=>c.contract_id===fkCid&&c.license_id===fkLid),'Certificates に license_id が入る');
 ok(rows(OPS,'Badges').some(b=>b.contract_id===fkCid&&b.license_id===fkLid&&b.cert_id),'Badges に license_id と cert_id が入る（認証の表示物）');
@@ -1670,6 +1684,57 @@ ok(rows(OPS,'Migration_Runs').some(r=>r.migration_name==='migrateLicenseForeignK
 ok(rows(OPS,'License_Cases').find(k=>k.license_id===legacyApp.license_id).case_status==='AWAITING_SUBMISSION','旧 case_status（SIGNED）を現行値へ正規化');
 const fk2=G.setup_migrateLicenseForeignKeysV2();
 ok(fk2.updated===0&&fk2.normalized===0&&fk2.unresolved.length===1,'再実行は補完0件（冪等）。未解決だけが残り続ける');
+
+// ============ RP-002 §3 / §22.1：認証は審査 CLEARED の後にだけ発行される ============
+geminiResponder=()=>({ overall_result:'PASS_CANDIDATE', findings:[] });
+const c3App=mkAppV4(['WRK-ARK00012'],'書籍');
+const c3Case=()=>rows(OPS,'License_Cases').find(k=>k.license_id===c3App.license_id);
+const c3Certs=()=>rows(OPS,'Certificates').filter(c=>c.license_id===c3App.license_id);
+G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({submission_id:'FR-C3',columns:v4Cols(c3App)})}});
+G.doPost({parameter:{},postData:{contents:JSON.stringify({document_id:'DOC-C3',status:'COMPLETED',application_ref:c3App.application_ref})}});
+// Test 1：締結 → 認証なし・バッジなし・AWAITING_SUBMISSION
+ok(c3Certs().length===0,'Test1: 締結で Certificate は作られない');
+ok(!rows(OPS,'Badges').some(b=>b.license_id===c3App.license_id),'Test1: 締結で Badge は作られない');
+ok(c3Case().case_status==='AWAITING_SUBMISSION'&&c3Case().certification_status==='NOT_ISSUED','Test1: case_status = AWAITING_SUBMISSION');
+// Test 2：提出 → REVIEWING・認証なし
+const c3Ctr=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-C3');
+const c3Link=G.admin_sendUploadLink(c3Ctr.contract_id);
+const c3Sub=G.web_submitWork(c3Link.token,{ title:'順序検証', filename:'o.pdf', mimeType:'application/pdf', dataBase64:b64 });
+ok(c3Case().case_status==='REVIEWING'&&c3Certs().length===0,'Test2: 提出で REVIEWING、認証なし');
+// Test 3：是正要求 → CORRECTION_REQUIRED・認証なし
+G.admin_setHumanReview(c3Sub.submission_id,'CORRECTION_REQUIRED','クレジット表記を直してください');
+ok(c3Case().case_status==='CORRECTION_REQUIRED'&&c3Certs().length===0,'Test3: 是正要求で CORRECTION_REQUIRED、認証なし');
+// Test 4：再提出 → CLEARED → Certificate ACTIVE・Badge Job・CERTIFIED
+G.web_submitWork(c3Link.token,{ submission_id:c3Sub.submission_id, title:'順序検証', filename:'o2.pdf', mimeType:'application/pdf', dataBase64:b64 });
+const c3Res=G.admin_setHumanReview(c3Sub.submission_id,'CLEARED','ok');
+ok(c3Res.certification&&c3Res.certification.issued===true,'Test4: CLEARED で認証を発行');
+ok(c3Certs().length===1&&c3Certs()[0].status==='ACTIVE','Test4: Certificate ACTIVE');
+ok(rows(OPS,'Badge_Jobs').some(j=>j.license_id===c3App.license_id&&(j.status==='ISSUED'||j.status==='QUEUED')),'Test4: Badge Job 起票');
+ok(c3Case().case_status==='CERTIFIED'&&c3Case().review_status==='CLEARED'&&c3Case().certification_status==='ACTIVE','Test4: case_status = CERTIFIED');
+// 再審査を通しても二重発行しない
+const c3Again=G.admin_setHumanReview(c3Sub.submission_id,'CLEARED','再確認');
+ok(c3Again.certification&&c3Again.certification.reused===true&&c3Certs().length===1,'認証は1案件1枚（再CLEAREDでは再発行しない）');
+
+// 未解決の重大アラートがあると CLEARED でも発行しない。閉じてから再CLEAREDで発行
+geminiResponder=()=>({ overall_result:'HIGH_RISK', findings:[{ work_id:'WRK-ARK00012', rule_id:'R1', severity:'HIGH', result:'HIGH_RISK', evidence:'x' }] });
+const c3bApp=mkAppV4(['WRK-BKK00019'],'書籍');
+G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.stringify({submission_id:'FR-C3B',columns:v4Cols(c3bApp)})}});
+G.doPost({parameter:{},postData:{contents:JSON.stringify({document_id:'DOC-C3B',status:'COMPLETED',application_ref:c3bApp.application_ref})}});
+const c3bCtr=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-C3B');
+const c3bLink=G.admin_sendUploadLink(c3bCtr.contract_id);
+const c3bSub=G.web_submitWork(c3bLink.token,{ title:'高リスク', filename:'h.pdf', mimeType:'application/pdf', dataBase64:b64 });
+const c3bAlert=rows(OPS,'Compliance_Alerts').find(a=>a.submission_id===c3bSub.submission_id);
+ok(c3bAlert&&c3bAlert.license_id===c3bApp.license_id&&c3bAlert.status==='OPEN','高リスクで Compliance_Alert（license_id つき）');
+const c3bRes=G.admin_setHumanReview(c3bSub.submission_id,'CLEARED','目視で問題なし');
+ok(c3bRes.certification&&c3bRes.certification.issued===false&&/重大アラート/.test(c3bRes.certification.reason),
+  '未解決の重大アラートがあると CLEARED でも認証を発行しない: '+c3bRes.certification.reason);
+ok(!rows(OPS,'Certificates').some(c=>c.license_id===c3bApp.license_id),'認証は作られていない');
+G.updateRow_(OPS,'Compliance_Alerts','alert_id',c3bAlert.alert_id,{ status:'CLOSED' });
+const c3bRes2=G.admin_setHumanReview(c3bSub.submission_id,'CLEARED','アラート解消を確認');
+ok(c3bRes2.certification&&c3bRes2.certification.issued===true,'アラートを閉じて再CLEAREDで発行');
+geminiResponder=()=>({ overall_result:'PASS_CANDIDATE', findings:[] });
+
+// 締結前の提出は起きない（提出トークンは締結後にしか出ない）が、状態機械でも締結前の認証発行は拒否される（201で検証済）
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

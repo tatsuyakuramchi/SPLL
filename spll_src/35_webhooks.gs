@@ -188,7 +188,7 @@ function processCloudSignEvent_(body, e){
     updateRow_(ssOps_(),'Contracts','contract_id',contractId,{
       form_submission_id: app.form_submission_id || '', license_id: app.license_id || '',
       route_type: app.manual_review_reason ? 'MANUAL' : 'AUTO', delivery_status: 'DELIVERED' });
-    // 条件照合（経理設計書 §10.8）：認証・バッジ・請求の前に主要条件を検証
+    // 条件照合（経理設計書 §10.8）：提出導線・経理引渡の前に主要条件を検証（認証は審査後）
     const verify = verifyContractTerms_(contractId, app);
     if(!verify.ok){
       updateRow_(ssOps_(),'Contracts','contract_id',contractId,{
@@ -314,7 +314,7 @@ function csBounceStatus_(event){
   return '';
 }
 /**
- * 締結後の条件照合（§10.8）。認証・バッジ・請求の前に、台帳スナップショットと
+ * 締結後の条件照合（§10.8）。提出導線・経理引渡の前に、台帳スナップショットと
  * 締結内容の主要条件（フォーム完了記録・対象原作・利用目的・料金モデル）を検証する。
  */
 function verifyContractTerms_(contractId, app){

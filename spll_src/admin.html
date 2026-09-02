@@ -162,7 +162,7 @@
     <div class="panel" id="unlinked-panel" style="display:none;border-color:var(--brass);">
       <div class="ph"><h3>⚠️ 未紐付けの締結（要・手動紐付け）</h3><span class="hint">application_ref で申込に突合できなかった締結</span></div>
       <div class="pbody">
-        <p class="setnote">契約書タイトルに application_ref が載っていない等で自動突合できなかった締結です。書類タイトルを手掛かりに、正しい申込を選んで紐付けてください。紐付けると対象原作の固定・認証・バッジ・提出トークンが発行されます。</p>
+        <p class="setnote">契約書タイトルに application_ref が載っていない等で自動突合できなかった締結です。書類タイトルを手掛かりに、正しい申込を選んで紐付けてください。紐付けると対象原作の固定・提出トークン・案内が発行されます（認証・バッジは作品の審査完了後）。</p>
         <table><thead><tr><th>契約ID</th><th>書類タイトル</th><th>CloudSign書類ID</th><th>締結日</th><th>申込に紐付け</th></tr></thead><tbody id="unlinked-tbody"></tbody></table>
       </div>
     </div>
@@ -185,7 +185,7 @@
       <table><thead><tr><th>申込</th><th>利用目的</th><th>フォーム送信</th><th>状態</th><th>理由</th><th>操作</th></tr></thead><tbody id="acc-cs-send-tbody"></tbody></table>
     </div>
     <div class="panel">
-      <div class="ph"><h3>条件不一致（TERMS_MISMATCH）</h3><span class="hint">締結内容と台帳スナップショットの照合で不一致。認証・バッジは停止中</span></div>
+      <div class="ph"><h3>条件不一致（TERMS_MISMATCH）</h3><span class="hint">締結内容と台帳スナップショットの照合で不一致。提出導線・経理引渡は停止中</span></div>
       <table><thead><tr><th>契約</th><th>申込番号</th><th>書類タイトル</th><th>不一致内容</th><th>操作</th></tr></thead><tbody id="acc-cs-terms-tbody"></tbody></table>
     </div>
     <div class="panel">
@@ -193,7 +193,7 @@
       <table><thead><tr><th>契約</th><th>書類タイトル</th><th>不達種別</th><th>発生</th><th>操作</th></tr></thead><tbody id="acc-cs-delivery-tbody"></tbody></table>
     </div>
     <div class="note">申込の訂正（原作・利用目的・名義等）は上書きせず「再申込」で新しい申込番号を発行します（旧申込はSUPERSEDED・再同意/再送信が必要）。CloudSignテンプレート・経路別フォームURLの版管理は admin_saveContractTemplates で設定します（STANDARD_FIXED／STANDARD_RATE／MANUAL_REVIEW）。</div>
-    <div class="note"><b>認証のオン／オフ：</b>締結時は<b>オン（有効）</b>で発行されます。未入金が判明したら「認証をオフ」にすると、バッジのQRから検証したときに「無効」と表示されます（担当者1名で切替可能・理由必須）。入金確認後は「認証をオン」で戻せます。<b>失効（REVOKED）・契約終了は別扱い</b>で、申請→別担当者の承認が必要です。</div>
+    <div class="note"><b>認証のオン／オフ：</b>認証は作品の<b>審査完了（CLEARED）時</b>に有効で発行されます。未入金が判明したら「認証をオフ」にすると、バッジのQRから検証したときに「無効」と表示されます（担当者1名で切替可能・理由必須）。入金確認後は「認証をオン」で戻せます。<b>失効（REVOKED）・契約終了は別扱い</b>で、申請→別担当者の承認が必要です。</div>
     <div class="note">締結の書き戻しはCloudSign Webhook（status=2 締結完了）のみが行います。自動突合できない締結は「未紐付け」として記録され、上のパネルから手動で申込に紐付けます（誤って別申込の原作を固定しないため、紐付けまで認証等の発行は保留されます）。</div>
   </section>
 
@@ -1131,7 +1131,16 @@ function humanReview(r,result){
   var id=(r&&r.submission_id)||r.id||r;
   var vid=(r&&r.version_id)||"";
   var comment = (result==="CORRECTION_REQUIRED"||result==="ESCALATED") ? (prompt("コメント（任意）：","")||"") : "";
-  call("admin_setHumanReview",[id,result,comment,"",vid],function(){ toast("人手判断を記録： "+result); loadReview(); loadDashboard(); });
+  call("admin_setHumanReview",[id,result,comment,"",vid],function(res){
+    // CLEARED では認証の発行結果も伝える（発行できない理由があれば表示）
+    var c=res&&res.certification;
+    if(result==="CLEARED"&&c){
+      if(c.issued) toast("人手判断を記録： CLEARED ／ 認証を発行しました（"+(c.cert_id||"")+"）");
+      else if(c.reused) toast("人手判断を記録： CLEARED（認証は既に発行済み）");
+      else toast("人手判断を記録： CLEARED ／ 認証は未発行："+(c.reason||""), true);
+    } else toast("人手判断を記録： "+result);
+    loadReview(); loadDashboard(); loadLicense();
+  });
 }
 
 function showUploadLink(contractId, res){
@@ -1179,7 +1188,7 @@ function loadUnlinked(){
 }
 function doLink(contractId, applicationId){
   if(!applicationId){ toast("紐付ける申込を選択してください", true); return; }
-  if(!confirm("契約 "+contractId+" を申込 "+applicationId+" に紐付けます。\n対象原作の固定・認証・バッジ・提出トークンが発行されます。よろしいですか？")) return;
+  if(!confirm("契約 "+contractId+" を申込 "+applicationId+" に紐付けます。\n対象原作の固定・提出トークン・案内が発行されます（認証は審査完了後）。よろしいですか？")) return;
   call("admin_linkContract",[contractId, applicationId],function(){ toast("申込に紐付けました"); loadContract(); loadDashboard(); });
 }
 
@@ -1363,7 +1372,7 @@ function loadAccCs(){
       var act=document.createElement("td"); act.className="actions";
       act.appendChild(mkBtn("条件確認済み（有効化）","btn p",function(){
         var note=prompt("確認メモ（締結PDFと台帳条件の照合結果）：",""); if(note===null) return;
-        if(!confirm("この契約を有効化します（認証・バッジが発行されます）。よろしいですか？")) return;
+        if(!confirm("この契約を有効化します（提出導線・経理引渡が動きます。認証は審査完了後）。よろしいですか？")) return;
         call("admin_confirmContractTerms",[c.contract_id,note],function(){ toast("条件確認済みとして有効化しました"); loadAccCs(); loadContract(); });
       }));
       tr.appendChild(act); tb.appendChild(tr);

@@ -223,7 +223,7 @@ function renderCtx(ctx){
   document.getElementById("app").style.display="";
   document.getElementById("mContract").textContent=ctx.contract_id||"—";
   document.getElementById("mWorks").textContent=(ctx.works&&ctx.works.length)?ctx.works.join("、"):"—";
-  var certMap={ACTIVE:"✔ 有効",SUSPENDED:"一時停止",REVOKED:"失効",EXPIRED:"期限切れ",TERMINATED:"終了",PAYMENT_HOLD:"支払保留",NONE:"—"};
+  var certMap={ACTIVE:"✔ 有効",SUSPENDED:"一時停止",REVOKED:"失効",EXPIRED:"期限切れ",TERMINATED:"終了",PAYMENT_HOLD:"支払保留",NONE:"未発行（審査完了後に発行）"};
   document.getElementById("mCert").textContent=certMap[ctx.cert_status]||ctx.cert_status||"—";
   document.getElementById("mLimit").textContent=(ctx.expires_at?("期限 "+ctx.expires_at):"")+(ctx.remaining_uploads!=null?("　残り "+ctx.remaining_uploads+" 回"):"");
   if(ctx.badge_url){ document.getElementById("badgeRow").style.display=""; document.getElementById("badgeLink").href=ctx.badge_url; }

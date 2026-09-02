@@ -131,7 +131,7 @@
 
     <div class="card">
       <h2 id="badgeHead">3. 認証バッジ（QRコード付き）</h2>
-      <p style="font-size:13.5px;margin:0 0 12px;">正規ライセンスであることを示す認証バッジです。<b>QRコードから誰でも有効性を確認できます。</b>作品のクレジット表記欄などにご利用ください。</p>
+      <p style="font-size:13.5px;margin:0 0 12px;">正規ライセンスであることを示す認証バッジです。<b>作品をご提出いただき、審査が完了した時点で発行されます。</b>QRコードから誰でも有効性を確認できます。作品のクレジット表記欄などにご利用ください。</p>
       <div id="badgeArea"></div>
       <div class="kv" style="margin-top:12px;">
         <div class="k">認証ID</div><div class="v mono" id="gCertId">—</div>
@@ -189,10 +189,13 @@ function render(c){
   if(c.badge_url){
     $("badgeArea").innerHTML='<a class="btn sec" href="'+esc(c.badge_url)+'" target="_blank" rel="noopener">🏅 認証バッジをダウンロード →</a>';
   }else{
-    $("badgeArea").innerHTML='<div class="note" style="margin:0">認証バッジを発行中です。しばらくしてからこのページを再読み込みしてください。</div>';
+    // 認証は作品の審査が完了してから発行される。締結直後は「未発行」が正常
+    $("badgeArea").innerHTML=(c.cert_status&&c.cert_status!=="NONE")
+      ? '<div class="note" style="margin:0">認証バッジを発行中です。しばらくしてからこのページを再読み込みしてください。</div>'
+      : '<div class="note" style="margin:0">作品のご提出と審査の完了後に発行されます。上の「作品提出ページを開く」からご提出ください。</div>';
   }
   $("gCertId").textContent=c.cert_id||"—";
-  var cm={ACTIVE:"✔ 有効",SUSPENDED:"一時停止",REVOKED:"失効",EXPIRED:"期限切れ",NONE:"発行準備中"};
+  var cm={ACTIVE:"✔ 有効",SUSPENDED:"一時停止",PAYMENT_HOLD:"一時停止",REVOKED:"失効",EXPIRED:"期限切れ",NONE:"未発行（審査完了後に発行）"};
   $("gCertStatus").textContent=cm[c.cert_status]||c.cert_status||"—";
   $("gVerify").href=c.verify_url||"#";
   $("gContact").innerHTML=c.office_contact

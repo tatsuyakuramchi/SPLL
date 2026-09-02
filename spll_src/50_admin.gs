@@ -147,11 +147,14 @@ function admin_setHumanReview(submissionId, result, comment, reviewer, versionId
   logEvent_('human_review', submissionId, actor.email, {status:sub.status}, {result:result, version_id:targetVersion});
   // 台帳の現在地（12_license_state）。判断の種類でイベントを分ける
   const licenseId = sub.license_id || licenseIdOfContract_(sub.contract_id);
+  let certification = null;
   if(licenseId){
     const ev = result === 'CLEARED' ? 'HUMAN_REVIEW_CLEARED' : (result === 'CORRECTION_REQUIRED' ? 'CORRECTION_REQUIRED' : 'REVIEW_ESCALATED');
     transitionLicenseCase_(licenseId, ev, { actor: actor.email, reason: submissionId + ' ' + targetVersion });
+    // 審査を通った時点で認証を発行する（RP-002 §3）。発行できない理由があれば結果に載せて返す
+    if(result === 'CLEARED') certification = completeCertification_(licenseId, submissionId, actor.email);
   }
-  return true;
+  return { ok:true, result:result, certification: certification };
 }
 
 /** 契約一覧：締結済(Contracts)＋締結待ち(Applications)を結合、契約者名はマスク、対象原作は複数表示 */
@@ -219,7 +222,7 @@ function admin_listLinkableApplications(){ requireRole_([]);
     }; });
 }
 /**
- * 未紐付け締結を申込へ手動紐付け。対象原作を固定し、認証・バッジ・提出トークンを発行（冪等）。
+ * 未紐付け締結を申込へ手動紐付け。対象原作を固定し、提出トークン・案内を発行（冪等）。認証は審査後。
  * ref突合が使えない運用（契約書タイトルにref差込不可等）の最終手段。
  */
 function admin_linkContract(contractId, applicationId){ requireRole_(['OPERATIONS','LEGAL_ADMIN']);
@@ -932,7 +935,7 @@ function admin_listTermsMismatch(){ requireRole_([]);
       cloudsign_title:c.cloudsign_title, signed_at:String(c.signed_at||'').slice(0,10),
       detail:c.terms_verification_detail }; });
 }
-/** 条件不一致の手動確認（LEGAL_ADMIN）。確認後に認証・バッジ・請求を実行（§10.8）。 */
+/** 条件不一致の手動確認（LEGAL_ADMIN）。確認後に締結後の導線と経理引渡を実行（§10.8）。認証は審査後。 */
 function admin_confirmContractTerms(contractId, note){
   const actor = requireRole_(['LEGAL_ADMIN']);
   const c = readRows_(ssOps_(),'Contracts').find(function(x){ return x.contract_id === String(contractId||''); });

@@ -1,4 +1,4 @@
-/** SPLL 32_contract ― 契約成立処理：スナップショット・認証・バッジ・締結PDF（GAS②/③共用） */
+/** SPLL 32_contract ― 契約成立処理：スナップショット・締結PDF・認証とバッジの実体（GAS②/③共用。発行の判断は 41_certificate） */
 
 
 /** 締結済PDFをCloudSign APIから取得し、契約フォルダへハッシュ付きで保存（FUN-04/§8.2） */
@@ -79,26 +79,26 @@ function snapshotContractTerms_(contractId, app){
 
 /**
  * 契約成立後処理（RP-001 §13.1で分解）：
- *   License活性化（認証・バッジ・提出）と経理向け引渡データ作成のみを行う。
+ *   締結後の導線（提出トークン・案内ページ）の用意と、経理向け引渡データ作成のみを行う。
  *   請求・入金・清算は本システムの対象外（経理側の独自運用が引渡データを参照する）。
+ *   認証・バッジはここでは発行しない。作品提出→審査 CLEARED を経て completeCertification_ が発行する（RP-002 §3）。
  */
 function finishContractLinkage_(contractId){
-  finishLicenseActivation_(contractId);
+  preparePostSigningWorkflow_(contractId);
   createFinanceHandoff_(contractId);
 }
-/** License活性化：認証・バッジ・提出トークン・案内。 */
-function finishLicenseActivation_(contractId){
-  const cert = issueCert_(contractId);   // 平文コードはここでのみ取得可能（バッジQRへ焼き込む）
-  if(prop_('BADGE_AUTO') !== 'false'){ enqueueBadgeJob_(contractId, cert && cert.verify_url); }   // 失敗時はBadge_Jobsで再実行（V2-014-8）
+/**
+ * 締結後の導線を用意する：提出トークン・案内ページURL・GUIDE_READY 通知。
+ * 台帳の状態は呼び出し側の syncLicenseOnSigning_（CLOUDSIGN_SIGNED）で AWAITING_SUBMISSION になっている。
+ * 以前はここで認証とバッジも発行していたが、審査前の作品に有効な認証が存在し得たため外した。
+ */
+function preparePostSigningWorkflow_(contractId){
   prepareSubmissionToken_(contractId);
-  // 締結直後に「今後のお手続き」案内ページのURLを払い出す（振込先・提出導線・バッジをまとめた1枚）
+  // 締結直後に「今後のお手続き」案内ページのURLを払い出す（振込先・提出導線・審査後のバッジ受け取りをまとめた1枚）
   const guideToken = prepareGuideToken_(contractId);
   enqueueNotification_(contractId, 'GUIDE_READY', contractId,
     { guide_url: userPageUrl_('guide','t',guideToken),
-      note:'締結完了。この案内ページURLを契約者へお伝えください（振込先・作品提出・認証バッジを含みます）' });
-  // 認証発行を台帳へ反映。審査前の発行は RP-002 §3 で改める（allow_unreviewed は移行期間の互換）
-  const licenseId = licenseIdOfContract_(contractId);
-  if(licenseId) transitionLicenseCase_(licenseId, 'CERTIFICATE_ISSUED', { actor:'system', allow_unreviewed:true, reason:'締結により発行' });
+      note:'締結完了。この案内ページURLを契約者へお伝えください（振込先・作品提出の導線。認証バッジは作品の審査完了後に発行されます）' });
 }
 /**
  * 経理向け引渡データの作成（RP-001 §10）。締結内容のスナップショットを
@@ -230,7 +230,7 @@ function extractApplicationRef_(body, e){
 // ============================================================
 const BADGE_SIZES = [{ key:'L', size:'LARGE' }, { key:'M', size:'MEDIUM' }, { key:'S', size:'SMALL' }];
 
-// B経路固定：認証・バッジは締結時に発行（課金モデル分岐なし）。
+// 認証・バッジの実体。発行のタイミングは審査 CLEARED 後（41_certificate の completeCertification_）。
 
 /** バッジ発行（契約単位・冪等）。BADGE_TEMPLATE_IDがあればテンプレ差込、無ければ自動組版。 */
 function issueBadge_(contractId, verifyUrl){
@@ -363,13 +363,13 @@ function distributeBadge_(c, badgeId){
 
 // ============================================================
 // 13. 認証（証明書）・検証ポータル・失効制御（案③）
-//     締結で「有効」→ 台帳連動で後から失効可能。検証は固定ポータル＋ID照会。
+//     審査 CLEARED で「有効」→ 台帳連動で後から失効可能。検証は固定ポータル＋ID照会。
 //     配布は当社メールを使わず、クリエーターは「受付番号」でポータルからバッジ取得。
 // ============================================================
 const CERT_STATES = ['ACTIVE','SUSPENDED','REVOKED','EXPIRED','TERMINATED','PAYMENT_HOLD'];
 
 /**
- * 締結時に認証を発行（ACTIVE）。照合コードは12桁の暗号学的乱数とし、台帳にはハッシュのみ保存
+ * 認証を発行（ACTIVE）。呼ぶのは審査 CLEARED 後の completeCertification_。照合コードは12桁の暗号学的乱数とし、台帳にはハッシュのみ保存
  * （修正設計書 §13.2）。平文コードは戻り値と検証URL（バッジQR用）でのみ扱う。
  */
 function issueCert_(contractId){
@@ -379,7 +379,7 @@ function issueCert_(contractId){
   const code = randCode_(12);
   const now = new Date().toISOString();
   appendRow_(ssOps_(),'Certificates',{ cert_id:certId, contract_id:contractId, license_id: licenseIdOfContract_(contractId), status:'ACTIVE',
-    reason_code:'ISSUED', reason_text:'締結により発行', requested_by:'system', approved_by:'system',
+    reason_code:'ISSUED', reason_text:'審査完了により発行', requested_by:'system', approved_by:'system',
     legal_case_id:'', effective_at:now, check_code_hash:hash_(code), issued_at:now.slice(0,10) });
   logEvent_('certificate', certId, 'system', null, { contract_id:contractId, status:'ACTIVE' });
   return { cert_id:certId, check_code:code, verify_url:verifyUrl_(certId, code) };
