@@ -1370,7 +1370,9 @@ const ovv = G.admin_partnershipOverview(2026,9);
 ok(ovv.events.some(e=>e.kind==='MEETING')&&ovv.events.some(e=>e.kind==='SETTLEMENT_DUE'),'カレンダーに会議と清算期限が載る');
 ok(ovv.events.every((e,i,arr)=>i===0||arr[i-1].date<=e.date),'カレンダーの予定は日付順');
 ok(ovv.kpis.active_members===5&&ovv.kpis.pending_settlements===1,'KPIは有効構成員・未完了清算を数える');
-ok(G.admin_partnershipOverview(2026,10).events.length===0,'対象月以外の予定は返さない');
+// 隣接月は使わない：報告期限が「翌月末」で起票されるため、実行した月によっては
+// 隣の月に予定が入る（この検査は実際に9月に入った時点で落ちた）。データの無い月で確かめる。
+ok(G.admin_partnershipOverview(2030,3).events.length===0,'対象月以外の予定は返さない');
 
 // 121. 権限（登録系はLEGAL_ADMIN/OPERATIONSのみ・閲覧は既存ロールで可）
 G.Session={ getActiveUser:()=>({ getEmail:()=>'auditor@example.com' }) };
@@ -1513,6 +1515,14 @@ const whDrift=G.doPost({parameter:{hook:'formrun'},postData:{contents:JSON.strin
   columns:okCols(driftApp)})}});
 ok(String(whDrift.getContent())==='accepted-manual-review','申込時条件を再現できない受信は自動締結を止める');
 G.updateRow_(MAS,'Works_Master','work_id','WRK-BKK00019',{ work_name:'インセイン' });
+
+// 126-3. クレジット表記は契約書へ差し込まず、案内ページ・検証ページで示す
+// 原作数に比例して膨らみ、2作品でformrunのURL上限に達するため（設定設計 §11）
+const creditApp=mkAppV4(['WRK-ARK00012'],'書籍');
+ok(!/credit/.test(creditApp.form_url_full),'組み上がったURLにクレジット表記を載せない');
+ok(creditApp.form_fields.work_names&&creditApp.form_fields.licensor_name,
+  '原著作物と当事者の特定は契約書へ差し込み続ける');
+ok(creditApp.form_fields.credit_text===undefined,'転送項目からクレジット表記を外す');
 
 // 127. QRは独自ドメインへ固定できる（実行基盤のURLを頒布物へ焼き込まない）
 G.setConfig_('WORKFLOW_URL','https://script.google.com/macros/s/WF/exec');

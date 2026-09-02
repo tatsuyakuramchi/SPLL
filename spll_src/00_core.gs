@@ -399,6 +399,17 @@ function contractWorkNames_(contractId){
   return readRows_(ssOps_(),'Contract_Works').filter(function(x){ return x.contract_id === contractId; })
     .map(function(x){ return nameMap[x.work_id] || x.work_id; });
 }
+/**
+ * 契約が求めるクレジット表記。契約書には具体的な文言を差し込まず「甲が別途指定する権利表記」とし、
+ * 実際の文言はここから案内ページ・検証ページで示す（CloudSign FORMのURLは1000字までで、
+ * クレジット表記は原作数に比例して膨らむため、契約書へ列挙すると2作品で上限に達する）。
+ * 出所は締結時のスナップショットとする。原作マスタを後から直しても、締結済の契約が求める表記は変わらない。
+ */
+function contractCreditTexts_(contractId){
+  return readRows_(ssOps_(),'Contract_Works').filter(function(x){ return x.contract_id === contractId; })
+    .map(function(x){ return String(x.credit_snapshot || ''); }).filter(Boolean)
+    .filter(function(v, i, a){ return a.indexOf(v) === i; });
+}
 function htmlPage_(title, inner){
   return HtmlService.createHtmlOutput(
     '<div style="font-family:sans-serif;max-width:640px;margin:0 auto;padding:24px;color:#211E2B">' + inner + '</div>'

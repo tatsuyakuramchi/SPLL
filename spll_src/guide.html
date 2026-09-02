@@ -109,7 +109,9 @@
         <div class="k">利用区分</div><div class="v" id="gUsage">—</div>
         <div class="k">利用許諾料</div><div class="v" id="gFee">—</div>
         <div class="k">締結日</div><div class="v mono" id="gSigned">—</div>
+        <div class="k">クレジット表記</div><div class="v" id="gCredit">—</div>
       </div>
+      <div class="note" id="gCreditNote" style="display:none;">上記のクレジット表記を、二次創作物に記載してください。表示位置・改変の可否は二次創作ガイドラインに従います。</div>
       <div class="note">SPLL番号は、お問い合わせ・お振込・作品提出のすべてで使う受付番号です。<span id="gExp"></span></div>
     </div>
 
@@ -165,6 +167,9 @@ function render(c){
   $("gUsage").textContent=c.usage_category||"—";
   $("gFee").textContent=c.fee_label||"—";
   $("gSigned").textContent=c.signed_at||"—";
+  var credits=(c.credit_texts&&c.credit_texts.length)?c.credit_texts.join(" ／ "):"";
+  $("gCredit").textContent=credits||"—";
+  $("gCreditNote").style.display=credits?"":"none";
   $("gExp").textContent=c.guide_expires_at
     ? ("　このページのご利用期限："+c.guide_expires_at+"（作品のご提出はこの期間内であればいつでも可能です。期限後は事務局へご連絡ください）") : "";
 

@@ -9,9 +9,14 @@ const CONTRACT_FORM_V4_VERSION = 'v4.1';
  * 3倍前後に膨らむ。全条件をURLに載せるとクレジット表記や原作名だけで上限に届くため、
  * 契約書へ差し込む最小限だけを転送し、残りはテンプレートの固定文言とする。
  * SPLL側は全条件（CONTRACT_FORM_V4_HASH_KEYS）を内部スナップショットとして保持し続ける。
+ *
+ * credit_text を転送しないのは、原作数に比例して膨らみ2作品で上限に達するため。
+ * 契約書は「甲が別途指定する権利表記を行う」とし、実際の文言は案内ページ・検証ページで示す
+ * （contractCreditTexts_）。原著作物の特定（work_names）と当事者（licensor_name）は
+ * 契約の中核なので転送を続ける。
  */
 const CONTRACT_FORM_V4_TRANSFER_KEYS = [
-  'license_id','application_ref','usage_category','work_names','licensor_name','fee_amount_or_rate','credit_text'
+  'license_id','application_ref','usage_category','work_names','licensor_name','fee_amount_or_rate'
 ];
 /** URLに載せる転送項目以外のシステム項目（改変検知・経路特定） */
 const CONTRACT_FORM_V4_CONTROL_KEYS = ['handoff_token','terms_snapshot_hash','template_route'];

@@ -185,6 +185,7 @@ function verifyCertificate_(certId, code){
     title: active ? '正規ライセンス 確認済み' : '無効',
     message: active ? 'このライセンスは有効です。' : 'このライセンスは現在有効ではありません（' + cert.status + '）。',
     work_names: contractWorkNames_(cert.contract_id),
+    credit_texts: contractCreditTexts_(cert.contract_id),   // 契約書は「別途指定」。実際の文言はここで示す
     license_id: cert.contract_id, issued_at: cert.issued_at, status: cert.status
   };
 }
@@ -199,7 +200,9 @@ function serveVerify_(e){
   if(v.state === 'LIMITED' || v.state === 'MISMATCH') return verifyHtml_('gray', v.title, v.message, '');
   const meta = '対象原作：' + (v.work_names.length ? esc_(v.work_names.join('、')) : '—') +
     '<br>ライセンスID：' + esc_(v.license_id) + '<br>発行日：' + esc_(v.issued_at) +
-    '<br>状態：' + esc_(v.status);
+    '<br>状態：' + esc_(v.status) +
+    ((v.credit_texts && v.credit_texts.length)
+      ? '<br>指定のクレジット表記：' + esc_(v.credit_texts.join(' ／ ')) : '');
   return verifyHtml_(v.state === 'ACTIVE' ? 'ok' : 'ng', v.title, v.message, meta);
 }
 

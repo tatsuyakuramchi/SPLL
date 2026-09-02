@@ -65,6 +65,9 @@ function web_getGuideContext(token){
     party_name: kase.party_display_name || '',
     usage_category: c.usage_category || '',
     works: contractWorkNames_(contractId),
+    // 契約書には具体的な文言を差し込まず「甲が別途指定する権利表記」としているため、
+    // クリエーターが公開前に確認できるようここで示す
+    credit_texts: contractCreditTexts_(contractId),
     signed_at: String(c.signed_at || '').slice(0,10),
     fee_label: String(terms.fee_amount_or_rate || ''),
     payment_terms: String(terms.payment_terms || terms.payment_due || ''),

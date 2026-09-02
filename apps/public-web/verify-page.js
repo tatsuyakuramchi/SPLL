@@ -82,11 +82,14 @@ function verifyPage(result){
   }
   const kind = result.state === 'ACTIVE' ? 'ok' : (result.state === 'INACTIVE' ? 'ng' : 'gray');
   const icon = kind === 'ok' ? '✓' : (kind === 'ng' ? '!' : '?');
+  // 契約書は「甲が別途指定する権利表記」とし、実際の文言はここで示す（設定設計 §11）
+  const credit = (result.credit_texts || []).join(' ／ ');
   const meta = (result.state === 'ACTIVE' || result.state === 'INACTIVE') ? `
     <dl>
       <dt>SPLL番号</dt><dd class="mono">${esc(result.license_id)}</dd>
       <dt>対象原作</dt><dd>${esc((result.work_names || []).join('、') || '—')}</dd>
       <dt>発行日</dt><dd class="mono">${esc(result.issued_at)}</dd>
+      ${credit ? `<dt>指定のクレジット表記</dt><dd>${esc(credit)}</dd>` : ''}
     </dl>` : '';
   return layout('SPLL ライセンス認証', `
     <div class="verdict">
