@@ -91,6 +91,23 @@
   .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:11px 20px;border-radius:9px;font-size:13px;z-index:50;opacity:0;transition:.2s;pointer-events:none;box-shadow:0 6px 24px rgba(0,0,0,.25);}
   .toast.show{opacity:1;}
   .toast.err{background:var(--fail);}
+  /* RP-002：ライセンス一覧のフィルタと詳細ドロワー */
+  .filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);background:#fff;}
+  .filters input,.filters select{border:1px solid var(--line);border-radius:7px;padding:6px 9px;font-size:12px;background:#fff;}
+  .filters input{min-width:260px;}
+  tr.rowlink{cursor:pointer;} tr.rowlink:hover td{background:var(--teal-bg);}
+  .drawer{position:fixed;top:0;right:0;width:min(760px,96vw);height:100vh;background:var(--surface);border-left:1px solid var(--line);
+    box-shadow:-12px 0 40px rgba(0,0,0,.12);z-index:60;overflow:auto;display:none;}
+  .drawer.on{display:block;}
+  .drawer .dh{position:sticky;top:0;background:var(--surface);border-bottom:1px solid var(--line);padding:14px 18px;display:flex;align-items:center;gap:12px;z-index:1;}
+  .drawer .dh h3{margin:0;font-size:15px;} .drawer .dh .id{font-size:12px;}
+  .drawer .dsec{padding:14px 18px;border-bottom:1px solid var(--line);}
+  .drawer .dsec h4{margin:0 0 10px;font-size:12px;color:var(--teal);letter-spacing:.06em;text-transform:uppercase;}
+  .drawer .kv{display:grid;grid-template-columns:110px 1fr;gap:4px 12px;font-size:12.5px;} .drawer .kv .k{color:var(--soft);}
+  .drawer table{font-size:12px;}
+  .tl{list-style:none;margin:0;padding:0;} .tl li{display:grid;grid-template-columns:150px 1fr;gap:10px;padding:6px 0;border-bottom:1px dashed var(--line);font-size:12px;}
+  .tl li .t{font-family:"IBM Plex Mono";font-size:11px;color:var(--soft);}
+  .scrim{position:fixed;inset:0;background:rgba(0,0,0,.18);z-index:59;display:none;} .scrim.on{display:block;}
 </style>
 </head>
 <body>
@@ -105,8 +122,8 @@
 <div class="tabs"><div class="twrap">
   <div class="tab on" data-v="dash">ダッシュボード</div>
   <div class="tab" data-v="license">ライセンス</div>
-  <div class="tab" data-v="review">作品審査管理</div>
-  <div class="tab" data-v="contract">契約管理</div>
+  <div class="tab" data-v="review">作品審査</div>
+  <div class="tab" data-v="cert">認証管理</div>
   <div class="tab" data-v="settings">設定</div>
 </div></div>
 
@@ -114,51 +131,56 @@
   <!-- DASH -->
   <section class="view on" id="v-dash">
     <h2>ダッシュボード</h2>
-    <p class="sub">各業務台帳（スプレッドシート）の状態をリアルタイムに集約。数値はサンプル。</p>
+    <p class="sub">案件の現在地（License_Cases.case_status）を集計。人の判断が要るものを「要対応」にまとめます。</p>
     <div class="kpis">
-      <div class="kpi warn"><div class="n" id="kpi-review">–</div><div class="l">AI審査・要確認</div></div>
-      <div class="kpi alert"><div class="n" id="kpi-high">–</div><div class="l">高リスク（赤）</div></div>
-      <div class="kpi"><div class="n" id="kpi-unscreened">–</div><div class="l">未審査（提出済）</div></div>
-      <div class="kpi sign"><div class="n" id="kpi-signing">–</div><div class="l">締結待ち</div></div>
+      <div class="kpi alert"><div class="n" id="kpi-manual">–</div><div class="l">個別確認（契約・例外）</div></div>
+      <div class="kpi sign"><div class="n" id="kpi-signing">–</div><div class="l">締結中</div></div>
+      <div class="kpi alert"><div class="n" id="kpi-hold">–</div><div class="l">条件不一致</div></div>
+      <div class="kpi"><div class="n" id="kpi-awaiting">–</div><div class="l">作品提出待ち</div></div>
+      <div class="kpi warn"><div class="n" id="kpi-reviewing">–</div><div class="l">審査中</div></div>
+      <div class="kpi warn"><div class="n" id="kpi-correction">–</div><div class="l">是正対応中</div></div>
+      <div class="kpi"><div class="n" id="kpi-certified">–</div><div class="l">認証済</div></div>
+      <div class="kpi warn"><div class="n" id="kpi-suspended">–</div><div class="l">認証停止</div></div>
     </div>
-    <div class="note">提出→AI審査→人手確認→締結の各段の滞留を、ここから各タブへドリルダウンします。赤・要確認・締結待ちが主な人手ポイントです。</div>
+    <div class="note">申込 → 締結 → 作品提出 → 審査 → 認証。認証は作品の審査が完了（CLEARED）してから発行されます。SPLL番号を押すと案件の詳細が開きます。</div>
     <div class="panel">
-      <div class="ph"><h3>直近の要対応</h3><span class="hint">Compliance_Alerts / Contracts より</span></div>
-      <table><thead><tr><th>区分</th><th>対象</th><th>作品</th><th>状態</th><th>発生</th></tr></thead><tbody id="dash-alerts"></tbody></table>
+      <div class="ph"><h3>要対応</h3><span class="hint">License_Cases / Notification_Queue / Certificate_Change_Requests / System_Errors より</span></div>
+      <table><thead><tr><th>区分</th><th>SPLL番号</th><th>契約者・対象原作</th><th>状態</th><th>次の対応</th><th>発生</th></tr></thead><tbody id="dash-actions"></tbody></table>
     </div>
     <div class="panel">
       <div class="ph"><h3>📮 要対応の通知（クリエーターへの案内）</h3><span class="hint">Notification_Queue（メール非保持のため人手対応）<span id="err-count" style="margin-left:10px;color:var(--fail);"></span></span></div>
-      <table><thead><tr><th>種別</th><th>契約</th><th>対象原作</th><th>内容</th><th>起票日</th><th>操作</th></tr></thead><tbody id="notify-tbody"></tbody></table>
+      <table><thead><tr><th>種別</th><th>SPLL番号</th><th>対象原作</th><th>内容</th><th>起票日</th><th>操作</th></tr></thead><tbody id="notify-tbody"></tbody></table>
     </div>
   </section>
 
-  <!-- LICENSE（RP-001：SPLL番号中心の主台帳） -->
+  <!-- LICENSE（RP-002：SPLL番号が唯一の業務主キー） -->
   <section class="view" id="v-license">
-    <h2>ライセンス台帳</h2>
-    <p class="sub">1案件＝1つのSPLL番号。申込から契約・審査・認証までを1行で追跡します（License_Cases）。</p>
+    <h2>ライセンス</h2>
+    <p class="sub">1案件＝1つのSPLL番号。申込から契約・審査・認証までを1行で追跡し、行を押すと詳細（契約・原作・提出・審査・認証・履歴）が開きます。</p>
     <div class="panel">
       <div class="ph"><h3>ライセンス一覧</h3><button class="btn" onclick="loadLicense()">更新</button></div>
-      <table><thead><tr><th>SPLL番号</th><th>契約者</th><th>利用目的</th><th>利用許諾料</th><th>対象原作</th><th>案件</th><th>契約</th><th>審査</th><th>認証</th><th>経理引渡</th><th>操作</th></tr></thead><tbody id="license-tbody"></tbody></table>
+      <div class="filters">
+        <input id="lf-q" placeholder="SPLL番号／契約者名／原作名／CloudSign書類ID で検索" onkeydown="if(event.key==='Enter')loadLicense()">
+        <select id="lf-case" onchange="loadLicense()">
+          <option value="">現在状態：すべて</option>
+          <option value="APPLICATION_RECEIVED">申込受付</option><option value="CONTRACT_PENDING">契約書送付待ち</option>
+          <option value="MANUAL_REVIEW">個別確認</option><option value="SIGNING">締結待ち</option><option value="HOLD">条件確認中</option>
+          <option value="AWAITING_SUBMISSION">作品提出待ち</option><option value="REVIEWING">審査中</option>
+          <option value="CORRECTION_REQUIRED">是正対応中</option><option value="CERTIFIED">認証済</option>
+          <option value="SUSPENDED">認証停止</option><option value="TERMINATED">終了</option><option value="CANCELLED">取消</option>
+        </select>
+        <select id="lf-cert" onchange="loadLicense()">
+          <option value="">認証：すべて</option><option value="NOT_ISSUED">未発行</option><option value="ACTIVE">有効</option>
+          <option value="PAYMENT_HOLD">未入金で停止</option><option value="SUSPENDED">停止</option><option value="REVOKED">失効</option>
+        </select>
+        <select id="lf-usage" onchange="loadLicense()"><option value="">利用目的：すべて</option></select>
+        <button class="btn" onclick="$('lf-q').value='';$('lf-case').value='';$('lf-cert').value='';$('lf-usage').value='';loadLicense()">クリア</button>
+      </div>
+      <table><thead><tr><th>SPLL番号</th><th>契約者</th><th>対象原作</th><th>利用目的</th><th>現在状態</th><th>契約</th><th>審査</th><th>認証</th><th>締結日</th><th>最終更新</th><th>操作</th></tr></thead><tbody id="license-tbody"></tbody></table>
     </div>
-    <div class="note">契約書の原本は締結済みPDF（契約書履歴はSPLL番号ごとに1:N保持）。請求・入金・清算は本システムの対象外で、締結内容のスナップショット（Finance_Handoffs）を経理側の独自運用へ引き渡します。</div>
-  </section>
 
-  <!-- REVIEW -->
-  <section class="view" id="v-review">
-    <h2>作品審査管理</h2>
-    <p class="sub">Geminiの一次審査結果（PASS/REVIEW/HIGH_RISK）を受けて、人手判断（承認・是正要求・エスカレーション）を行います。A作品は締結前、B作品は締結後の提出。</p>
-    <div class="panel">
-      <div class="ph"><h3>審査キュー</h3><div style="display:flex;gap:8px;align-items:center;"><span class="hint">AI_Review_Jobs / AI_Findings より</span><button class="btn p" onclick="runAiReviews()">QUEUEDを実行</button></div></div>
-      <table><thead><tr><th>提出ID</th><th>対象原作</th><th>作品名</th><th>AI結果</th><th>主な指摘</th><th>人手判断</th></tr></thead><tbody id="review-tbody"></tbody></table>
-    </div>
-    <div class="note">AI結果は一次スクリーニングで、承認・適法性保証ではありません。最終判断は人手で行い、判断はEventsへ記録されます。</div>
-  </section>
-
-  <!-- CONTRACT -->
-  <section class="view" id="v-contract">
-    <h2>契約管理</h2>
-    <p class="sub">クラウドサインフォーム→CloudSign締結の状態を一覧。締結有無はCloudSignのWebhookでSheetsへ自動書き戻し（application_refで申込に突合）。</p>
-
+    <h2 style="font-size:15px;margin-top:26px;">契約の例外対応</h2>
+    <p class="sub">CloudSign の書き戻しは Webhook が行います。自動突合できない締結・条件不一致・送信失敗・不達をここで解消します（解消すると上の一覧に反映されます）。</p>
     <div class="panel" id="unlinked-panel" style="display:none;border-color:var(--brass);">
       <div class="ph"><h3>⚠️ 未紐付けの締結（要・手動紐付け）</h3><span class="hint">application_ref で申込に突合できなかった締結</span></div>
       <div class="pbody">
@@ -166,20 +188,6 @@
         <table><thead><tr><th>契約ID</th><th>書類タイトル</th><th>CloudSign書類ID</th><th>締結日</th><th>申込に紐付け</th></tr></thead><tbody id="unlinked-tbody"></tbody></table>
       </div>
     </div>
-
-    <div class="panel" id="certreq-panel" style="display:none;border-color:var(--brass);">
-      <div class="ph"><h3>🔏 認証状態変更の申請（承認待ち）</h3><span class="hint">Certificate_Change_Requests ／ 申請者本人は承認不可（職務分離）</span></div>
-      <div class="pbody">
-        <p class="setnote">失効・再有効化など重要な状態変更は申請→<b>別の担当者（LEGAL_ADMIN）</b>による承認で適用されます。緊急時のみ本人承認が可能で、EMERGENCY_OVERRIDE として監査記録に残ります。</p>
-        <table><thead><tr><th>申請ID</th><th>契約ID</th><th>変更先</th><th>理由</th><th>申請者</th><th>申請日</th><th>操作</th></tr></thead><tbody id="certreq-tbody"></tbody></table>
-      </div>
-    </div>
-
-    <div class="panel">
-      <div class="ph"><h3>契約一覧</h3><span class="hint">Applications / Contracts より</span></div>
-      <table><thead><tr><th>契約ID</th><th>申込ID</th><th>対象原作</th><th>契約者</th><th>締結状態</th><th>認証</th><th>締結日</th><th>操作</th></tr></thead><tbody id="contract-tbody"></tbody></table>
-    </div>
-
     <div class="panel">
       <div class="ph"><h3>⚠️ CloudSign 自動送信失敗・手動送信待ち</h3><button class="btn" onclick="loadAccCs()">更新</button></div>
       <table><thead><tr><th>申込</th><th>利用目的</th><th>フォーム送信</th><th>状態</th><th>理由</th><th>操作</th></tr></thead><tbody id="acc-cs-send-tbody"></tbody></table>
@@ -192,10 +200,44 @@
       <div class="ph"><h3>メール不達</h3></div>
       <table><thead><tr><th>契約</th><th>書類タイトル</th><th>不達種別</th><th>発生</th><th>操作</th></tr></thead><tbody id="acc-cs-delivery-tbody"></tbody></table>
     </div>
-    <div class="note">申込の訂正（原作・利用目的・名義等）は上書きせず「再申込」で新しい申込番号を発行します（旧申込はSUPERSEDED・再同意/再送信が必要）。CloudSignテンプレート・経路別フォームURLの版管理は admin_saveContractTemplates で設定します（STANDARD_FIXED／STANDARD_RATE／MANUAL_REVIEW）。</div>
-    <div class="note"><b>認証のオン／オフ：</b>認証は作品の<b>審査完了（CLEARED）時</b>に有効で発行されます。未入金が判明したら「認証をオフ」にすると、バッジのQRから検証したときに「無効」と表示されます（担当者1名で切替可能・理由必須）。入金確認後は「認証をオン」で戻せます。<b>失効（REVOKED）・契約終了は別扱い</b>で、申請→別担当者の承認が必要です。</div>
-    <div class="note">締結の書き戻しはCloudSign Webhook（status=2 締結完了）のみが行います。自動突合できない締結は「未紐付け」として記録され、上のパネルから手動で申込に紐付けます（誤って別申込の原作を固定しないため、紐付けまで認証等の発行は保留されます）。</div>
+    <div class="note">申込の訂正（原作・利用目的・名義等）は上書きせず「再申込」で新しいSPLL番号を発行します（旧案件は取消・再同意/再送信が必要）。CloudSignテンプレート・経路別フォームURLの版管理は admin_saveContractTemplates で設定します（STANDARD_FIXED／STANDARD_RATE／MANUAL_REVIEW）。</div>
   </section>
+
+  <!-- REVIEW -->
+  <section class="view" id="v-review">
+    <h2>作品審査</h2>
+    <p class="sub">Geminiの一次審査結果（PASS/REVIEW/HIGH_RISK）を受けて、人手判断（承認・是正要求・エスカレーション）を行います。承認（CLEARED）で認証とバッジが発行されます。</p>
+    <div class="panel">
+      <div class="ph"><h3>審査キュー</h3><div style="display:flex;gap:8px;align-items:center;"><span class="hint">AI_Review_Jobs / AI_Findings より</span><button class="btn p" onclick="runAiReviews()">QUEUEDを実行</button></div></div>
+      <table><thead><tr><th>提出ID</th><th>対象原作</th><th>作品名</th><th>AI結果</th><th>主な指摘</th><th>人手判断</th></tr></thead><tbody id="review-tbody"></tbody></table>
+    </div>
+    <div class="note">AI結果は一次スクリーニングで、承認・適法性保証ではありません。最終判断は人手で行い、判断はEventsへ記録されます。未解決の重大アラートが残っている案件は、CLEAREDにしても認証は発行されません（アラートを閉じてから再度CLEARED）。</div>
+  </section>
+
+  <!-- CERT（RP-002 §12.4：Certificate が正本、Badge は表示物） -->
+  <section class="view" id="v-cert">
+    <h2>認証管理</h2>
+    <p class="sub">認証（Certificate）が正本で、バッジはその表示物です。認証は作品の審査完了（CLEARED）で発行され、未入金の停止・失効・復帰はここで扱います。</p>
+    <div class="panel" id="certreq-panel" style="display:none;border-color:var(--brass);">
+      <div class="ph"><h3>🔏 認証状態変更の申請（承認待ち）</h3><span class="hint">Certificate_Change_Requests ／ 申請者本人は承認不可（職務分離）</span></div>
+      <div class="pbody">
+        <p class="setnote">失効・再有効化など重要な状態変更は申請→<b>別の担当者（LEGAL_ADMIN）</b>による承認で適用されます。緊急時のみ本人承認が可能で、EMERGENCY_OVERRIDE として監査記録に残ります。</p>
+        <table><thead><tr><th>申請ID</th><th>SPLL番号</th><th>変更先</th><th>理由</th><th>申請者</th><th>申請日</th><th>操作</th></tr></thead><tbody id="certreq-tbody"></tbody></table>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="ph"><h3>認証一覧</h3><button class="btn" onclick="loadCert()">更新</button></div>
+      <table><thead><tr><th>SPLL番号</th><th>契約者</th><th>対象原作</th><th>認証状態</th><th>発行日</th><th>停止理由</th><th>バッジ</th><th>状態変更申請</th><th>操作</th></tr></thead><tbody id="cert-tbody"></tbody></table>
+    </div>
+    <div class="note"><b>認証のオン／オフ：</b>認証は作品の<b>審査完了（CLEARED）時</b>に有効で発行されます。未入金が判明したら「認証をオフ」にすると、バッジのQRから検証したときに「無効」と表示されます（担当者1名で切替可能・理由必須）。入金確認後は「認証をオン」で戻せます。<b>失効（REVOKED）・契約終了は別扱い</b>で、申請→別担当者の承認が必要です。認証を直接編集する画面は設けていません。</div>
+  </section>
+
+  <!-- ライセンス詳細ドロワー -->
+  <div class="scrim" id="lic-scrim" onclick="closeLicense()"></div>
+  <aside class="drawer" id="lic-drawer" aria-hidden="true">
+    <div class="dh"><h3 id="ld-title">ライセンス詳細</h3><span class="id" id="ld-sub"></span><span style="flex:1"></span><button class="btn" onclick="closeLicense()">閉じる ✕</button></div>
+    <div id="ld-body"></div>
+  </aside>
 
   <!-- SETTINGS -->
   <section class="view" id="v-settings">
@@ -580,7 +622,7 @@ document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{
   if(v==="settings") loadSettings();
   else if(v==="dash") loadDashboard();
   else if(v==="review") loadReview();
-  else if(v==="contract") loadContract();
+  else if(v==="cert") loadCert();
   else if(v==="license") loadLicense();
   window.scrollTo(0,0);
 });
@@ -1074,7 +1116,7 @@ function loadNotifications(){
       var detail=p.comment||p.note||(p.period?("対象期: "+p.period):"")||(p.title?("作品: "+p.title):"");
       var tr=document.createElement("tr");
       tr.appendChild(td('<span class="pill review">'+esc(NOTIFY_LABEL[n.type]||n.type)+'</span>'));
-      tr.appendChild(td('<span class="id">'+esc(n.contract_id||"—")+'</span>'));
+      tr.appendChild(td(licLink(n.license_id)||'<span class="id">'+esc(n.contract_id||"—")+'</span>'));
       tr.appendChild(td(esc(n.work||"")));
       tr.appendChild(td('<span class="evi">'+esc(detail||"—")+'</span>'));
       tr.appendChild(td('<span class="id">'+esc(n.created_at||"")+'</span>'));
@@ -1086,20 +1128,35 @@ function loadNotifications(){
   call("admin_countOpenErrors",[],function(n){ var el=$("err-count"); if(el) el.textContent=(n>0?("⚠ 未解決エラー "+n+" 件（System_Errors）"):""); });
 }
 
-// ---- ダッシュボード ----
+// ---- ダッシュボード（RP-002：License_Cases が正本） ----
+var CASE_LABEL={APPLICATION_RECEIVED:{cls:"wait",label:"申込受付"},CONTRACT_PENDING:{cls:"review",label:"契約書送付待ち"},MANUAL_REVIEW:{cls:"fail",label:"個別確認"},
+  SIGNING:{cls:"sign",label:"締結待ち"},HOLD:{cls:"fail",label:"条件確認中"},AWAITING_SUBMISSION:{cls:"pass",label:"作品提出待ち"},REVIEWING:{cls:"review",label:"審査中"},
+  CORRECTION_REQUIRED:{cls:"fail",label:"是正対応中"},CERTIFIED:{cls:"pass",label:"認証済"},SUSPENDED:{cls:"review",label:"認証停止"},TERMINATED:{cls:"wait",label:"終了"},CANCELLED:{cls:"wait",label:"取消"},
+  APPLIED:{cls:"wait",label:"申込受付"},CONTRACTING:{cls:"review",label:"契約手続中"},SIGNED:{cls:"pass",label:"締結済"},CLOSED:{cls:"wait",label:"終了"}};
+var CERT_LABEL={NOT_ISSUED:{cls:"wait",label:"未発行"},ACTIVE:{cls:"pass",label:"有効"},PAYMENT_HOLD:{cls:"review",label:"未入金で停止"},SUSPENDED:{cls:"review",label:"停止"},
+  REVOKED:{cls:"fail",label:"失効"},TERMINATED:{cls:"wait",label:"終了"},EXPIRED:{cls:"wait",label:"期限切れ"},NONE:{cls:"wait",label:"未発行"}};
+var REVIEW_LABEL={NOT_STARTED:"—",NOT_REQUIRED:"—",AWAITING_SUBMISSION:"提出待ち",IN_REVIEW:"審査中",CLEARED:"承認",CORRECTION_REQUIRED:"是正要求",ESCALATED:"上申",PENDING:"審査中"};
+function casePill(st){ return pill(CASE_LABEL[String(st)]||{cls:"wait",label:String(st||"—")}); }
+function certPill(st){ return pill(CERT_LABEL[String(st)]||{cls:"wait",label:String(st||"—")}); }
+function licLink(id){ return id?'<a href="#" class="id" style="font-weight:700;color:var(--teal)" onclick="openLicense(\''+esc(id)+'\');return false;">'+esc(id)+'</a>':'<span class="id">—</span>'; }
 function loadDashboard(){
   loadNotifications();
   call("admin_dashboard",[],function(d){
     if(!d) return; var k=d.kpis||{};
-    setText("kpi-review",k.reviewPending); setText("kpi-high",k.highRisk);
-    setText("kpi-unscreened",k.unscreened); setText("kpi-signing",k.signing);
-    var tb=$("dash-alerts"); tb.innerHTML="";
-    var rows=d.alerts||[];
-    if(!rows.length){ emptyRow(tb,5,"要対応の項目はありません"); return; }
+    setText("kpi-manual",k.manual_review); setText("kpi-signing",k.signing); setText("kpi-hold",k.hold);
+    setText("kpi-awaiting",k.awaiting_submission); setText("kpi-reviewing",k.reviewing); setText("kpi-correction",k.correction_required);
+    setText("kpi-certified",k.certified); setText("kpi-suspended",k.suspended);
+    var tb=$("dash-actions"); tb.innerHTML="";
+    var rows=d.actions||[];
+    if(!rows.length){ emptyRow(tb,6,"要対応の項目はありません"); return; }
     rows.forEach(function(a){
       var tr=document.createElement("tr");
-      tr.innerHTML='<td>'+esc(a.kind)+'</td><td class="id">'+esc(a.target)+'</td><td>'+esc(a.work)+'</td>'+
-        '<td>'+pill({cls:a.cls||"wait",label:a.status})+'</td><td class="id">'+esc(a.at)+'</td>';
+      tr.appendChild(td(esc(a.kind)));
+      tr.appendChild(td(licLink(a.license_id)||'<span class="id">'+esc(a.target)+'</span>'));
+      tr.appendChild(td(esc(a.party||"")+(a.work?'<br><span style="font-size:11px;color:var(--soft)">'+esc(a.work)+'</span>':"")));
+      tr.appendChild(td(pill({cls:a.cls||"wait",label:String(a.status||"")})));
+      tr.appendChild(td(esc(a.label||"")));
+      tr.appendChild(td('<span class="id">'+esc(String(a.at||"").slice(0,10))+'</span>'));
       tb.appendChild(tr);
     });
   });
@@ -1189,7 +1246,7 @@ function loadUnlinked(){
 function doLink(contractId, applicationId){
   if(!applicationId){ toast("紐付ける申込を選択してください", true); return; }
   if(!confirm("契約 "+contractId+" を申込 "+applicationId+" に紐付けます。\n対象原作の固定・提出トークン・案内が発行されます（認証は審査完了後）。よろしいですか？")) return;
-  call("admin_linkContract",[contractId, applicationId],function(){ toast("申込に紐付けました"); loadContract(); loadDashboard(); });
+  call("admin_linkContract",[contractId, applicationId],function(){ toast("申込に紐付けました"); loadLicense(); loadDashboard(); });
 }
 
 // ---- 認証状態変更の申請（承認待ち）----
@@ -1203,7 +1260,7 @@ function loadCertRequests(){
     rows.forEach(function(r){
       var tr=document.createElement("tr");
       tr.appendChild(td('<span class="id">'+esc(String(r.request_id).slice(0,8))+'…</span>'));
-      tr.appendChild(td('<span class="id">'+esc(r.contract_id)+'</span>'));
+      tr.appendChild(td(licLink(r.license_id)||'<span class="id">'+esc(r.contract_id)+'</span>'));
       tr.appendChild(td(esc(stMap[String(r.requested_status)]||r.requested_status)));
       tr.appendChild(td(esc(r.reason_text||"—")));
       tr.appendChild(td(esc(r.requested_by)));
@@ -1211,11 +1268,11 @@ function loadCertRequests(){
       var act=document.createElement("td"); act.className="actions";
       act.appendChild(mkBtn("承認して適用","btn p",function(){
         if(!confirm("この申請を承認し、認証状態を「"+(stMap[String(r.requested_status)]||r.requested_status)+"」に変更します。よろしいですか？")) return;
-        call("admin_approveCertChange",[r.request_id,true,""],function(){ toast("承認・適用しました"); loadContract(); }, function(e){
+        call("admin_approveCertChange",[r.request_id,true,""],function(){ toast("承認・適用しました"); loadCert(); }, function(e){
           var msg=String(e&&e.message||e);
           if(msg.indexOf("申請者本人")>=0){
             var er=prompt("申請者本人による承認は原則できません。\n緊急時のみ、緊急理由を入力すると EMERGENCY_OVERRIDE として記録のうえ適用されます：","");
-            if(er&&er.trim()) call("admin_approveCertChange",[r.request_id,true,er],function(){ toast("緊急承認（EMERGENCY_OVERRIDE）として適用しました"); loadContract(); });
+            if(er&&er.trim()) call("admin_approveCertChange",[r.request_id,true,er],function(){ toast("緊急承認（EMERGENCY_OVERRIDE）として適用しました"); loadCert(); });
           } else { toast("承認に失敗しました: "+msg, true); }
         });
       }));
@@ -1228,92 +1285,175 @@ function loadCertRequests(){
   });
 }
 
-// ---- ライセンス台帳（RP-001）----
+// ---- ライセンス（RP-002：SPLL番号中心） ----
+var _licUsageLoaded=false;
 function loadLicense(){
-  call("admin_listLicenseCases",[],function(rows){
+  loadLicenseExceptions();
+  var f={ q:$("lf-q").value, case_status:$("lf-case").value, certification_status:$("lf-cert").value, usage_category:$("lf-usage").value };
+  call("admin_listLicenseCases",[f],function(rows){
     var tb=$("license-tbody"); tb.innerHTML=""; rows=rows||[];
-    if(!rows.length){ emptyRow(tb,11,"ライセンス案件がありません"); return; }
-    var caseM={APPLICATION_RECEIVED:{cls:"wait",label:"申込受付"},CONTRACT_PENDING:{cls:"review",label:"契約書送付待ち"},MANUAL_REVIEW:{cls:"fail",label:"個別確認"},
-      SIGNING:{cls:"review",label:"締結待ち"},HOLD:{cls:"fail",label:"条件確認中"},AWAITING_SUBMISSION:{cls:"pass",label:"作品提出待ち"},REVIEWING:{cls:"review",label:"審査中"},
-      CORRECTION_REQUIRED:{cls:"fail",label:"是正対応中"},CERTIFIED:{cls:"pass",label:"認証済"},SUSPENDED:{cls:"review",label:"認証停止"},TERMINATED:{cls:"wait",label:"終了"},CANCELLED:{cls:"wait",label:"取消"},
-      // 移行前の旧値
-      APPLIED:{cls:"wait",label:"申込受付"},CONTRACTING:{cls:"review",label:"契約手続中"},SIGNED:{cls:"pass",label:"締結済"},CLOSED:{cls:"wait",label:"終了"}};
-    var certM={NOT_ISSUED:{cls:"wait",label:"—"},ACTIVE:{cls:"pass",label:"有効"},PAYMENT_HOLD:{cls:"review",label:"未入金で停止"},SUSPENDED:{cls:"review",label:"停止"},REVOKED:{cls:"fail",label:"失効"}};
-    var hoM={NOT_REQUIRED:{cls:"wait",label:"—"},READY:{cls:"review",label:"引渡待ち"},SENT:{cls:"review",label:"送信済"},ACCEPTED:{cls:"pass",label:"受領済"},ERROR:{cls:"fail",label:"エラー"}};
+    if(!_licUsageLoaded){ // 利用目的の選択肢は一覧から拾う（料金表の変更に追随）
+      var us={}; rows.forEach(function(k){ if(k.usage_category) us[k.usage_category]=1; });
+      var sel=$("lf-usage"); Object.keys(us).sort().forEach(function(u){ var o=document.createElement("option"); o.value=u; o.textContent=u; sel.appendChild(o); });
+      if(rows.length) _licUsageLoaded=true;
+    }
+    if(!rows.length){ emptyRow(tb,11,"条件に合うライセンス案件がありません"); return; }
     rows.forEach(function(k){
-      var tr=document.createElement("tr");
-      tr.appendChild(td('<span class="id"><b>'+esc(k.license_id)+'</b></span>'));
+      var tr=document.createElement("tr"); tr.className="rowlink";
+      tr.onclick=function(e){ if(e.target.closest("button")) return; openLicense(k.license_id); };
+      tr.appendChild(td('<span class="id" style="font-weight:700;color:var(--teal)">'+esc(k.license_id)+'</span>'));
       tr.appendChild(td(esc(k.party_display_name||"—")+
-        (k.party_type?'<br><span style="font-size:10px;color:var(--soft)">'+esc(k.party_type)+'</span>':"")+
-        (k.contact_email?'<br><span class="id" style="font-size:10px">'+esc(k.contact_email)+'</span>':"")));
-      tr.appendChild(td(esc(k.usage_category)));
-      tr.appendChild(td(esc(k.fee||"—")));
+        (k.party_type?'<br><span style="font-size:10px;color:var(--soft)">'+esc(k.party_type)+'</span>':"")));
       tr.appendChild(td(esc(k.works)));
-      tr.appendChild(td(pill(caseM[String(k.case_status)]||{cls:"wait",label:String(k.case_status)})));
-      tr.appendChild(td(pill(k.contract_status==="SIGNED"?{cls:"pass",label:"締結済"}:{cls:"wait",label:k.contract_status==="NOT_STARTED"?"未着手":String(k.contract_status)})));
-      tr.appendChild(td(esc(k.review_status==="NOT_REQUIRED"?"—":k.review_status)));
-      tr.appendChild(td(pill(certM[String(k.certification_status)]||{cls:"wait",label:String(k.certification_status)})));
-      tr.appendChild(td(pill(hoM[String(k.finance_handoff_status)]||{cls:"wait",label:String(k.finance_handoff_status)})));
+      tr.appendChild(td(esc(k.usage_category)+(k.fee?'<br><span style="font-size:10px;color:var(--soft)">'+esc(k.fee)+'</span>':"")));
+      tr.appendChild(td(casePill(k.case_status)+(k.next_action&&k.next_action!=="—"?'<br><span style="font-size:10px;color:var(--soft)">'+esc(k.next_action)+'</span>':"")));
+      tr.appendChild(td(pill(k.contract_status==="SIGNED"?{cls:"pass",label:"締結済"}:(k.contract_status==="SIGNING"?{cls:"sign",label:"締結待ち"}:(k.contract_status==="TERMINATED"?{cls:"wait",label:"終了"}:{cls:"wait",label:"未着手"})))));
+      tr.appendChild(td(esc(REVIEW_LABEL[String(k.review_status)]||k.review_status||"—")));
+      tr.appendChild(td(certPill(k.certification_status)));
+      tr.appendChild(td('<span class="id">'+esc(k.signed_at||"—")+'</span>'));
+      tr.appendChild(td('<span class="id">'+esc(k.updated_at||"—")+'</span>'));
       var act=document.createElement("td"); act.className="actions";
-      if(k.legacy_contract_id){
-        act.appendChild(mkBtn("提出リンク","btn",function(){ call("admin_sendUploadLink",[k.legacy_contract_id],function(res){ showUploadLink(k.legacy_contract_id,res); }); }));
+      act.appendChild(mkBtn("詳細","btn",function(){ openLicense(k.license_id); }));
+      if(k.contract_status==="SIGNED"){
+        act.appendChild(mkBtn("案内リンク","btn p",function(){
+          if(!confirm("「今後のお手続き」案内ページのURLを発行します。\n以前に発行したURLは無効になります。よろしいですか？")) return;
+          call("admin_issueGuideLink",[k.license_id],function(res){ showGuideLink(k.license_id,res); });
+        }));
+        act.appendChild(mkBtn("提出リンク","btn",function(){ call("admin_sendUploadLink",[k.license_id],function(res){ showUploadLink(k.license_id,res); }); }));
       }
       tr.appendChild(act); tb.appendChild(tr);
     });
   });
 }
+function loadLicenseExceptions(){ loadUnlinked(); loadAccCs(); }
 
-// ---- 契約一覧 ----
-function loadContract(){
-  loadUnlinked();
+// ---- ライセンス詳細（ドロワー）----
+function openLicense(licenseId){
+  $("ld-title").textContent="ライセンス詳細"; $("ld-sub").textContent=licenseId; $("ld-body").innerHTML='<div class="dsec">読み込み中…</div>';
+  $("lic-drawer").classList.add("on"); $("lic-scrim").classList.add("on");
+  call("admin_getLicenseCase",[licenseId],function(d){ if(!d){ $("ld-body").innerHTML='<div class="dsec">取得できませんでした</div>'; return; } renderLicenseDetail(d); },
+    function(e){ $("ld-body").innerHTML='<div class="dsec" style="color:var(--fail)">'+esc(e&&e.message||e)+'</div>'; });
+}
+function closeLicense(){ $("lic-drawer").classList.remove("on"); $("lic-scrim").classList.remove("on"); }
+function kvRow(k,v){ return '<div class="k">'+esc(k)+'</div><div>'+(v||"—")+'</div>'; }
+function renderLicenseDetail(d){
+  var L=d.license||{}, C=d.contract, cert=d.certificate, badge=d.badge, lid=L.license_id;
+  var h='';
+  // 概要
+  h+='<div class="dsec"><h4>概要</h4><div class="kv">'+
+    kvRow("SPLL番号",'<b class="id" style="font-size:13px;color:var(--ink)">'+esc(lid)+'</b>')+
+    kvRow("契約者",esc(L.party_display_name||"—")+(L.party_type?' <span class="id">'+esc(L.party_type)+'</span>':"")+(L.contact_email?'<br><span class="id">'+esc(L.contact_email)+'</span>':""))+
+    kvRow("利用目的",esc(L.usage_category||"—"))+
+    kvRow("現在状態",casePill(L.case_status)+(L.next_action?'　<span style="font-size:12px">次の対応：'+esc(L.next_action)+'</span>':""))+
+    kvRow("申込参照",'<span class="id">'+esc(L.application_ref||"—")+'</span>')+
+    '</div></div>';
+  // 契約
+  h+='<div class="dsec"><h4>契約</h4><div class="kv">'+
+    kvRow("契約状態",pill(L.contract_status==="SIGNED"?{cls:"pass",label:"締結済"}:{cls:"wait",label:String(L.contract_status||"—")}))+
+    kvRow("締結日",'<span class="id">'+esc(L.signed_at?String(L.signed_at).slice(0,10):"—")+'</span>')+
+    kvRow("CloudSign書類",'<span class="id">'+esc(L.cloudsign_document_id||"—")+'</span>')+
+    (C?kvRow("利用許諾料",esc(C.fee_label||"—")+(C.payment_terms?'　<span style="font-size:11px;color:var(--soft)">'+esc(C.payment_terms)+'</span>':""))+
+        kvRow("条件照合",esc(C.terms_verification_status||"—")+(C.delivery_status&&C.delivery_status!=="DELIVERED"?'　<span class="pill fail">'+esc(C.delivery_status)+'</span>':"")):"")+
+    '</div>';
+  if((d.contractDocuments||[]).length){
+    h+='<table style="margin-top:10px"><thead><tr><th>種別</th><th>版</th><th>状態</th><th>締結日</th><th>CloudSign</th></tr></thead><tbody>'+
+      d.contractDocuments.map(function(x){ return '<tr><td>'+esc(x.document_type)+'</td><td>v'+esc(x.version)+'</td><td>'+esc(x.status)+'</td><td class="id">'+esc(String(x.signed_at||"").slice(0,10))+'</td><td class="id">'+esc(x.cloudsign_document_id||"—")+'</td></tr>'; }).join("")+
+      '</tbody></table>';
+  }
+  var acts='<div class="actions" style="margin-top:10px">';
+  if(L.contract_status==="SIGNED"){
+    acts+='<button class="btn p" onclick="call(\'admin_issueGuideLink\',[\''+esc(lid)+'\'],function(r){showGuideLink(\''+esc(lid)+'\',r);})">案内リンク</button>';
+    acts+='<button class="btn" onclick="call(\'admin_sendUploadLink\',[\''+esc(lid)+'\'],function(r){showUploadLink(\''+esc(lid)+'\',r);})">提出リンク</button>';
+  }
+  h+=acts+'</div></div>';
+  // 対象原作
+  h+='<div class="dsec"><h4>対象原作</h4><table><thead><tr><th>原作</th><th>クレジット表記</th><th>契約時料金条件</th></tr></thead><tbody>'+
+    (d.works||[]).map(function(w){ var fee=w.fee_model_snapshot==="RATE"?("売上の"+Math.round(Number(w.fee_value_snapshot||0)*1000)/10+"％"):(w.fee_model_snapshot?(Number(w.fee_value_snapshot||0).toLocaleString()+"円／契約"):"—");
+      return '<tr><td>'+esc(w.work_name_snapshot||w.work_id)+'<br><span class="id">'+esc(w.work_id)+'</span></td><td>'+esc(w.credit_snapshot||"—")+'</td><td>'+esc(fee)+'</td></tr>'; }).join("")+
+    '</tbody></table></div>';
+  // 作品提出・審査
+  h+='<div class="dsec"><h4>作品提出・審査</h4>';
+  if(!(d.submissions||[]).length) h+='<div style="font-size:12px;color:var(--soft)">まだ提出はありません。</div>';
+  else h+='<table><thead><tr><th>提出</th><th>作品名</th><th>版</th><th>状態</th><th>最新の人手審査</th></tr></thead><tbody>'+
+    d.submissions.map(function(sb){ var lr=sb.latest_review;
+      return '<tr><td class="id">'+esc(sb.submission_id)+'</td><td>'+esc(sb.title||"—")+'</td><td>'+sb.versions.map(function(v){ return 'v'+v.version_no+'<span class="id">('+esc(v.status)+')</span>'; }).join("<br>")+'</td>'+
+        '<td>'+esc(REVIEW_LABEL[String(sb.status)]||sb.status)+'</td><td>'+(lr?esc(lr.result)+' <span class="id">'+esc(lr.reviewed_at)+' '+esc(lr.reviewer)+'</span>'+(lr.comments?'<br><span style="font-size:11px">'+esc(lr.comments)+'</span>':""):"—")+'</td></tr>'; }).join("")+
+    '</tbody></table>';
+  h+='</div>';
+  // 認証
+  h+='<div class="dsec"><h4>認証</h4><div class="kv">'+
+    kvRow("認証状態",certPill(L.certification_status)+(cert&&cert.reason_text?'　<span style="font-size:11px;color:var(--soft)">'+esc(cert.reason_text)+'</span>':""))+
+    kvRow("認証ID",'<span class="id">'+esc(cert?cert.cert_id:"—")+'</span>')+
+    kvRow("発行日",'<span class="id">'+esc(cert?cert.issued_at:"—")+'</span>')+
+    kvRow("バッジ",badge?pill({cls:"pass",label:"発行済 "+badge.issued_at}):pill({cls:"wait",label:cert?"生成中":"未発行（審査完了後）"}))+
+    '</div>';
+  if((d.changeRequests||[]).length) h+='<table style="margin-top:10px"><thead><tr><th>申請</th><th>変更先</th><th>理由</th><th>申請者</th><th>状態</th></tr></thead><tbody>'+
+    d.changeRequests.map(function(r){ return '<tr><td class="id">'+esc(String(r.request_id).slice(0,8))+'…</td><td>'+esc(r.requested_status)+'</td><td>'+esc(r.reason_text)+'</td><td>'+esc(r.requested_by)+'</td><td>'+esc(r.status)+'</td></tr>'; }).join("")+'</tbody></table>';
+  h+='<div class="actions" style="margin-top:10px">'+certActionButtons(lid, cert?cert.status:"NONE", function(){ openLicense(lid); })+'</div></div>';
+  // 要対応の通知
+  if((d.pendingNotifications||[]).length){
+    h+='<div class="dsec"><h4>要対応の通知</h4><table><thead><tr><th>種別</th><th>状態</th><th>起票</th><th>内容</th></tr></thead><tbody>'+
+      d.pendingNotifications.map(function(n){ return '<tr><td>'+esc(n.type)+'</td><td>'+esc(n.status)+'</td><td class="id">'+esc(n.created_at)+'</td><td style="font-size:11px">'+esc(JSON.stringify(n.payload||{}).slice(0,160))+'</td></tr>'; }).join("")+'</tbody></table></div>';
+  }
+  // 履歴
+  var EV={APPLICATION_CREATED:"申込受付（SPLL番号発行）",FORM_SUBMITTED:"フォーム送信",MANUAL_REVIEW_REQUIRED:"個別確認へ",CLOUDSIGN_SENT:"CloudSign送付",TERMS_MISMATCH:"条件不一致",
+    CLOUDSIGN_SIGNED:"契約成立",SUBMISSION_CREATED:"作品提出",HUMAN_REVIEW_CLEARED:"審査 承認",CORRECTION_REQUIRED:"是正要求",REVIEW_ESCALATED:"上申",
+    CERTIFICATE_ISSUED:"認証発行",CERTIFICATE_SUSPENDED:"認証停止",CERTIFICATE_RESTORED:"認証復帰",CERTIFICATE_REVOKED:"認証失効",CONTRACT_TERMINATED:"契約終了",APPLICATION_CANCELLED:"取消"};
+  h+='<div class="dsec"><h4>履歴</h4><ul class="tl">'+
+    (d.timeline||[]).slice().reverse().map(function(e){ return '<li><span class="t">'+esc(String(e.occurred_at||"").replace("T"," ").slice(0,16))+'</span><span>'+esc(EV[e.event]||e.event)+
+      (e.after&&e.after.case_status?' <span class="id">→ '+esc(e.after.case_status)+'</span>':"")+(e.reason?'<br><span style="font-size:11px;color:var(--soft)">'+esc(e.reason)+'</span>':"")+' <span class="id">'+esc(e.actor)+'</span></span></li>'; }).join("")+
+    '</ul></div>';
+  if(d.legacy&&(d.legacy.contract_id||(d.legacy.handoffs||[]).length)){
+    h+='<div class="dsec" style="color:var(--soft);font-size:11px"><h4>外部連携・互換（参照のみ）</h4>旧契約ID: <span class="id">'+esc(d.legacy.contract_id||"—")+'</span>'+
+      ((d.legacy.handoffs||[]).length?'　経理引渡: '+d.legacy.handoffs.map(function(x){ return 'v'+esc(x.handoff_version)+' '+esc(x.status); }).join(" / "):"")+'</div>';
+  }
+  $("ld-body").innerHTML=h;
+}
+/** 認証の操作ボタン（SPLL番号で操作）。詳細ドロワーと認証一覧で共用 */
+function certActionButtons(lid, cs, after){
+  var id="ca_"+lid.replace(/[^A-Za-z0-9]/g,"_");
+  window[id]=after||function(){};
+  var b='';
+  if(cs==="ACTIVE"||cs==="PAYMENT_HOLD"){
+    b+='<button class="btn '+(cs==="ACTIVE"?"d":"p")+'" onclick="toggleCert(\''+esc(lid)+'\',\''+cs+'\','+id+')">'+(cs==="ACTIVE"?"認証をオフ（未入金）":"認証をオン（入金確認）")+'</button>';
+  }
+  if(cs==="ACTIVE") b+='<button class="btn d" onclick="requestCert(\''+esc(lid)+'\',\'REVOKED\','+id+')">失効を申請</button>';
+  else if(cs==="REVOKED") b+='<button class="btn" onclick="requestCert(\''+esc(lid)+'\',\'ACTIVE\','+id+')">再有効化を申請</button>';
+  return b;
+}
+function toggleCert(lid, cs, after){
+  if(cs==="ACTIVE"){
+    var r=prompt("認証を無効にします。理由（未入金の状況など・必須）：","利用許諾料が未入金のため");
+    if(r===null) return; if(!r.trim()){ toast("理由は必須です",true); return; }
+    call("admin_setCertEnabled",[lid,false,r],function(){ toast("認証をオフにしました（検証は「無効」と表示されます）"); after&&after(); loadCert(); loadLicense(); });
+  }else{
+    if(!confirm("入金を確認できたものとして認証をオンに戻します。よろしいですか？")) return;
+    call("admin_setCertEnabled",[lid,true,"入金確認により再有効化"],function(){ toast("認証をオンに戻しました"); after&&after(); loadCert(); loadLicense(); });
+  }
+}
+function requestCert(lid, status, after){
+  var reason=prompt(status==="REVOKED"?"失効理由（必須）：":"再有効化の理由（必須）：",""); if(reason===null) return;
+  if(!reason.trim()){ toast("理由は必須です", true); return; }
+  call("admin_requestCertChange",[lid,status,status==="REVOKED"?"MANUAL_REVOKE":"REACTIVATE",reason,""],function(){ toast("申請しました（別の担当者の承認待ち）"); after&&after(); loadCert(); });
+}
+
+// ---- 認証管理 ----
+function loadCert(){
   loadCertRequests();
-  loadAccCs();
-  call("admin_listContracts",[],function(rows){
-    var tb=$("contract-tbody"); tb.innerHTML=""; rows=rows||[];
-    if(!rows.length){ emptyRow(tb,8,"契約がありません"); return; }
+  call("admin_listCertifications",[],function(rows){
+    var tb=$("cert-tbody"); tb.innerHTML=""; rows=rows||[];
+    if(!rows.length){ emptyRow(tb,9,"認証はまだ発行されていません（作品の審査完了で発行されます）"); return; }
     rows.forEach(function(c){
-      var cp=contractPill(c.status);
       var tr=document.createElement("tr");
-      tr.appendChild(td('<span class="id">'+esc(c.contract_id)+'</span>'));
-      tr.appendChild(td('<span class="id">'+esc(c.application_id)+'</span>'));
-      tr.appendChild(td(esc(c.work)));
-      tr.appendChild(td(esc(c.applicant)));
-      tr.appendChild(td(pill(cp)));
-      var cs=String(c.cert_status||"NONE");
-      var certPill = cs==="ACTIVE"?{cls:"pass",label:"有効"}
-        :(cs==="PAYMENT_HOLD"?{cls:"review",label:"未入金で停止"}
-        :(cs==="REVOKED"?{cls:"fail",label:"失効"}:{cls:"wait",label:"—"}));
-      tr.appendChild(td(pill(certPill)));
-      tr.appendChild(td('<span class="id">'+esc(c.signed_at||"—")+'</span>'));
-      var act=document.createElement("td"); act.className="actions";
-      var hasContract = c.contract_id && c.contract_id!=="—";
-      if(hasContract){
-        act.appendChild(mkBtn("案内リンク","btn p",function(){
-          if(!confirm("「今後のお手続き」案内ページのURLを発行します。\n以前に発行したURLは無効になります。よろしいですか？")) return;
-          call("admin_issueGuideLink",[c.contract_id],function(res){ showGuideLink(c.contract_id,res); });
-        }));
-        act.appendChild(mkBtn("提出リンク発行","btn",function(){ call("admin_sendUploadLink",[c.contract_id],function(res){ showUploadLink(c.contract_id, res); }); }));
-      }
-      if(cs==="ACTIVE"||cs==="PAYMENT_HOLD"){
-        // 未入金対応のスイッチ（担当者1名で切替可能・既定はオン）
-        act.appendChild(mkBtn(cs==="ACTIVE"?"認証をオフ（未入金）":"認証をオン（入金確認）", cs==="ACTIVE"?"btn d":"btn p", function(){
-          if(cs==="ACTIVE"){
-            var r=prompt("認証を無効にします。理由（未入金の状況など・必須）：","利用許諾料が未入金のため");
-            if(r===null) return; if(!r.trim()){ toast("理由は必須です",true); return; }
-            call("admin_setCertEnabled",[c.contract_id,false,r],function(){ toast("認証をオフにしました（検証は「無効」と表示されます）"); loadContract(); loadLicense(); });
-          }else{
-            if(!confirm("入金を確認できたものとして認証をオンに戻します。よろしいですか？")) return;
-            call("admin_setCertEnabled",[c.contract_id,true,"入金確認により再有効化"],function(){ toast("認証をオンに戻しました"); loadContract(); loadLicense(); });
-          }
-        }));
-      }
-      if(cs==="ACTIVE"){
-        act.appendChild(mkBtn("失効を申請","btn d",function(){ var reason=prompt("失効理由（必須）：",""); if(reason===null) return; if(!reason.trim()){ toast("理由は必須です", true); return; } call("admin_requestCertChange",[c.contract_id,"REVOKED","MANUAL_REVOKE",reason,""],function(){ toast("失効を申請しました（別の担当者の承認待ち）"); loadContract(); }); }));
-      } else if(cs==="REVOKED"){
-        act.appendChild(mkBtn("再有効化を申請","btn",function(){ var reason=prompt("再有効化の理由（必須）：",""); if(reason===null) return; if(!reason.trim()){ toast("理由は必須です", true); return; } call("admin_requestCertChange",[c.contract_id,"ACTIVE","REACTIVATE",reason,""],function(){ toast("再有効化を申請しました（別の担当者の承認待ち）"); loadContract(); }); }));
-      } else if(!hasContract){
-        act.appendChild(mkBtn("CloudSign確認","btn",function(){ toast("CloudSign管理画面でご確認ください"); }));
-      }
+      tr.appendChild(td(licLink(c.license_id)));
+      tr.appendChild(td(esc(c.party_display_name||"—")));
+      tr.appendChild(td(esc(c.works||"—")));
+      tr.appendChild(td(certPill(c.status)));
+      tr.appendChild(td('<span class="id">'+esc(c.issued_at||"—")+'</span>'));
+      tr.appendChild(td(esc(c.status==="ACTIVE"?"—":(c.reason_text||c.reason_code||"—"))));
+      tr.appendChild(td(pill(c.badge_status==="ISSUED"?{cls:"pass",label:"発行済"}:{cls:"wait",label:"生成中"})));
+      tr.appendChild(td(c.pending_request?pill({cls:"review",label:"承認待ち："+esc(c.pending_request.requested_status)}):'<span class="id">—</span>'));
+      var act=document.createElement("td"); act.className="actions"; act.innerHTML=certActionButtons(c.license_id||c.legacy_contract_id, c.status, null);
       tr.appendChild(act); tb.appendChild(tr);
     });
   });
@@ -1373,7 +1513,7 @@ function loadAccCs(){
       act.appendChild(mkBtn("条件確認済み（有効化）","btn p",function(){
         var note=prompt("確認メモ（締結PDFと台帳条件の照合結果）：",""); if(note===null) return;
         if(!confirm("この契約を有効化します（提出導線・経理引渡が動きます。認証は審査完了後）。よろしいですか？")) return;
-        call("admin_confirmContractTerms",[c.contract_id,note],function(){ toast("条件確認済みとして有効化しました"); loadAccCs(); loadContract(); });
+        call("admin_confirmContractTerms",[c.contract_id,note],function(){ toast("条件確認済みとして有効化しました"); loadAccCs(); loadLicense(); });
       }));
       tr.appendChild(act); tb.appendChild(tr);
     });
@@ -1397,12 +1537,11 @@ function loadAccCs(){
   });
 }
 // ===== 業務タブ用モック（スタンドアロン表示） =====
-MOCK.admin_dashboard=function(){ return { kpis:{reviewPending:7,highRisk:2,unscreened:15,signing:4}, alerts:[
-  {kind:"審査",target:"SUB-202606-0042",work:"新クトゥルフ神話TRPG",status:"HIGH_RISK",cls:"fail",at:"2026-06-27"},
-  {kind:"審査",target:"SUB-202606-0039",work:"ソード・ワールド2.5",status:"REVIEW",cls:"review",at:"2026-06-27"},
-  {kind:"契約",target:"CTR-202606-0018",work:"光砕のリヴァルチャー",status:"締結待ち",cls:"wait",at:"2026-06-26"},
-  {kind:"入金",target:"CTR-202606-0011",work:"インセイン",status:"入金待ち",cls:"unpaid",at:"2026-06-25"}
-]}; };
+MOCK.admin_dashboard=function(){ return { kpis:{manual_review:1,signing:2,hold:0,awaiting_submission:3,reviewing:2,correction_required:1,certified:6,suspended:1,unscreened:2,highRisk:1}, actions:[
+  {kind:"案件",license_id:"SPLL-202608-0003",target:"SPLL-202608-0003",party:"佐藤花子",work:"インセイン",status:"MANUAL_REVIEW",label:"個別確認",cls:"fail",at:"2026-08-27"},
+  {kind:"案件",license_id:"SPLL-202608-0004",target:"SPLL-202608-0004",party:"鈴木一郎",work:"新クトゥルフ神話TRPG",status:"REVIEWING",label:"審査",cls:"review",at:"2026-08-26"},
+  {kind:"認証",license_id:"SPLL-202608-0001",target:"SPLL-202608-0001",party:"山田太郎",work:"新クトゥルフ神話TRPG",status:"REVOKED",label:"承認待ち",cls:"review",at:"2026-08-25"}
+], alerts:[] }; };
 MOCK.admin_reviewQueue=function(){ return [
   {id:"SUB-202606-0042",submission_id:"SUB-202606-0042",version_id:"SV-1",title:"狂気山脈の夜想曲",work:"新クトゥルフ神話TRPG、インセイン",result:"HIGH_RISK",finding:"[新クトゥルフ神話TRPG] 必須クレジット欠落（p.1）"},
   {id:"SUB-202606-0039",submission_id:"SUB-202606-0039",version_id:"SV-2",title:"剣の街の異邦人",work:"ソード・ワールド2.5",result:"REVIEW_REQUIRED",finding:"公式誤認の可能性（表紙）"},
@@ -1424,7 +1563,7 @@ MOCK.admin_listLinkableApplications=function(){ return [
 ]; };
 MOCK.admin_linkContract=function(){ return true; };
 var _mCertReqs=[
-  {request_id:"req-mock-0001",contract_id:"CTR-202606-0011",requested_status:"ACTIVE",reason_text:"入金確認済みのため再有効化",requested_by:"ops@example.com",requested_at:"2026-07-10"}
+  {request_id:"req-mock-0001",contract_id:"CTR-202608-0001",license_id:"SPLL-202608-0001",requested_status:"REVOKED",reason_text:"権利者からの要請",requested_by:"ops@example.com",requested_at:"2026-08-25"}
 ];
 MOCK.admin_requestCertChange=function(contractId,status,code,reason){ var id="req-mock-"+(1000+_mCertReqs.length); _mCertReqs.push({request_id:id,contract_id:contractId,requested_status:status,reason_text:reason,requested_by:"you@example.com",requested_at:"2026-07-14"}); return { request_id:id }; };
 MOCK.admin_approveCertChange=function(requestId){ _mCertReqs=_mCertReqs.filter(function(r){ return r.request_id!==requestId; }); return true; };
@@ -1433,9 +1572,26 @@ MOCK.admin_revokeCert=function(c){ return MOCK.admin_requestCertChange(c,"REVOKE
 MOCK.admin_reactivateCert=function(c){ return MOCK.admin_requestCertChange(c,"ACTIVE","REACTIVATE","再有効化の申請"); };
 var _mCsSend=[{application_id:"APP-202607-0071",application_ref:"REF-202607-0071",usage_category:"書籍",form_submitted_at:"2026-07-10 14:22",cloudsign_send_status:"CLOUDSIGN_SEND_FAILED",cloudsign_send_error:"formrun→CloudSign連携エラー",manual_review_reason:""}];
 MOCK.admin_listLicenseCases=function(){ return [
-  {license_id:"SPLL-202608-0001",party_display_name:"山田太郎",party_type:"INDIVIDUAL",contact_email:"taro.yamada@example.com",usage_category:"書籍",fee:"16,500円／契約（複数原作は権利者へ均等分配）",works:"新クトゥルフ神話TRPG ルールブック",case_status:"SIGNED",contract_status:"SIGNED",review_status:"PENDING",certification_status:"ACTIVE",finance_handoff_status:"ACCEPTED",signed_at:"2026-08-10",legacy_contract_id:"CTR-202608-0001"},
-  {license_id:"SPLL-202608-0002",party_display_name:"株式会社サンプル",party_type:"CORPORATION",usage_category:"電子出版物",fee:"売上の10％",works:"インセイン",case_status:"CONTRACTING",contract_status:"NOT_STARTED",review_status:"NOT_REQUIRED",certification_status:"NOT_ISSUED",finance_handoff_status:"NOT_REQUIRED",signed_at:"",legacy_contract_id:""}
+  {license_id:"SPLL-202608-0001",party_display_name:"山田太郎",party_type:"INDIVIDUAL",contact_email:"taro.yamada@example.com",usage_category:"書籍",fee:"16,500円／契約",works:"新クトゥルフ神話TRPG ルールブック",case_status:"CERTIFIED",next_action:"—（有効）",contract_status:"SIGNED",review_status:"CLEARED",certification_status:"ACTIVE",signed_at:"2026-08-10",updated_at:"2026-08-20",legacy_contract_id:"CTR-202608-0001"},
+  {license_id:"SPLL-202608-0002",party_display_name:"鈴木一郎",party_type:"INDIVIDUAL",usage_category:"電子出版物",fee:"売上の10％",works:"インセイン",case_status:"SIGNING",next_action:"クリエーターがCloudSignで同意",contract_status:"SIGNING",review_status:"NOT_STARTED",certification_status:"NOT_ISSUED",signed_at:"",updated_at:"2026-08-26",legacy_contract_id:""},
+  {license_id:"SPLL-202608-0004",party_display_name:"佐藤花子",party_type:"INDIVIDUAL",usage_category:"書籍",fee:"16,500円／契約",works:"光砕のリヴァルチャー",case_status:"REVIEWING",next_action:"審査（AI→人手）",contract_status:"SIGNED",review_status:"IN_REVIEW",certification_status:"NOT_ISSUED",signed_at:"2026-08-22",updated_at:"2026-08-26",legacy_contract_id:"CTR-202608-0004"}
 ]; };
+MOCK.admin_getLicenseCase=function(id){ return { license:{license_id:id,party_display_name:"山田太郎",party_type:"INDIVIDUAL",contact_email:"taro.yamada@example.com",usage_category:"書籍",case_status:"CERTIFIED",next_action:"—（有効）",contract_status:"SIGNED",review_status:"CLEARED",certification_status:"ACTIVE",signed_at:"2026-08-10",cloudsign_document_id:"DOC-mock-1",application_ref:"REF-202608-AB12CD"},
+  contract:{contract_id:"CTR-202608-0001",status:"SIGNED",terms_verification_status:"VERIFIED",delivery_status:"DELIVERED",cloudsign_document_id:"DOC-mock-1",signed_at:"2026-08-10",fee_label:"16,500円／契約",payment_terms:"契約成立後14日以内",template_version:"v4.1"},
+  contractDocuments:[{document_type:"ORIGINAL",version:1,status:"SIGNED",signed_at:"2026-08-10",cloudsign_document_id:"DOC-mock-1"}],
+  works:[{work_id:"WRK-ARK00012",work_name_snapshot:"新クトゥルフ神話TRPG ルールブック",credit_snapshot:"指定のシリーズ権利表記を記載",fee_model_snapshot:"FLAT",fee_value_snapshot:"16500"}],
+  submissions:[{submission_id:"SUB-202608-0007",title:"狂気山脈の夜想曲",status:"CLEARED",versions:[{version_no:1,status:"CORRECTION_REQUIRED"},{version_no:2,status:"CLEARED"}],latest_review:{result:"CLEARED",reviewer:"ops@example.com",comments:"問題なし",reviewed_at:"2026-08-20"}}],
+  certificate:{cert_id:"CERT-202608-0003",status:"ACTIVE",reason_code:"ISSUED",reason_text:"審査完了により発行",issued_at:"2026-08-20"}, badge:{badge_id:"BDG-202608-0003",issued_at:"2026-08-20",status:"ISSUED"},
+  changeRequests:[], pendingNotifications:[],
+  timeline:[{occurred_at:"2026-08-01T10:00:00Z",actor:"portal",event:"APPLICATION_CREATED",after:{case_status:"APPLICATION_RECEIVED"}},{occurred_at:"2026-08-10T09:00:00Z",actor:"cloudsign",event:"CLOUDSIGN_SIGNED",after:{case_status:"AWAITING_SUBMISSION"}},{occurred_at:"2026-08-18T12:00:00Z",actor:"licensee",event:"SUBMISSION_CREATED",after:{case_status:"REVIEWING"}},{occurred_at:"2026-08-20T15:00:00Z",actor:"ops@example.com",event:"CERTIFICATE_ISSUED",after:{case_status:"CERTIFIED"}}],
+  legacy:{contract_id:"CTR-202608-0001",handoffs:[{handoff_version:1,status:"ACCEPTED"}]} }; };
+MOCK.admin_listCertifications=function(){ return [
+  {cert_id:"CERT-202608-0003",license_id:"SPLL-202608-0001",party_display_name:"山田太郎",works:"新クトゥルフ神話TRPG ルールブック",status:"ACTIVE",reason_text:"審査完了により発行",issued_at:"2026-08-20",badge_status:"ISSUED",pending_request:{request_id:"req-mock-0001",requested_status:"REVOKED",requested_by:"ops@example.com"}},
+  {cert_id:"CERT-202607-0001",license_id:"SPLL-202607-0001",party_display_name:"高橋",works:"インセイン",status:"PAYMENT_HOLD",reason_text:"利用許諾料が未入金のため",issued_at:"2026-07-30",badge_status:"ISSUED",pending_request:null}
+]; };
+MOCK.admin_setCertEnabled=function(){ return {status:"ACTIVE",changed:true}; };
+MOCK.admin_getCertStatus=function(){ return {status:"ACTIVE"}; };
+MOCK.admin_issueGuideLink=function(){ return { url:"https://script.example/exec?page=guide&t=mock-guide-token", license_id:"SPLL-202608-0001", payment_configured:true, contact_email:"taro.yamada@example.com", contact_email_source:"CLOUDSIGN" }; };
 MOCK.admin_listCloudSignSendFailures=function(){ return _mCsSend; };
 MOCK.admin_markManualCloudSignSent=function(id){ _mCsSend=_mCsSend.filter(function(a){return a.application_id!==id;}); return true; };
 MOCK.admin_cancelApplication=function(id){ _mCsSend=_mCsSend.filter(function(a){return a.application_id!==id;}); return true; };

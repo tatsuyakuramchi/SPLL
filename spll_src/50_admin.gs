@@ -65,32 +65,73 @@ function admin_cloudSignTest(){ requireRole_(['SYSTEM_ADMIN']);
 }
 
 /** ダッシュボード：KPI＋直近の要対応（作品名を結合） */
+/**
+ * ダッシュボード（RP-002 §11.1）。案件の現在地は License_Cases.case_status を正本とする。
+ * Applications の件数や Contracts 中心の集計は使わない（旧テーブルは技術・証跡用）。
+ * 要対応一覧は License_Cases（人の判断が要る現在地）・Notification_Queue・System_Errors・
+ * Certificate_Change_Requests を統合し、SPLL番号で詳細へ飛べる形で返す。
+ */
 function admin_dashboard(){ requireRole_([]);
-  const jobs      = readRows_(ssOps_(),'AI_Review_Jobs');
-  const findings  = readRows_(ssOps_(),'AI_Findings');
-  const apps      = readRows_(ssOps_(),'Applications');
-  const alerts    = readRows_(ssOps_(),'Compliance_Alerts');
-  const human     = readRows_(ssOps_(),'Human_Reviews');
-  const ctrWorks  = contractWorksMap_();
-  const cleared   = {}; human.filter(h=>h.result==='CLEARED').forEach(h => { cleared[String(h.submission_id)] = true; });
-
+  const cases = readRows_(ssOps_(),'License_Cases');
+  const jobs  = readRows_(ssOps_(),'AI_Review_Jobs');
+  const findings = readRows_(ssOps_(),'AI_Findings');
+  const byStatus = {};
+  cases.forEach(function(k){ const st = normalizeCaseStatus_(k.case_status); byStatus[st] = (byStatus[st] || 0) + 1; });
   const kpis = {
-    reviewPending: jobs.filter(j => j.status==='COMPLETED' && !cleared[String(j.submission_id)]).length,
-    highRisk:      findings.filter(isHighRisk_).length,
-    unscreened:    jobs.filter(j => j.status==='QUEUED' || j.status==='SCANNING').length,
-    signing:       apps.filter(a => a.status && a.status!=='SIGNED' && a.status!=='CANCELLED').length,
-    unpaid:        0,
-    reporting:     0
+    manual_review:       byStatus.MANUAL_REVIEW || 0,
+    signing:             (byStatus.SIGNING || 0) + (byStatus.CONTRACT_PENDING || 0),
+    hold:                byStatus.HOLD || 0,
+    awaiting_submission: byStatus.AWAITING_SUBMISSION || 0,
+    reviewing:           byStatus.REVIEWING || 0,
+    correction_required: byStatus.CORRECTION_REQUIRED || 0,
+    certified:           byStatus.CERTIFIED || 0,
+    suspended:           byStatus.SUSPENDED || 0,
+    // 審査タブの指標（AI一次審査の滞留）
+    unscreened: jobs.filter(function(j){ return j.status==='QUEUED' || j.status==='SCANNING'; }).length,
+    highRisk:   findings.filter(isHighRisk_).length
   };
 
-  const subCtr = {}; readRows_(ssOps_(),'Submissions').forEach(s => { subCtr[s.submission_id] = s.contract_id; });
-  const rows = [];
-  alerts.filter(a => a.status!=='CLOSED').forEach(a => rows.push({
-    kind:'審査', target:a.submission_id||a.contract_id||'', work:contractWorkLabel_(ctrWorks, a.contract_id||subCtr[a.submission_id]),
-    status:String(a.severity||'ALERT'), cls:isHighRisk_(a)?'fail':'review', at:String(a.occurred_at||'')
-  }));
-  rows.sort((a,b) => String(b.at).localeCompare(String(a.at)));
-  return { kpis: kpis, alerts: rows.slice(0,8) };
+  const worksBy = licenseWorksMap_();
+  const nameOf = function(lid){ const k = cases.find(function(x){ return x.license_id === lid; }); return k ? (k.party_display_name || '') : ''; };
+  const actions = [];
+  // 1) 人の判断が要る現在地
+  const NEEDS = { MANUAL_REVIEW:'個別確認', HOLD:'条件不一致の確認', CORRECTION_REQUIRED:'是正の確認', REVIEWING:'審査' };
+  cases.forEach(function(k){
+    const st = normalizeCaseStatus_(k.case_status);
+    if(!NEEDS[st]) return;
+    actions.push({ kind:'案件', license_id:k.license_id, target:k.license_id, work:(worksBy[k.license_id]||[]).join('、'),
+      party:k.party_display_name||'', status:st, label:NEEDS[st], cls:(st==='HOLD'||st==='MANUAL_REVIEW')?'fail':'review',
+      at:String(k.updated_at||k.created_at||'') });
+  });
+  // 2) 人手対応が残っている通知
+  readRows_(ssOps_(),'Notification_Queue')
+    .filter(function(n){ return n.status === 'MANUAL_REQUIRED' || n.status === 'SEND_FAILED'; })
+    .forEach(function(n){ actions.push({ kind:'通知', license_id:n.license_id||licenseIdOfContract_(n.contract_id), target:n.license_id||n.contract_id||'',
+      work:(worksBy[n.license_id]||[]).join('、'), party:nameOf(n.license_id), status:n.type, label:n.status==='SEND_FAILED'?'送信失敗':'人手対応',
+      cls:n.status==='SEND_FAILED'?'fail':'review', at:String(n.created_at||'') }); });
+  // 3) 承認待ちの認証状態変更
+  readRows_(ssOps_(),'Certificate_Change_Requests')
+    .filter(function(r){ return r.status === 'REQUESTED'; })
+    .forEach(function(r){ const lid = r.license_id || licenseIdOfContract_(r.contract_id);
+      actions.push({ kind:'認証', license_id:lid, target:lid||r.contract_id, work:(worksBy[lid]||[]).join('、'), party:nameOf(lid),
+        status:r.requested_status, label:'承認待ち', cls:'review', at:String(r.requested_at||'') }); });
+  // 4) 未解決のシステムエラー（業務影響のあるもの）
+  readRows_(ssOps_(),'System_Errors')
+    .filter(function(e){ return e.status === 'OPEN' && !/RATE|rate/.test(String(e.source)); })
+    .slice(-20)
+    .forEach(function(e){ actions.push({ kind:'エラー', license_id:'', target:e.source||'', work:'', party:'',
+      status:e.error_code, label:String(e.message||'').slice(0,60), cls:'fail', at:String(e.occurred_at||'') }); });
+  actions.sort(function(a,b){ return String(b.at).localeCompare(String(a.at)); });
+  return { kpis: kpis, actions: actions.slice(0, 30), alerts: [] };
+}
+/** SPLL番号 → 対象原作名（License_Works のスナップショット。active=false は除く） */
+function licenseWorksMap_(){
+  const m = {};
+  readRows_(ssOps_(),'License_Works').forEach(function(w){
+    if(String(w.active) === 'false') return;
+    (m[w.license_id] = m[w.license_id] || []).push(w.work_name_snapshot || w.work_id);
+  });
+  return m;
 }
 
 /** 審査キュー：提出版(version)単位に総合結果・主指摘・対象原作(複数)を結合（B経路固定） */
@@ -157,7 +198,10 @@ function admin_setHumanReview(submissionId, result, comment, reviewer, versionId
   return { ok:true, result:result, certification: certification };
 }
 
-/** 契約一覧：締結済(Contracts)＋締結待ち(Applications)を結合、契約者名はマスク、対象原作は複数表示 */
+/**
+ * 契約一覧：締結済(Contracts)＋締結待ち(Applications)を結合、契約者名はマスク、対象原作は複数表示
+ * @deprecated RP-002 日常UIからは外した。ライセンス一覧（admin_listLicenseCases）と詳細を使う。移行期間の参照用に残す。
+ */
 function admin_listContracts(){ requireRole_([]);
   const contracts = readRows_(ssOps_(),'Contracts');
   const apps      = readRows_(ssOps_(),'Applications');
@@ -700,16 +744,17 @@ function admin_issueBadge(contractId){ requireRole_(['OPERATIONS']); const r = i
 /** 照合コードの再発行（LEGAL_ADMIN）。旧QRは無効になる。平文は1回だけ返す。 */
 function admin_rotateCertCode(contractId){
   const actor = requireRole_(['LEGAL_ADMIN']);
-  const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.contract_id === contractId; });
+  const cert = certForRef_(contractId);
   if(!cert) throw new Error('認証が見つかりません: ' + contractId);
   const code = randCode_(12);
   updateRow_(ssOps_(),'Certificates','cert_id',cert.cert_id,{ check_code_hash:hash_(code) });
   logEvent_('certificate', cert.cert_id, actor.email, null, { code_rotated:true });
   const url = verifyUrl_(cert.cert_id, code);
-  // 旧QRを含むバッジを差し替え（V2-015）
-  readRows_(ssOps_(),'Badges').filter(function(b){ return b.contract_id === contractId && b.status === 'ISSUED'; })
+  // 旧QRを含むバッジを差し替え（V2-015）。バッジは認証の表示物なので同じ案件の分を全部
+  const ref = resolveLicenseRef_(cert.license_id || cert.contract_id);
+  readRows_(ssOps_(),'Badges').filter(function(b){ return belongsToLicense_(b, ref) && b.status === 'ISSUED'; })
     .forEach(function(b){ updateRow_(ssOps_(),'Badges','badge_id',b.badge_id,{ status:'SUPERSEDED' }); });
-  enqueueBadgeJob_(contractId, url);
+  enqueueBadgeJob_(cert.contract_id, url);
   return { cert_id:cert.cert_id, check_code:code, verify_url:url };
 }
 
@@ -724,10 +769,15 @@ function admin_setCertStatus(contractId, status, reasonCode, reasonText, legalCa
     throw new Error('AUTHORIZATION_ERROR: この状態変更（' + status + '）は申請・承認の分離が必要です。admin_requestCertChange → 別の担当者が admin_approveCertChange を実行してください。');
   return applyCertStatus_(contractId, status, reasonCode, reasonText, legalCaseId, actor_());
 }
+/** 認証の行を SPLL番号または契約IDから引く（license_id が正本、旧行は contract_id）。 */
+function certForRef_(idOrLicense){
+  const ref = resolveLicenseRef_(idOrLicense);
+  return readRows_(ssOps_(),'Certificates').find(function(x){ return belongsToLicense_(x, ref); }) || null;
+}
 /** 状態変更の実適用（内部）。承認済み申請または非重要状態からのみ呼ばれる。 */
 function applyCertStatus_(contractId, status, reasonCode, reasonText, legalCaseId, actorEmail){
   if(CERT_STATES.indexOf(status) < 0) throw new Error('不正な状態: ' + status);
-  const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.contract_id === contractId; });
+  const cert = certForRef_(contractId);
   if(!cert) throw new Error('認証が見つかりません: ' + contractId);
   const before = cert.status;
   updateRow_(ssOps_(),'Certificates','cert_id',cert.cert_id,{
@@ -737,7 +787,7 @@ function applyCertStatus_(contractId, status, reasonCode, reasonText, legalCaseI
   logEvent_('certificate', cert.cert_id, actorEmail, {status:before}, {status:status, reason_code:reasonCode||''});
   // ライセンス台帳の認証状態も追随させる（一覧・検証の表示が実体とずれないように）。
   // 状態列は遷移表を通す：認証の状態値から対応するイベントを選ぶ
-  const licenseId = cert.license_id || licenseIdOfContract_(contractId);
+  const licenseId = cert.license_id || licenseIdOfContract_(cert.contract_id);
   if(licenseId){
     const kase = readRows_(ssOps_(),'License_Cases').find(function(k){ return k.license_id === licenseId; }) || {};
     transitionLicenseCase_(licenseId, certificateEventFor_(status, kase.certification_status),
@@ -754,7 +804,7 @@ function applyCertStatus_(contractId, status, reasonCode, reasonText, legalCaseI
  */
 function admin_setCertEnabled(contractId, enabled, reason){
   const actor = requireRole_(['OPERATIONS','ACCOUNTING','LEGAL_ADMIN']);
-  const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.contract_id === String(contractId||''); });
+  const cert = certForRef_(contractId);
   if(!cert) throw new Error('DATA_NOT_FOUND: 認証が見つかりません: ' + contractId);
   if(['ACTIVE','PAYMENT_HOLD'].indexOf(String(cert.status)) < 0)
     throw new Error('DATA_CONFLICT: このスイッチは有効／入金保留の切替のみです（現在: ' + cert.status +
@@ -776,11 +826,11 @@ function admin_requestCertChange(contractId, requestedStatus, reasonCode, reason
   const actor = requireRole_(['LEGAL_ADMIN','OPERATIONS']);
   if(CERT_STATES.indexOf(requestedStatus) < 0) throw new Error('不正な状態: ' + requestedStatus);
   if(!String(reasonText||'').trim()) throw new Error('VALIDATION_ERROR: 理由は必須です');
-  const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.contract_id === contractId; });
+  const cert = certForRef_(contractId);
   if(!cert) throw new Error('認証が見つかりません: ' + contractId);
   const reqId = Utilities.getUuid();
-  appendRow_(ssOps_(),'Certificate_Change_Requests',{ request_id:reqId, cert_id:cert.cert_id, contract_id:contractId,
-    license_id: cert.license_id || licenseIdOfContract_(contractId),
+  appendRow_(ssOps_(),'Certificate_Change_Requests',{ request_id:reqId, cert_id:cert.cert_id, contract_id:cert.contract_id,
+    license_id: cert.license_id || licenseIdOfContract_(cert.contract_id),
     requested_status:requestedStatus, reason_code:reasonCode||'', reason_text:sanitizeCell_(String(reasonText)),
     legal_case_id:legalCaseId||'', requested_by:actor.email, requested_at:new Date().toISOString(),
     approved_by:'', approved_at:'', status:'REQUESTED', emergency_override:'' });
@@ -834,7 +884,7 @@ function admin_listCertChangeRequests(){ requireRole_([]);
 function admin_revokeCert(contractId, reasonText){ return admin_requestCertChange(contractId, 'REVOKED', 'MANUAL_REVOKE', reasonText||'管理コンソールからの失効申請', ''); }
 function admin_reactivateCert(contractId){ return admin_requestCertChange(contractId, 'ACTIVE', 'REACTIVATE', '再有効化の申請', ''); }
 function admin_getCertStatus(contractId){ requireRole_([]);
-  const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return x.contract_id === contractId; });
+  const cert = certForRef_(contractId);
   return cert ? { cert_id:cert.cert_id, status:cert.status, reason_code:cert.reason_code, issued_at:cert.issued_at } : { status:'NONE' };
 }
 
@@ -844,6 +894,7 @@ function admin_listNotifications(){ requireRole_([]);
   return readRows_(ssOps_(),'Notification_Queue')
     .filter(function(n){ return n.status === 'MANUAL_REQUIRED' || n.status === 'SEND_FAILED'; })
     .map(function(n){ return { notification_id:n.notification_id, contract_id:n.contract_id,
+      license_id: n.license_id || licenseIdOfContract_(n.contract_id) || '',   // 一覧の表示はSPLL番号
       work:contractWorkLabel_(ctrWorks, n.contract_id), type:n.type, status:n.status,
       attempts:num_(n.attempts), last_error:String(n.last_error||''),
       payload:parseJson_(n.payload_json, {}), created_at:String(n.created_at||'').slice(0,10) }; });
@@ -1057,11 +1108,19 @@ function admin_saveContractTemplates(cfg){
 }
 
 // ---- SPLLライセンス台帳（RP-001 §6：管理画面の主台帳）----
-function admin_listLicenseCases(){ requireRole_([]);
-  const worksBy = {}, feeBy = {};
+/**
+ * ライセンス一覧（RP-002 §11.3 / §12.2）。1案件＝1行。SPLL番号で申込〜認証まで追える。
+ * filters: { q（SPLL番号・契約者名・原作名・CloudSign書類ID）, case_status, contract_status, review_status,
+ *            certification_status, usage_category, work_id, limit }
+ * 経理引渡の状況は返すが一覧の主列にはしない（Finance_Handoffs は外部連携のキュー・§17）。
+ */
+function admin_listLicenseCases(filters){ requireRole_([]);
+  filters = filters || {};
+  const worksBy = {}, workIdsBy = {}, feeBy = {};
   readRows_(ssOps_(),'License_Works').forEach(function(w){
     if(String(w.active) !== 'false'){
       (worksBy[w.license_id] = worksBy[w.license_id] || []).push(w.work_name_snapshot || w.work_id);
+      (workIdsBy[w.license_id] = workIdsBy[w.license_id] || []).push(String(w.work_id));
       if(!feeBy[w.license_id]) feeBy[w.license_id] = licenseFeeLabel_(w);   // 料金は契約単位（原作間で共通）
     }});
   const contractBy = {}, feeSnapBy = {};
@@ -1070,17 +1129,43 @@ function admin_listLicenseCases(){ requireRole_([]);
       contractBy[c.license_id] = c.contract_id;
       try{ feeSnapBy[c.license_id] = JSON.parse(c.terms_snapshot || '{}').fee_amount_or_rate || ''; }catch(e){}
     }});
-  return readRows_(ssOps_(),'License_Cases').slice(-200).reverse().map(function(k){ return {
-    license_id: k.license_id, application_ref: k.application_ref,
-    party_type: k.party_type, party_display_name: k.party_display_name,
-    usage_category: k.usage_category, works: (worksBy[k.license_id] || []).join('、'),
-    contact_email: k.contact_email || '',
-    fee: feeSnapBy[k.license_id] || feeBy[k.license_id] || '',   // 締結済は契約スナップショット、未締結は申込時スナップショット
-    case_status: k.case_status, contract_status: k.contract_status,
-    review_status: k.review_status, certification_status: k.certification_status,
-    finance_handoff_status: k.finance_handoff_status,
-    signed_at: String(k.signed_at || '').slice(0, 10),
-    legacy_contract_id: contractBy[k.license_id] || '' }; });
+  const q = String(filters.q || '').trim().toLowerCase();
+  const eq = function(field, v){ return !filters[field] || String(v || '') === String(filters[field]); };
+  const limit = num_(filters.limit) || 200;
+  return readRows_(ssOps_(),'License_Cases').slice().reverse().filter(function(k){
+    const st = normalizeCaseStatus_(k.case_status);
+    if(!eq('case_status', st) || !eq('contract_status', k.contract_status) || !eq('review_status', k.review_status) ||
+       !eq('certification_status', k.certification_status) || !eq('usage_category', k.usage_category)) return false;
+    if(filters.work_id && (workIdsBy[k.license_id] || []).indexOf(String(filters.work_id)) < 0) return false;
+    if(q){
+      const hay = [k.license_id, k.party_display_name, k.cloudsign_document_id, k.application_ref, (worksBy[k.license_id]||[]).join(' ')]
+        .join(' ').toLowerCase();
+      if(hay.indexOf(q) < 0) return false;
+    }
+    return true;
+  }).slice(0, limit).map(function(k){
+    const st = normalizeCaseStatus_(k.case_status);
+    return {
+      license_id: k.license_id, application_ref: k.application_ref,
+      party_type: k.party_type, party_display_name: k.party_display_name,
+      usage_category: k.usage_category, works: (worksBy[k.license_id] || []).join('、'),
+      contact_email: k.contact_email || '',
+      fee: feeSnapBy[k.license_id] || feeBy[k.license_id] || '',   // 締結済は契約スナップショット、未締結は申込時スナップショット
+      case_status: st, next_action: licenseNextAction_(st),
+      contract_status: k.contract_status, review_status: k.review_status, certification_status: k.certification_status,
+      finance_handoff_status: k.finance_handoff_status,
+      cloudsign_document_id: k.cloudsign_document_id || '',
+      signed_at: String(k.signed_at || '').slice(0, 10), updated_at: String(k.updated_at || '').slice(0, 10),
+      legacy_contract_id: contractBy[k.license_id] || '' }; });
+}
+/** 現在地から「次に誰が何をするか」の短い案内（一覧・詳細の「次の対応」列） */
+function licenseNextAction_(caseStatus){
+  return ({
+    APPLICATION_RECEIVED: 'クリエーターがフォーム入力', CONTRACT_PENDING: 'CloudSign送付待ち', MANUAL_REVIEW: '事務局が個別確認',
+    SIGNING: 'クリエーターがCloudSignで同意', HOLD: '法務が条件不一致を確認', AWAITING_SUBMISSION: 'クリエーターが作品提出',
+    REVIEWING: '審査（AI→人手）', CORRECTION_REQUIRED: 'クリエーターが是正・再提出', CERTIFIED: '—（有効）',
+    SUSPENDED: '停止理由の解消', TERMINATED: '—', CANCELLED: '—'
+  })[String(caseStatus || '')] || '';
 }
 /** License_Worksのスナップショットから料金表示ラベル（締結前の案件用） */
 function licenseFeeLabel_(w){
@@ -1091,14 +1176,93 @@ function licenseFeeLabel_(w){
   return '';
 }
 /** ライセンス詳細（契約書履歴・引渡状況つき）。 */
+/**
+ * ライセンス詳細（RP-002 §11.3）。1案件を SPLL番号で丸ごと返す。
+ *   license / works / contractDocuments / submissions（版・最新の人手審査）/ certificate / badge /
+ *   changeRequests / pendingNotifications / timeline（状態遷移の履歴）/ legacy（旧契約ID・経理引渡）
+ * 画面は契約ID・申込IDを主表示にせず、この応答だけで案件を扱えるようにする。
+ */
 function admin_getLicenseCase(licenseId){ requireRole_([]);
-  const k = readRows_(ssOps_(),'License_Cases').find(function(x){ return x.license_id === String(licenseId||''); });
+  const lid = String(licenseId || '');
+  const k = readRows_(ssOps_(),'License_Cases').find(function(x){ return x.license_id === lid; });
   if(!k) throw new Error('DATA_NOT_FOUND: ライセンスがありません: ' + licenseId);
+  const ref = resolveLicenseRef_(lid);
+  const contract = ref.contractId ? (readRows_(ssOps_(),'Contracts').find(function(c){ return c.contract_id === ref.contractId; }) || null) : null;
+  const versions = readRows_(ssOps_(),'Submission_Versions');
+  const reviews  = readRows_(ssOps_(),'Human_Reviews');
+  const submissions = readRows_(ssOps_(),'Submissions').filter(function(x){ return belongsToLicense_(x, ref); }).map(function(sub){
+    const vs = versions.filter(function(v){ return v.submission_id === sub.submission_id; })
+      .sort(function(a,b){ return num_(a.version_no) - num_(b.version_no); })
+      .map(function(v){ return { version_id:v.version_id, version_no:num_(v.version_no), status:v.status,
+        submitted_at:String(v.submitted_at||'').slice(0,10), method:v.submission_method||'UPLOAD' }; });
+    const latestReview = reviews.filter(function(h){ return h.submission_id === sub.submission_id; })
+      .sort(function(a,b){ return String(b.reviewed_at||'').localeCompare(String(a.reviewed_at||'')); })[0] || null;
+    return { submission_id:sub.submission_id, title:sub.title, status:sub.status, method:sub.submission_method||'UPLOAD',
+      submitted_at:String(sub.submitted_at||'').slice(0,10), versions:vs,
+      latest_review: latestReview ? { result:latestReview.result, reviewer:latestReview.reviewer,
+        comments:String(latestReview.comments||''), reviewed_at:String(latestReview.reviewed_at||'').slice(0,10) } : null };
+  });
+  const cert = readRows_(ssOps_(),'Certificates').find(function(x){ return belongsToLicense_(x, ref); }) || null;
+  const badge = readRows_(ssOps_(),'Badges').find(function(b){ return belongsToLicense_(b, ref) && String(b.status) === 'ISSUED'; }) || null;
+  let terms = {}; try{ terms = JSON.parse((contract && contract.terms_snapshot) || '{}'); }catch(e){}
   return {
-    case: k,
-    works: readRows_(ssOps_(),'License_Works').filter(function(w){ return w.license_id === k.license_id; }),
-    documents: readRows_(ssOps_(),'Contract_Documents').filter(function(d){ return d.license_id === k.license_id; }),
-    handoffs: readRows_(ssOps_(),'Finance_Handoffs').filter(function(h){ return h.license_id === k.license_id; })
-      .map(function(h){ return { handoff_version: h.handoff_version, status: h.status, created_at: h.created_at, accepted_at: h.accepted_at }; }),
+    license: Object.assign({}, k, { case_status: normalizeCaseStatus_(k.case_status), next_action: licenseNextAction_(normalizeCaseStatus_(k.case_status)) }),
+    works: readRows_(ssOps_(),'License_Works').filter(function(w){ return w.license_id === lid; }),
+    contract: contract ? { contract_id:contract.contract_id, status:contract.status, link_status:contract.link_status,
+      terms_verification_status:contract.terms_verification_status||'', delivery_status:contract.delivery_status||'',
+      cloudsign_document_id:contract.cloudsign_document_id||'', signed_at:String(contract.signed_at||'').slice(0,10),
+      contact_email:contract.contact_email||'', contact_email_source:contract.contact_email_source||'',
+      fee_label:String(terms.fee_amount_or_rate||''), payment_terms:String(terms.payment_terms||terms.payment_due||''),
+      template_version:String(terms.contract_template_version||'') } : null,
+    contractDocuments: readRows_(ssOps_(),'Contract_Documents').filter(function(d){ return d.license_id === lid; })
+      .sort(function(a,b){ return String(a.created_at||'').localeCompare(String(b.created_at||'')); }),
+    submissions: submissions,
+    certificate: cert ? { cert_id:cert.cert_id, status:cert.status, reason_code:cert.reason_code||'', reason_text:cert.reason_text||'',
+      issued_at:cert.issued_at||'', effective_at:String(cert.effective_at||'').slice(0,10) } : null,
+    badge: badge ? { badge_id:badge.badge_id, issued_at:badge.issued_at, status:badge.status } : null,
+    changeRequests: readRows_(ssOps_(),'Certificate_Change_Requests').filter(function(r){ return belongsToLicense_(r, ref); })
+      .map(function(r){ return { request_id:r.request_id, requested_status:r.requested_status, reason_text:r.reason_text,
+        requested_by:r.requested_by, requested_at:String(r.requested_at||'').slice(0,10), status:r.status }; }),
+    pendingNotifications: readRows_(ssOps_(),'Notification_Queue')
+      .filter(function(n){ return belongsToLicense_(n, ref) && (n.status === 'MANUAL_REQUIRED' || n.status === 'SEND_FAILED'); })
+      .map(function(n){ return { notification_id:n.notification_id, type:n.type, status:n.status, created_at:String(n.created_at||'').slice(0,10),
+        payload:parseJson_(n.payload_json, {}) }; }),
+    timeline: licenseTimeline_(lid),
+    legacy: { contract_id: ref.contractId || '',
+      handoffs: readRows_(ssOps_(),'Finance_Handoffs').filter(function(h){ return h.license_id === lid; })
+        .map(function(h){ return { handoff_version:h.handoff_version, status:h.status, created_at:String(h.created_at||'').slice(0,10), accepted_at:String(h.accepted_at||'').slice(0,10) }; }) }
   };
+}
+/** 状態遷移の履歴だけ */
+function admin_getLicenseTimeline(licenseId){ requireRole_([]); return licenseTimeline_(String(licenseId||'')); }
+/** 契約書履歴だけ */
+function admin_getContractDocuments(licenseId){ requireRole_([]);
+  return readRows_(ssOps_(),'Contract_Documents').filter(function(d){ return d.license_id === String(licenseId||''); }); }
+/** 提出だけ */
+function admin_getSubmissionsByLicense(licenseId){ requireRole_([]); return admin_getLicenseCase(licenseId).submissions; }
+/** 認証だけ */
+function admin_getCertificationByLicense(licenseId){ requireRole_([]);
+  const d = admin_getLicenseCase(licenseId); return { certificate:d.certificate, badge:d.badge, changeRequests:d.changeRequests }; }
+
+/**
+ * 認証管理タブの一覧（RP-002 §12.4）。Certificate が正本、Badge は表示物。
+ * SPLL番号・契約者・原作・認証状態・発行日・停止理由・承認待ちの申請を1行にまとめる。
+ */
+function admin_listCertifications(){ requireRole_([]);
+  const cases = {}; readRows_(ssOps_(),'License_Cases').forEach(function(k){ cases[k.license_id] = k; });
+  const worksBy = licenseWorksMap_();
+  const badges = readRows_(ssOps_(),'Badges'), reqs = readRows_(ssOps_(),'Certificate_Change_Requests');
+  return readRows_(ssOps_(),'Certificates').slice().reverse().map(function(c){
+    const lid = c.license_id || licenseIdOfContract_(c.contract_id) || '';
+    const k = cases[lid] || {};
+    const ref = { licenseId: lid, contractId: c.contract_id };
+    const pending = reqs.filter(function(r){ return r.status === 'REQUESTED' && (r.cert_id === c.cert_id || belongsToLicense_(r, ref)); });
+    const badge = badges.find(function(b){ return belongsToLicense_(b, ref) && String(b.status) === 'ISSUED'; });
+    return { cert_id:c.cert_id, license_id:lid, legacy_contract_id:c.contract_id||'',
+      party_display_name:k.party_display_name||'', works:(worksBy[lid]||[]).join('、'),
+      status:c.status, reason_code:c.reason_code||'', reason_text:c.reason_text||'', issued_at:c.issued_at||'',
+      badge_status: badge ? 'ISSUED' : 'NONE',
+      pending_request: pending.length ? { request_id:pending[0].request_id, requested_status:pending[0].requested_status,
+        requested_by:pending[0].requested_by } : null };
+  });
 }

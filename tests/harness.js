@@ -786,7 +786,7 @@ ok(lcFee&&/16,500円/.test(lcFee.fee),'ライセンス一覧に利用許諾料�
 const lcFeeRate=lcList.find(k=>k.usage_category==='電子出版物'&&k.contract_status!=='SIGNED');
 ok(!lcFeeRate||/売上の10％/.test(lcFeeRate.fee||'売上の10％'),'未締結案件は申込時スナップショットから率を表示');
 const lcDet=G.admin_getLicenseCase(appP4.license_id);
-ok(lcDet.works.length===1&&lcDet.documents.length===1&&lcDet.handoffs.length===1,'ライセンス詳細（原作・契約書履歴・引渡）');
+ok(lcDet.works.length===1&&lcDet.contractDocuments.length===1&&lcDet.legacy.handoffs.length===1,'ライセンス詳細（原作・契約書履歴・引渡は互換情報として）');
 
 // 78. 定額×複数原作＝契約単位定額（費用は原作数で増えない）
 ok(G.computeFeeTerms_('書籍',2).amount===16500,'2原作でも契約単位の定額16,500円');
@@ -1770,6 +1770,58 @@ const lkFolder=G.DriveApp.getFolderById(c3Ctr.folder_id);
 ok(lkFolder&&typeof lkFolder.getName==='function'?lkFolder.getName()===c3App.license_id:!!c3Ctr.folder_id,'締結時の案件フォルダは SPLL番号名: '+(lkFolder&&lkFolder.getName?lkFolder.getName():c3Ctr.folder_id));
 ok(!!unlinkedC.folder_id&&(!G.DriveApp.getFolderById(unlinkedC.folder_id).getName||G.DriveApp.getFolderById(unlinkedC.folder_id).getName()===unlinkedC.contract_id),
   '未紐付け締結（SPLL番号なし）は契約ID名のフォルダ');
+
+// ============ RP-002 §11-§12：管理画面は License_Cases 中心 ============
+// 230. ダッシュボードは case_status を集計し、要対応を SPLL番号で統合して返す（Applications を直接数えない）
+const dash=G.admin_dashboard();
+ok(dash.kpis&&typeof dash.kpis.awaiting_submission==='number'&&typeof dash.kpis.reviewing==='number'&&typeof dash.kpis.certified==='number',
+  'KPI は案件の現在地（AWAITING_SUBMISSION / REVIEWING / CERTIFIED …）');
+ok(dash.kpis.certified>=2&&dash.kpis.manual_review>=1,'KPI の件数は台帳の現在地と一致: certified='+dash.kpis.certified+' manual='+dash.kpis.manual_review);
+ok(Array.isArray(dash.actions)&&dash.actions.some(a=>a.kind==='案件'&&a.license_id&&a.status==='MANUAL_REVIEW'),'要対応に個別確認の案件が SPLL番号つきで載る');
+ok(dash.actions.some(a=>a.kind==='通知'),'要対応に人手対応の通知を統合');
+ok(dash.actions.every(a=>a.kind==='エラー'||/^SPLL-|^$/.test(String(a.license_id))),'要対応の対象IDは SPLL番号（契約ID・申込IDを出さない）');
+ok(!('signing' in dash.kpis)||typeof dash.kpis.signing==='number','締結中の件数も License_Cases から');
+// 231. ライセンス一覧のフィルタと「次の対応」
+const allLic=G.admin_listLicenseCases();
+ok(allLic.length>0&&allLic.every(k=>k.next_action!==undefined&&k.case_status&&!/^(APPLIED|CONTRACTING|SIGNED|CLOSED)$/.test(k.case_status)),'一覧の現在地は現行値、次の対応つき');
+const onlyCert=G.admin_listLicenseCases({ case_status:'CERTIFIED' });
+ok(onlyCert.length>0&&onlyCert.every(k=>k.case_status==='CERTIFIED'),'case_status で絞り込める');
+ok(G.admin_listLicenseCases({ q:c3App.license_id }).length===1,'SPLL番号で検索できる');
+ok(G.admin_listLicenseCases({ q:'DOC-C3' }).some(k=>k.license_id===c3App.license_id),'CloudSign書類IDで検索できる');
+ok(G.admin_listLicenseCases({ q:'状態機械' }).some(k=>k.license_id===smApp.license_id),'契約者名で検索できる');
+ok(G.admin_listLicenseCases({ work_id:'WRK-BKK00019' }).every(k=>/インセイン/.test(k.works)),'原作IDで絞り込める');
+// 232. ライセンス詳細は1案件を丸ごと返す（契約・原作・提出・審査・認証・履歴）
+const det=G.admin_getLicenseCase(c3App.license_id);
+ok(det.license.license_id===c3App.license_id&&det.license.case_status==='CERTIFIED','詳細：概要');
+ok(det.contract&&det.contract.cloudsign_document_id==='DOC-C3'&&det.contractDocuments.length===1,'詳細：契約・契約書履歴');
+ok(det.works.length===1&&det.works[0].work_id==='WRK-ARK00012','詳細：対象原作');
+ok(det.submissions.length===1&&det.submissions[0].versions.length===2&&det.submissions[0].latest_review.result==='CLEARED','詳細：提出（版・最新の人手審査）');
+ok(det.certificate&&det.certificate.status==='ACTIVE'&&det.badge&&det.badge.status==='ISSUED','詳細：認証・バッジ');
+ok(det.timeline.length>=6&&det.timeline[0].event==='APPLICATION_CREATED'&&det.timeline.some(e=>e.event==='CERTIFICATE_ISSUED'),'詳細：状態遷移のタイムライン');
+ok(det.legacy.contract_id===c3Ctr.contract_id,'旧契約IDは legacy に退避（主表示にしない）');
+ok(G.admin_getLicenseTimeline(c3App.license_id).length===det.timeline.length&&G.admin_getSubmissionsByLicense(c3App.license_id).length===1
+   &&G.admin_getCertificationByLicense(c3App.license_id).certificate.cert_id===det.certificate.cert_id,'個別APIも同じ内容を返す');
+// 233. 認証管理の一覧と、SPLL番号での認証操作
+const certList=G.admin_listCertifications();
+const certRow=certList.find(c=>c.license_id===c3App.license_id);
+ok(certRow&&certRow.status==='ACTIVE'&&certRow.badge_status==='ISSUED'&&/新クトゥルフ/.test(certRow.works),'認証一覧に SPLL番号・原作・認証状態・バッジ');
+G.admin_setCertEnabled(c3App.license_id,false,'未入金のため');
+ok(G.admin_getCertStatus(c3App.license_id).status==='PAYMENT_HOLD','SPLL番号で認証をオフにできる');
+ok(rows(OPS,'License_Cases').find(k=>k.license_id===c3App.license_id).case_status==='SUSPENDED','台帳の現在地も SUSPENDED');
+G.admin_setCertEnabled(c3App.license_id,true,'入金確認');
+ok(G.admin_getCertStatus(c3App.license_id).status==='ACTIVE'&&rows(OPS,'License_Cases').find(k=>k.license_id===c3App.license_id).case_status==='CERTIFIED','SPLL番号でオンに戻せる');
+const reqL=G.admin_requestCertChange(c3App.license_id,'REVOKED','MANUAL_REVOKE','権利者からの要請','');
+ok(G.admin_listCertifications().find(c=>c.license_id===c3App.license_id).pending_request.request_id===reqL.request_id,'認証一覧に承認待ちの申請が載る');
+ok(G.admin_dashboard().actions.some(a=>a.kind==='認証'&&a.license_id===c3App.license_id),'承認待ちはダッシュボードの要対応にも載る');
+G.Session={ getActiveUser:()=>({ getEmail:()=>'legal2@example.com' }) };
+G.admin_approveCertChange(reqL.request_id,false,'');
+G.Session=SessFm;
+// 234. 管理画面：契約管理タブは無く、認証管理タブがある。通常一覧に経理引渡列・契約ID列を出さない
+const adminHtml=fs.readFileSync(path.join(__dirname,'..','spll_src','admin.html'),'utf8');
+ok(!/data-v="contract"/.test(adminHtml)&&/data-v="cert"/.test(adminHtml),'タブ：契約管理を外し、認証管理を追加');
+ok(!/<th>経理引渡<\/th>/.test(adminHtml),'ライセンス一覧に経理引渡列を出さない');
+ok(/admin_listCertifications/.test(adminHtml)&&/admin_getLicenseCase/.test(adminHtml),'画面は認証一覧・ライセンス詳細のAPIを使う');
+ok(!/call\("admin_listContracts"/.test(adminHtml),'画面は旧契約一覧（admin_listContracts）を呼ばない');
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);
