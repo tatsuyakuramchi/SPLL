@@ -14,6 +14,10 @@
  *   /?page=badge&t=…        認証バッジの取得
  *   /?page=verify&id=&c=…   ライセンス認証の確認（QRの遷移先）
  *
+ * Webhook の中継（GASの302を追えない送信側のため。中身は見ずGAS②へそのまま渡す）
+ *   POST /hooks/formrun     formrun（フォーム送信）
+ *   POST /hooks/cloudsign   CloudSign（締結）
+ *
  * 読み取り系は短時間キャッシュするため、表示のたびにスプレッドシートを読まない。
  * 依存パッケージなし（Node 22 の http と fetch のみ）。
  */
@@ -97,6 +101,44 @@ function readBody(request){
 
 function gasUrlFor(fn){
   return RPC_TARGETS[fn] === 'workflow' ? GAS_WORKFLOW_URL : GAS_PORTAL_URL;
+}
+
+/**
+ * Webhook の中継口（/hooks/formrun・/hooks/cloudsign）。
+ *
+ * GAS のウェブアプリは POST に対して必ず script.googleusercontent.com へ 302 を返す。
+ * リダイレクトを追わない送信側（formrun のテスト送信など）は、GAS が正しく受け取っていても
+ * 「送信失敗」と判定してしまう。ここが代わりにリダイレクトを追い、送信側へは素直な 200 を返す。
+ *
+ * 中身は見ない・書き換えない。本文はそのまま GAS② へ渡し、検証（共有秘密・改変検知・冪等）も
+ * 受信記録も GAS 側の実装がそのまま行う。クエリ（?key= など）も落とさずに引き継ぐ。
+ */
+const HOOK_PROVIDERS = { '/hooks/formrun': 'formrun', '/hooks/cloudsign': '' };
+const HOOK_PASSTHROUGH_PARAMS = ['key', 'sig', 'signature'];
+
+function hookTargetUrl(provider, incomingParams){
+  const base = GAS_WORKFLOW_URL;
+  if(!base) throw new Error('GAS_WORKFLOW_URL が未設定です');
+  const url = new URL(base);
+  if(provider) url.searchParams.set('hook', provider);
+  HOOK_PASSTHROUGH_PARAMS.forEach((k) => {
+    const v = incomingParams && incomingParams.get(k);
+    if(v) url.searchParams.set(k, v);
+  });
+  return url.toString();
+}
+
+/** 中継1件。GASの応答本文（'ok' / 'dup' / 'accepted-manual-review' など）をそのまま返す。 */
+async function forwardHook(provider, rawBody, contentType, incomingParams, fetchImpl){
+  const doFetch = fetchImpl || fetch;
+  const res = await doFetch(hookTargetUrl(provider, incomingParams), {
+    method: 'POST',
+    headers: { 'Content-Type': contentType || 'application/json' },
+    body: rawBody === undefined || rawBody === null ? '' : String(rawBody),
+    redirect: 'follow'
+  });
+  const text = await res.text();
+  return { status: res.status, text: String(text || '') };
 }
 
 /** GASへ1往復。応答が読めた場合だけ本文を返し、通信そのものが失敗したら例外を投げる。 */
@@ -211,6 +253,30 @@ function createServer(options){
       return send(response, out.status, 'application/json; charset=utf-8', JSON.stringify(out.body), { 'Cache-Control': 'no-store' });
     }
 
+    // Webhook の中継（formrun / CloudSign）。GAS の 302 をここで吸収し、送信側へは 200 を返す。
+    if(Object.prototype.hasOwnProperty.call(HOOK_PROVIDERS, pathname)){
+      const provider = HOOK_PROVIDERS[pathname];
+      // 疎通確認（送信側の URL 検証・ヘルスチェック）。GAS へは出さない
+      if(request.method === 'GET' || request.method === 'HEAD')
+        return send(response, 200, 'text/plain; charset=utf-8', request.method === 'HEAD' ? '' : 'ok', { 'Cache-Control': 'no-store' });
+      if(request.method !== 'POST')
+        return send(response, 405, 'text/plain; charset=utf-8', 'Method Not Allowed', { Allow: 'GET, HEAD, POST' });
+
+      let raw;
+      try{ raw = await readBody(request); }
+      catch(e){ return send(response, 413, 'text/plain; charset=utf-8', 'payload too large', { 'Cache-Control': 'no-store' }); }
+      try{
+        const out = await forwardHook(provider, raw, request.headers['content-type'], q, options.fetchImpl);
+        // GAS が受け取れていれば、業務上の判断（manual-review 等）に関わらず送信側へは成功を返す。
+        // 再送で直る種類の失敗ではないうえ、受信自体は Webhook_Receipts に記録済みだから。
+        return send(response, 200, 'text/plain; charset=utf-8', out.text || 'ok', { 'Cache-Control': 'no-store' });
+      }catch(error){
+        // 転送そのものに失敗（GAS へ届いていない）。送信側の再送に任せる
+        console.error('[hook] ' + pathname + ' の中継に失敗しました: ' + String((error && error.message) || error));
+        return send(response, 502, 'text/plain; charset=utf-8', 'upstream unavailable', { 'Cache-Control': 'no-store' });
+      }
+    }
+
     if(request.method !== 'GET' && request.method !== 'HEAD')
       return send(response, 405, 'text/plain; charset=utf-8', 'Method Not Allowed', { Allow: 'GET, HEAD, POST' });
 
@@ -267,4 +333,5 @@ if(require.main === module){
   });
 }
 
-module.exports = { createServer, handleRpc, callGas, gasUrlFor, ALLOWED, CACHEABLE, RETRYABLE };
+module.exports = { createServer, handleRpc, callGas, gasUrlFor, ALLOWED, CACHEABLE, RETRYABLE,
+  HOOK_PROVIDERS, hookTargetUrl, forwardHook };

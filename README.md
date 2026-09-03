@@ -37,12 +37,16 @@ SPLL/
                     │  /api/rpc（共有鍵 PUBLIC_WEB_KEY）
                     ├──▶ GAS① portal    … 原作一覧・法務文書・申込作成・CloudSign FORM への引渡
                     └──▶ GAS② workflow  … 提出・案内・バッジ・検証（トークン認証）
-CloudSign / formrun ──▶ GAS② doPost（Webhook。署名・共有鍵で検証）
+CloudSign / formrun ──▶ Cloud Run /hooks/*（302を吸収する中継）──▶ GAS② doPost（署名・共有鍵で検証）
 ユーザー（社内）  ──▶ GAS③ admin（Workspace ドメイン限定）
                          └── 時間主導トリガー（GAS②）：5分・日次バッチ
 業務台帳：Google スプレッドシート（SS_MASTER＝原作マスタ／SS_OPS＝業務台帳）、提出物：Drive（SPLL-番号/）
 ```
 
+- Webhook は Cloud Run の `/hooks/formrun`・`/hooks/cloudsign` を送信先にできます。GAS のウェブアプリは POST に必ず
+  302 を返すため、リダイレクトを追わない送信側（formrun のテスト送信など）が失敗します。中継口が代わりに追い、
+  送信側へは 200 を返します。本文は書き換えず、検証・受信記録は GAS② の実装がそのまま行います。
+  GAS② の `/exec` を直接登録しても構いません（追える送信側なら同じ結果になります）。
 - 公開サイトの画面（`index.html` / `guide.html` / `upload.html`）は `spll_src` が正本で、Cloud Run のイメージにも同梱します。
   画面を直したら **GAS の再デプロイと Cloud Run の再ビルドの両方**が必要です。
 - GAS① と GAS② は `HANDOFF_SECRET` を共有し、申込 → FORM → 締結 Webhook の改変検知に使います。

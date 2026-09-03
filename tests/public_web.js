@@ -285,6 +285,48 @@ async function rpc(payload, opts){ return server.handleRpc(payload, opts || {});
     '未知のパスは申込窓口へ戻す（導線を袋小路にしない）');
   await new Promise((r) => srv.close(r));
 
+  // ---- 7. Webhook の中継口 ----
+  // GAS は POST に 302 を返すため、リダイレクトを追わない送信側（formrun のテスト送信）が失敗する。
+  // 中継口が代わりにリダイレクトを追い、送信側へは 200 を返すことを確かめる。
+  ok(server.hookTargetUrl('formrun', new URLSearchParams()).indexOf('hook=formrun') > 0,
+    'formrun の転送先には ?hook=formrun を付ける');
+  ok(server.hookTargetUrl('', new URLSearchParams()).indexOf('hook=') < 0,
+    'CloudSign は hook パラメータを付けない（GAS②の既定の受け口）');
+  ok(server.hookTargetUrl('formrun', new URLSearchParams('key=s3cret&page=guide')).indexOf('key=s3cret') > 0,
+    '共有秘密（?key=）は転送先へ引き継ぐ');
+  ok(server.hookTargetUrl('formrun', new URLSearchParams('page=guide')).indexOf('page=guide') < 0,
+    '共有秘密以外のクエリは引き継がない');
+
+  const hookCalls = [];
+  const hookSrv = server.createServer({ fetchImpl: async (url, init) => {
+    hookCalls.push({ url: String(url), body: String(init.body), type: init.headers['Content-Type'], redirect: init.redirect });
+    if(String(url).indexOf('key=make-it-fail') > 0) throw new Error('fetch failed');
+    return { status: 200, text: async () => 'ok' };
+  } });
+  await new Promise((r) => hookSrv.listen(0, r));
+  const hookOrigin = 'http://127.0.0.1:' + hookSrv.address().port;
+
+  const probe = await fetch(hookOrigin + '/hooks/formrun');
+  ok(probe.status === 200 && (await probe.text()) === 'ok' && hookCalls.length === 0,
+    'GET は疎通確認として200（GASへは出さない）');
+
+  const payload = JSON.stringify({ fields: [{ key: '_field_6', label: 'handoff_token', value: 'x' }] });
+  const posted = await fetch(hookOrigin + '/hooks/formrun?key=s3cret', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload });
+  ok(posted.status === 200 && (await posted.text()) === 'ok', 'POST は転送してGASの応答をそのまま返す');
+  ok(hookCalls.length === 1 && hookCalls[0].body === payload, '本文は書き換えずそのまま渡す');
+  ok(hookCalls[0].url.indexOf('hook=formrun') > 0 && hookCalls[0].url.indexOf('key=s3cret') > 0, '転送先は GAS② の ?hook=formrun（鍵つき）');
+  ok(hookCalls[0].redirect === 'follow', 'GAS の 302 を中継口が追う（送信側に302を見せない）');
+
+  const cs = await fetch(hookOrigin + '/hooks/cloudsign', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"documentID":"DOC-1"}' });
+  ok(cs.status === 200 && hookCalls.length === 2 && hookCalls[1].url.indexOf('hook=') < 0, 'CloudSign も同じ形で中継する');
+
+  const bad = await fetch(hookOrigin + '/hooks/formrun?key=make-it-fail', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  ok(bad.status === 502, '転送に失敗したら 502（送信側の再送に任せる）');
+  await new Promise((r) => hookSrv.close(r));
+
   console.log('\nPUBLIC WEB RESULT: ' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })();
