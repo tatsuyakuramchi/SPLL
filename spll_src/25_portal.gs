@@ -27,6 +27,7 @@ function api_getApplyConfig(){
     refParam:  prop_('FORM_REF_PARAM')   || 'application_ref',   // 後方互換（hiddenMap未設定時）
     hiddenMap: parseJson_(prop_('FORM_HIDDEN_MAP'), {}),
     maxWorks:  parseInt(prop_('FORM_MAX_WORKS') || '5', 10) || 5,
+    officeContact: getConfig_('OFFICE_CONTACT',''),   // ヘッダーの「お問い合わせ」の宛先
     corporate: corporateInquiry_()   // 法人は本窓口の対象外（別ルート＝個別契約）
   };
 }
