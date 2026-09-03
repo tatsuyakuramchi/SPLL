@@ -154,6 +154,43 @@ td .mono{color:var(--soft);}
 
 footer{border-top:1px solid var(--line);padding-top:22px;font-size:12px;color:var(--faint);}
 
+/* ---- 印刷・PDF ---- */
+.printonly{display:none;}
+@media print{
+  :root{ --paper:#FFFFFF; --surface:#FFFFFF; --raise:#F7F6F2; --shadow:none; }
+  body{background:#fff;font-size:10.5pt;line-height:1.75;}
+  .wrap{display:block;max-width:none;}
+  nav{display:none;}
+  main{padding:0;max-width:none;}
+  header.top{padding:0 0 22px;margin-bottom:26px;break-after:page;}
+  header.top h1{font-size:30pt;}
+  .printonly{display:block;}
+  /* 章は改ページから始める（0章は表紙の続き） */
+  section{break-before:page;margin-bottom:24px;}
+  section#s0{break-before:auto;}
+  h2{font-size:17pt;margin-bottom:16px;}
+  h3{font-size:12.5pt;margin:20px 0 8px;break-after:avoid;}
+  h4{font-size:11pt;margin:16px 0 6px;break-after:avoid;}
+  figure,.mail,.note,.tw,.flow,.steps{break-inside:avoid;}
+  figure{margin:12px 0 16px;}
+  /* 縦に長い画面は1ページに収まる高さまで縮める（幅・高さの両方に上限をかけ、比率は保つ） */
+  figure img{box-shadow:none;width:auto;height:auto;max-width:100%;max-height:20.5cm;margin:0 auto;}
+  figcaption{margin-top:6px;font-size:9pt;}
+  table{font-size:9.5pt;}
+  th,td{padding:6px 10px;}
+  .mail pre{font-size:9pt;line-height:1.7;}
+  .flow .row > div{min-height:0;padding:6px 12px;font-size:9.5pt;}
+  a{color:inherit;text-decoration:none;}
+  footer{break-inside:avoid;}
+}
+/* 印刷時だけ出す目次（画面では左の目次があるので不要） */
+.ptoc{border:1px solid var(--line);border-radius:10px;padding:18px 22px;margin:26px 0 0;}
+.ptoc h2{font-size:15pt;border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:12px;}
+.ptoc ol{list-style:none;padding:0;margin:0;columns:2;column-gap:34px;}
+.ptoc li{font-size:10.5pt;margin:2px 0;break-inside:avoid;}
+.ptoc li .n{font-family:"IBM Plex Mono";color:var(--faint);font-size:9.5pt;margin-right:8px;}
+.ptoc li.s{padding-left:26px;font-size:9.5pt;color:var(--soft);}
+
 @media(max-width:900px){
   .wrap{grid-template-columns:1fr;}
   nav{position:static;height:auto;border-right:none;border-bottom:1px solid var(--line);padding:18px;}
@@ -204,6 +241,33 @@ footer{border-top:1px solid var(--line);padding-top:22px;font-size:12px;color:va
   <p>TRPG二次創作 利用許諾プラットフォームの画面遷移と操作方法をまとめたものです。掲載している画面は、実際に配信しているHTML（公開サイト／管理コンソール）をそのまま表示して撮影したものです。<b>表示されている番号・氏名・作品名・金額はすべてサンプル</b>です。</p>
   <div class="meta">
     <span>v1.0</span><span>申請者＝<b>クリエーター</b>／事務局担当者＝<b>ユーザー</b></span><span>画面数 30</span>
+  </div>
+
+  <div class="ptoc printonly">
+    <h2>目次</h2>
+    <ol>
+      <li><span class="n">0</span>システムの構成と入口</li>
+      <li><span class="n">1</span>全体の流れ</li>
+      <li><span class="n">2</span>クリエーター側の画面遷移</li>
+      <li class="s">2.1 申込窓口・トップページ</li>
+      <li class="s">2.2 原作をさがす</li>
+      <li class="s">2.3 申込ウィザード（全4ステップ）</li>
+      <li class="s">2.4 手続き案内ページ</li>
+      <li class="s">2.5 作品提出ページ</li>
+      <li class="s">2.6 認証バッジのダウンロード</li>
+      <li class="s">2.7 QRコードから開く検証ページ</li>
+      <li><span class="n">3</span>事務局側の画面遷移と操作</li>
+      <li class="s">3.1 ダッシュボード</li>
+      <li class="s">3.2 ライセンス一覧</li>
+      <li class="s">3.3 ライセンス詳細</li>
+      <li class="s">3.4 作品審査</li>
+      <li class="s">3.5 認証管理</li>
+      <li class="s">3.6 事務局運営</li>
+      <li class="s">3.7 設定</li>
+      <li><span class="n">4</span>自動送信されるメール</li>
+      <li><span class="n">5</span>逆引き：こんなときは</li>
+      <li><span class="n">6</span>状態の一覧</li>
+    </ol>
   </div>
 </header>
 
