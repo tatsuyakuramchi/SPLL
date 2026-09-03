@@ -295,8 +295,14 @@
     <p class="lead">創作・公開・頒布のときに守っていただきたいことをまとめています。</p>
     <div class="homeband" id="guideline">
       <h2>テーブルトークRPGに関する二次創作活動のガイドライン策定について</h2>
-      <p>本制度は、二次創作活動に関するガイドラインの一部として運用されています。ガイドラインは、著作権法上のトラブルを未然に防ぎ、クリエーターの皆様に安心して創作を楽しんでいただくことを目的としており、自由な創作活動を制限する意図はありません。権利表記の方法、禁止行為、データ転載の扱いなどを定めています。</p>
-      <p class="mono" style="font-size:11px;color:var(--soft);">※ ガイドライン本文・参加パブリッシャの正式な記載は確定前です。</p>
+      <p>ガイドラインは、著作権法上のトラブルを未然に防ぎ、クリエーターの皆様に安心して創作を楽しんでいただくことを目的としており、自由な創作活動を制限する意図はありません。権利表記の方法、禁止行為、データ転載の扱いなどを定めています。</p>
+      <!-- 本文は管理コンソールで公開した版（Legal_Documents の GUIDELINE）を表示する。申込時に同意を取るものと同一。 -->
+      <details id="guidelineBox" style="margin-top:6px;">
+        <summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--brand2);padding:6px 0;">ガイドライン全文を読む</summary>
+        <div class="legaltext" id="guidelineFull" style="margin-top:10px;max-height:420px;"></div>
+        <div class="scrollhint">▲ 枠内をスクロールしてご覧いただけます</div>
+      </details>
+      <p class="mono" style="font-size:11px;color:var(--soft);">※ 参加パブリッシャの正式な記載は確定前です。</p>
       <div class="partners">
         <span class="ptag">参加パブリッシャ（例）</span>
         <span class="ptag">アークライト</span><span class="ptag">KADOKAWA</span><span class="ptag">グループSNE</span><span class="ptag">新紀元社</span><span class="ptag">F.E.A.R.</span><span class="ptag">冒険企画局</span>
@@ -596,7 +602,15 @@ const DEFAULT_TERMS_TEMPLATE=`
 <h4>第6条（解除）</h4><ol><li>表明の虚偽、本規約違反その他の事由があるときは、本許諾を解除できます。［解除の遡及／非遡及は別途規定・法務確定前］</li></ol>
 <h4>第7条（準拠法・管轄）</h4><ol><li>日本法に準拠し、当社所在地を管轄する裁判所を専属的合意管轄とします。</li></ol>`;
 
-let LEGAL = { privacy: DEFAULT_PRIVACY, termsTemplate: DEFAULT_TERMS_TEMPLATE };
+const DEFAULT_GUIDELINE = `
+<h4>SPLL二次創作ガイドライン（未登録）</h4>
+<p>ガイドライン本文がまだ登録されていません。管理コンソール「設定 → 同意文・規約 → SPLL二次創作ガイドライン」で公開してください。</p>`;
+let LEGAL = { privacy: DEFAULT_PRIVACY, termsTemplate: DEFAULT_TERMS_TEMPLATE, guideline: DEFAULT_GUIDELINE };
+/** トップページのガイドライン全文欄。公開版が読み込まれたら差し替える。 */
+function renderGuideline(){
+  const box = document.getElementById("guidelineFull");
+  if(box) box.innerHTML = LEGAL.guideline || DEFAULT_GUIDELINE;
+}
 let LEGAL_META = { privacy_doc_id:"", terms_doc_id:"", guideline_doc_id:"", privacy_version:"", terms_version:"", guideline_version:"" };
 const CONSENT_SESSION_ID = "cs-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2,10);
 function fnv1a(s){ let h=0x811c9dc5; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=(h*0x01000193)>>>0; } return ("0000000"+h.toString(16)).slice(-8); }
@@ -765,6 +779,7 @@ loadLegal();
 loadWorks();
 loadViewerRole();
 loadUsageOptions();
+renderGuideline();
 </script>
 </body>
 </html>

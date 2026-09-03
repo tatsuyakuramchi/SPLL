@@ -79,9 +79,10 @@
       if(l.privacy) LEGAL.privacy = l.privacy;
       if(l.guideline){
         LEGAL.guideline = l.guideline;
-        // 取得が表示より後になった場合に備え、既に開いている確認画面を描画し直す
+        // 取得が表示より後になった場合に備え、既に開いている確認画面とトップの全文欄を描画し直す
         const box = document.getElementById('termsText');
         if(box) box.innerHTML = termsHTML();
+        if(typeof renderGuideline === 'function') renderGuideline();
       }
       LEGAL_META.guideline_doc_id = l.guideline_doc_id || '';
       LEGAL_META.guideline_version = l.guideline_version || '';
