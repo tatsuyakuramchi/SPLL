@@ -326,11 +326,12 @@ function issueBadge_(licenseId, certId, verifyUrl){
 /** バッジ1枚をSlidesで組版し presentationId を返す */
 function buildBadgeSlide_(badgeId, w, c, issuedAt){
   const templateId = prop_('BADGE_TEMPLATE_ID');
+  const licenseId = licenseLabelOfContract_(c);   // 印字するのは SPLL番号（契約IDは頒布物に出さない・P1-1）
   if(templateId){
     const copy = DriveApp.getFileById(templateId).makeCopy('SPLL_badge_' + badgeId);
     const pres = SlidesApp.openById(copy.getId());
     pres.replaceAllText('{{work_name}}', w.work_name || '');
-    pres.replaceAllText('{{license_id}}', c.contract_id || '');
+    pres.replaceAllText('{{license_id}}', licenseId);
     pres.replaceAllText('{{issued_at}}', issuedAt);
     pres.replaceAllText('{{credit}}', w.credit_text || '');
     pres.replaceAllText('{{verify_url}}', w.verify_url || '');
@@ -346,7 +347,7 @@ function buildBadgeSlide_(badgeId, w, c, issuedAt){
   t.getText().getTextStyle().setForegroundColor('#FFFFFF').setBold(true).setFontSize(28);
   t = slide.insertTextBox(w.work_name || '', 36, 120, 648, 70);
   t.getText().getTextStyle().setForegroundColor('#F4EBD8').setBold(true).setFontSize(24);
-  t = slide.insertTextBox('ライセンスID: ' + (c.contract_id || '') + '\n発行日: ' + issuedAt, 36, 205, 648, 70);
+  t = slide.insertTextBox('SPLL番号: ' + licenseId + '\n発行日: ' + issuedAt, 36, 205, 648, 70);
   t.getText().getTextStyle().setForegroundColor('#D7CFEC').setFontSize(14);
   t = slide.insertTextBox(w.credit_text || '', 36, 285, 648, 40);
   t.getText().getTextStyle().setForegroundColor('#EDEAF4').setFontSize(12);

@@ -624,7 +624,8 @@ ok(bbad._h.indexOf('無効')>=0,'不正トークンはバッジ拒否');
 geminiResponder=()=>({ overall_result:'REVIEW_REQUIRED', findings:[{ work_id:'WRK-ARK00012', rule_id:'=CMD()', severity:'MEDIUM',
   result:'REVIEW_REQUIRED', page:1, evidence:'=HYPERLINK("http://evil")', recommended_action:'+SUM(A1)対応を推奨' }] });
 const linkAI=G.admin_sendUploadLink(contract.contract_id);
-const subAI=G.web_submitWork(linkAI.token,{ title:'AI無害化テスト', filename:'ai.pdf', mimeType:'application/pdf', dataBase64:b64 });
+// 1ライセンス＝1作品：同じ提出の新しい版として出す（AI審査は版ごとに走る）
+const subAI=G.web_submitWork(linkAI.token,{ submission_id:sub1.submission_id, title:'AI無害化テスト', filename:'ai.pdf', mimeType:'application/pdf', dataBase64:b64 });
 const fAI=rows(OPS,'AI_Findings').slice(-1)[0];
 ok(fAI.evidence.charAt(0)==="'" && fAI.rule_id.charAt(0)==="'" && fAI.recommended_action.charAt(0)==="'",'AI出力の式文字を無害化（先頭引用符）');
 ok(fAI.recommended_action.indexOf('SUM')>=0,'recommended_action を保存');
@@ -926,8 +927,12 @@ ok(String(whRep.getContent())==='ok','再申込のFormRun受信が改変検知�
 
 
 // ============ 大容量作品の提出（専用Driveフォルダ受渡し） ============
-// 85. 受け口の払い出し：版ごとに空フォルダ＋編集リンク
-const bigLink=G.admin_sendUploadLink(contract.contract_id);
+// 85. 受け口の払い出し：版ごとに空フォルダ＋編集リンク（1ライセンス＝1作品なので、新しい案件で始める）
+const bigApp=mkApp(['WRK-ARK00012'],'書籍',docExtra);
+frPost(bigApp,'FR-BIG');
+G.doPost({parameter:{},postData:{contents:JSON.stringify({ document_id:'DOC-BIG', status:'COMPLETED', application_ref:bigApp.application_ref })}});
+const bigCtr=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-BIG');
+const bigLink=G.admin_sendUploadLink(bigCtr.contract_id);
 const opened=G.web_openDriveSubmission(bigLink.token,{ title:'大容量テスト作品（動画）' });
 ok(/^SUB-/.test(opened.submission_id)&&opened.version_no===1,'新規提出の受け口を作成');
 ok(/drive\.google\.com\/drive\/folders\//.test(opened.folder_url),'投入用フォルダURLを払い出す: '+opened.folder_url);
@@ -956,8 +961,10 @@ ok(fin.ai_applicable===true&&fin.ai_review_id,'PDFが含まれるためAI一次�
 let dupFin=false; try{ G.web_finalizeDriveSubmission(bigLink.token, opened.version_id); }catch(e){ dupFin=/既に提出が確定/.test(String(e.message)); }
 ok(dupFin,'確定済みの版は再確定できない（冪等）');
 
-// 87. AI審査できない形式だけの提出は人手審査へ回送
-const openedB=G.web_openDriveSubmission(bigLink.token,{ title:'立体データのみ' });
+// 87. AI審査できない形式だけの提出は人手審査へ回送（1ライセンス＝1作品なので、同じ提出の新しい版として出す）
+let secondNew=false; try{ G.web_openDriveSubmission(bigLink.token,{ title:'立体データのみ' }); }catch(e){ secondNew=/DATA_CONFLICT/.test(String(e.message))&&/新しい版として再提出/.test(String(e.message)); }
+ok(secondNew,'既に提出がある案件で2件目の新規提出（大容量）は拒否し、再提出を案内する');
+const openedB=G.web_openDriveSubmission(bigLink.token,{ submission_id:opened.submission_id });
 const folderB=G.DriveApp.getFolderById(rows(OPS,'Submission_Versions').find(v=>v.version_id===openedB.version_id).drive_folder_id);
 folderB._putDummy('model.stl','model/stl', 40*1024*1024);
 const finB=G.web_finalizeDriveSubmission(bigLink.token, openedB.version_id);
@@ -970,7 +977,7 @@ ok(pickedBlob&&pickedBlob.name==='設定資料.pdf','900MB動画が混在して�
 ok(G.resolveSubmissionBlob_({ version_id:openedB.version_id })===null,'読める形式が無い版はAI入力なし（人手審査）');
 
 // 88. 上限超過は受け付けない
-const openedC=G.web_openDriveSubmission(bigLink.token,{ title:'上限テスト' });
+const openedC=G.web_openDriveSubmission(bigLink.token,{ submission_id:opened.submission_id });
 const folderC=G.DriveApp.getFolderById(rows(OPS,'Submission_Versions').find(v=>v.version_id===openedC.version_id).drive_folder_id);
 folderC._putDummy('huge.zip','application/zip', 6*1024*1024*1024);
 let overSize=false; try{ G.web_finalizeDriveSubmission(bigLink.token, openedC.version_id); }catch(e){ overSize=/合計サイズが上限/.test(String(e.message)); }
@@ -986,11 +993,12 @@ ok(folderC.sharing&&folderC.sharing.access===G.DriveApp.Access.PRIVATE,'放置�
 // 90. 提出ページのコンテキストに大容量の案内値と再開情報が載る
 const bigCtx=G.web_getSubmitContext(bigLink.token);
 ok(bigCtx.upload_max_mb===20&&bigCtx.folder_max_gb===5&&bigCtx.folder_open_days===14,'提出ページへ上限・期限を配信');
-const openedD=G.web_openDriveSubmission(bigLink.token,{ title:'再開テスト' });
+const openedD=G.web_openDriveSubmission(bigLink.token,{ submission_id:opened.submission_id });
 const ctxResume=G.web_getSubmitContext(bigLink.token);
+ok(ctxResume.submissions.length===1,'提出ページの一覧は1件（1ライセンス＝1作品、版だけが増える）');
 const resumeV=(ctxResume.submissions.find(s=>s.submission_id===openedD.submission_id).versions||[]).find(v=>v.folder_status==='OPEN');
 ok(resumeV&&resumeV.version_id===openedD.version_id&&resumeV.folder_url,'未確定の受け口はページ再訪時に復帰できる');
-ok(!ctxResume.submissions.find(s=>s.submission_id===opened.submission_id).versions.some(v=>v.version_id),'確定済みの版は操作対象として返さない');
+ok(ctxResume.submissions[0].versions.filter(v=>v.folder_status!=='OPEN').every(v=>!v.version_id),'確定済みの版は操作対象として返さない');
 
 
 // ============ 締結後の「今後のお手続き」案内ページ ============
@@ -1240,7 +1248,7 @@ ok(/^v2:/.test(ai1.effective_version)&&ai1.effective_version!==ai0.effective_ver
 ok(G.buildReviewPrompt_(sampleRules).indexOf('クレジット表記の欠落')>=0,'審査は保存後のプロンプトを使う');
 // 審査ジョブに版が記録される（どの文面の結果か後から追える）
 const aiLink=G.admin_sendUploadLink(contract.contract_id);
-const aiSub=G.web_submitWork(aiLink.token,{ title:'プロンプト版テスト', filename:'p.pdf', mimeType:'application/pdf', dataBase64:b64 });
+const aiSub=G.web_submitWork(aiLink.token,{ submission_id:sub1.submission_id, title:'プロンプト版テスト', filename:'p.pdf', mimeType:'application/pdf', dataBase64:b64 });
 ok(rows(OPS,'AI_Review_Jobs').slice(-1)[0].prompt_version===ai1.effective_version,'審査ジョブに適用版を記録');
 
 // 110. 検証：空・長すぎ・{{rules}}欠落
@@ -2039,6 +2047,34 @@ G.admin_setCertEnabled(pfApp.license_id,false,'未入金');
 ok(lockWaits>pfLocks1&&lockHeld===0&&pfCerts()[0].status!=='ACTIVE'&&pfCase().certification_status===pfCerts()[0].status,'状態変更もロックの中で認証の行と台帳を揃える');
 G.LockService.getScriptLock=lockOrig;
 G.admin_setCertEnabled(pfApp.license_id,true,'入金確認');
+
+// ============ P1-1 / P1-3：バッジ本体は SPLL番号を印字・1ライセンス＝1作品 ============
+// 330. 生成される PNG（Slides の組版）に契約IDではなく SPLL番号が入る
+ok(G.licenseLabelOfContract_({ license_id:'SPLL-1', contract_id:'CTR-1' })==='SPLL-1'&&G.licenseLabelOfContract_({ contract_id:pfApp.license_id?rows(OPS,'Contracts').find(c=>c.license_id===pfApp.license_id).contract_id:'' })===pfApp.license_id
+  &&G.licenseLabelOfContract_({ contract_id:'CTR-LEGACY-NONE' })==='CTR-LEGACY-NONE','表示ラベルは license_id → 契約から解決 → 旧データだけ契約ID');
+const slideTexts=[], slidesCreateOrig2=G.SlidesApp.create;
+G.SlidesApp.create=function(n){ const p=slidesCreateOrig2(n); const s=p.getSlides()[0]; const ins=s.insertTextBox; s.insertTextBox=function(t){ slideTexts.push(String(t)); return ins.apply(s,arguments); }; p.getSlides=function(){ return [s]; }; return p; };
+const pfRot=G.admin_rotateCertCode(pfApp.license_id);   // ACTIVE なのでバッジを作り直す＝組版が走る
+G.SlidesApp.create=slidesCreateOrig2;
+const pfCtrId=rows(OPS,'Contracts').find(c=>c.license_id===pfApp.license_id).contract_id;
+ok(slideTexts.some(t=>t.indexOf('SPLL番号: '+pfApp.license_id)===0),'バッジ本体に SPLL番号を印字: '+slideTexts.find(t=>/SPLL番号/.test(t)));
+ok(!slideTexts.some(t=>t.indexOf(pfCtrId)>=0)&&!slideTexts.some(t=>/ライセンスID/.test(t)),'バッジ本体に契約IDは出さない');
+ok(slideTexts.some(t=>t.indexOf('検証: ')===0&&t.indexOf(pfRot.verify_url)>0),'検証URL（QRの内容）を印字');
+const src32=fs.readFileSync(path.join(__dirname,'..','spll_src','32_contract.gs'),'utf8');
+ok(/replaceAllText\('\{\{license_id\}\}',\s*licenseId\)/.test(src32)&&!/\{\{license_id\}\}',\s*c\.contract_id/.test(src32),'テンプレート差込 {{license_id}} も SPLL番号');
+
+// 331. 1ライセンス＝1作品。2件目の新規提出は拒否し、再提出（版）を案内する
+const oneLink=G.admin_sendUploadLink(pfApp.license_id);
+let oneErr='';
+try{ G.web_submitWork(oneLink.token,{ title:'別の作品', filename:'z.pdf', mimeType:'application/pdf', dataBase64:b64 }); }catch(e){ oneErr=String(e.message); }
+ok(/DATA_CONFLICT/.test(oneErr)&&/事前検証/.test(oneErr)&&/新しい版として再提出/.test(oneErr),'2件目の新規提出は拒否し、既存の提出名と再提出の案内を返す: '+oneErr.slice(0,60));
+ok(rows(OPS,'Submissions').filter(s=>s.license_id===pfApp.license_id).length===1,'Submissions は増えない');
+const oneRe=G.web_submitWork(oneLink.token,{ submission_id:pfSub.submission_id, title:'事前検証', filename:'z2.pdf', mimeType:'application/pdf', dataBase64:b64 });
+ok(oneRe.submission_id===pfSub.submission_id&&oneRe.version_no===2,'同じ提出の新しい版としては受け付ける');
+let oneDrive=false; try{ G.web_openDriveSubmission(oneLink.token,{ title:'別の大容量作品' }); }catch(e){ oneDrive=/DATA_CONFLICT/.test(String(e.message)); }
+ok(oneDrive,'大容量提出でも2件目の新規は拒否');
+const uploadHtml=fs.readFileSync(path.join(__dirname,'..','spll_src','upload.html'),'utf8');
+ok(/1つのライセンス（SPLL番号）で提出できる作品は1つ/.test(uploadHtml)&&/newOpt\.remove\(\)/.test(uploadHtml),'提出ページは既存提出があるとき「新しい作品」を選ばせない');
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

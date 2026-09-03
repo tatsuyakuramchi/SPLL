@@ -84,6 +84,18 @@ function validateUpload_(data){
 }
 
 /**
+ * 1ライセンス（SPLL番号）＝1つの二次創作作品（Submission）。修正・差し替えは同じ Submission の新しい版として出す。
+ * 認証（Certificate）は案件に1枚なので、提出が複数あると「どの作品の認証か」が曖昧になる（P1-3）。
+ * 別の作品を出すときは別のライセンス（新しい申込）になる。
+ */
+function assertNoOtherSubmission_(ref){
+  const existing = readRows_(ssOps_(),'Submissions').filter(function(s){ return belongsToLicense_(s, ref); });
+  if(!existing.length) return;
+  throw new Error('DATA_CONFLICT: このライセンスには既に提出「' + String(existing[0].title || existing[0].submission_id) +
+    '」があります。修正版は同じ提出の新しい版として再提出してください（1ライセンス＝1作品。別の作品は別の申込が必要です）。');
+}
+
+/**
  * 作品提出（新規 or 再提出）。data:
  *   { submission_id?（再提出時）, title, filename, mimeType, dataBase64, note }
  * 新規は Submission＋v1、再提出は既存Submission配下に新しい版を追加。
@@ -100,8 +112,9 @@ function web_submitWork(token, data){
   const contractId = ref.contractId, contract = ref.contract;
   const licenseId = ref.licenseId;
 
-  // 提出（新規 or 既存）。所属はSPLL番号で判定する
+  // 提出（新規 or 既存）。所属はSPLL番号で判定する。1ライセンス＝1作品：2件目の新規提出は受けない（再提出は版）
   let submissionId = data.submission_id || '';
+  if(!submissionId) assertNoOtherSubmission_(ref);
   let sub = submissionId ? readRows_(ssOps_(),'Submissions').find(s => s.submission_id===submissionId) : null;
   if(sub && !belongsToLicense_(sub, ref)) throw new Error('この提出は対象のライセンスに属していません。');
   const now = new Date().toISOString();
@@ -154,7 +167,7 @@ function serveBadge_(e){
   const b = tok ? badgeForToken_(token, false) : null;
   if(!b) return HtmlService.createHtmlOutput('<p style="font-family:sans-serif">リンクが無効か、有効期限が切れています。</p>').setTitle('SPLL 認証バッジ');
   const workNames = contractWorkNames_(b.contract_id).join('、');   // 契約単位（複数原作）
-  const licenseLabel = b.license_id || licenseIdOfContract_(b.contract_id) || b.contract_id;   // 表示は必ずSPLL番号
+  const licenseLabel = licenseLabelOfContract_(b);   // 表示は必ずSPLL番号
   const rows = [['大 (L)', b.png_l], ['中 (M)', b.png_m], ['小 (S)', b.png_s]].map(function(p){
     let dataUri = '';
     try{
@@ -197,7 +210,7 @@ function verifyCertificate_(certId, code){
     message: active ? 'このライセンスは有効です。' : 'このライセンスは現在有効ではありません（' + cert.status + '）。',
     work_names: contractWorkNames_(cert.contract_id),
     credit_texts: contractCreditTexts_(cert.contract_id),   // 契約書は「別途指定」。実際の文言はここで示す
-    license_id: cert.license_id || licenseIdOfContract_(cert.contract_id) || cert.contract_id,   // 表示はSPLL番号
+    license_id: licenseLabelOfContract_(cert),   // 表示はSPLL番号
     issued_at: cert.issued_at, status: cert.status
   };
 }
@@ -225,7 +238,7 @@ function serveVerify_(e){
 function web_getBadgeContext(token){
   const b = badgeForToken_(token, true);
   if(!b) return null;
-  return { license_id: b.license_id || licenseIdOfContract_(b.contract_id) || b.contract_id, badge_id:b.badge_id, issued_at:b.issued_at,
+  return { license_id: licenseLabelOfContract_(b), badge_id:b.badge_id, issued_at:b.issued_at,
     work_names: contractWorkNames_(b.contract_id).join('、'),
     sizes: [{ key:'l', label:'大 (L)' }, { key:'m', label:'中 (M)' }, { key:'s', label:'小 (S)' }] };
 }

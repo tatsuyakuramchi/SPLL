@@ -256,6 +256,15 @@ function licenseIdOfContract_(contractId){
 }
 
 /**
+ * 契約行の表示用ラベル＝SPLL番号。旧データで解決できないときだけ契約IDを返す。
+ * バッジPNG・案内・検証など、人の目に触れる場所は必ずこれを通す（契約IDを主表示にしない・P1-1）。
+ */
+function licenseLabelOfContract_(c){
+  if(!c) return '';
+  return String(c.license_id || licenseIdOfContract_(c.contract_id) || c.contract_id || '');
+}
+
+/**
  * SPLL番号か契約IDのどちらを渡されても { licenseId, contractId } に揃える。
  * 正本は license_id。contract_id は移行期間の互換（Drive フォルダ等の旧参照に使う）。
  * SPLL番号から契約を引くときは SIGNED の最新契約（無ければ空）。

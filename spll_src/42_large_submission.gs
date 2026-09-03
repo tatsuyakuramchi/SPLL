@@ -40,6 +40,7 @@ function web_openDriveSubmission(token, data){
   const now = new Date().toISOString();
   if(!sub){
     if(!String(data.title || '').trim()) throw new Error('VALIDATION_ERROR: 二次創作作品名は必須です。');
+    assertNoOtherSubmission_(ref);   // 1ライセンス＝1作品（再提出は版）
     submissionId = newId_('SUB');
     appendRow_(ssOps_(),'Submissions',{ submission_id:submissionId, contract_id:contractId,
       license_id: ref.licenseId,

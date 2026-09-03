@@ -138,14 +138,14 @@
     <div id="histCard" class="card" style="display:none;">
       <label class="f">これまでの提出</label>
       <div class="hist" id="hist"></div>
-      <p class="sub" style="margin:10px 0 0;font-size:11px;">是正要求を受けた作品は、下のフォームで同じ作品として再提出（新しい版）できます。</p>
+      <p class="sub" style="margin:10px 0 0;font-size:11px;">1つのライセンス（SPLL番号）で提出できる作品は1つです。修正版・差し替えは、下のフォームから同じ作品の<b>新しい版</b>として再提出してください。別の作品を頒布する場合は、別途お申込みください。</p>
     </div>
 
     <form id="form" class="card">
       <div id="notice"></div>
-      <label class="f">再提出する提出（新規提出はそのまま）</label>
+      <label class="f" id="reSubmitLabel">提出する作品</label>
       <select id="reSubmit" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:11px 13px;font-size:14px;">
-        <option value="">＋ 新しい作品として提出</option>
+        <option value="">＋ 新しい作品として提出（初回）</option>
       </select>
 
       <label class="f">二次創作作品名 <span class="must">必須</span></label>
@@ -245,8 +245,13 @@ function renderCtx(ctx){
           (s.status==='CORRECTION_REQUIRED'?'<br><span style="color:var(--soft)">下のフォームで「再提出：'+esc(s.title||s.submission_id)+'」を選び、修正版を提出してください。</span>':'')+
           '</div>';
       }
-      var o=document.createElement("option"); o.value=s.submission_id; o.textContent="再提出：「"+(s.title||s.submission_id)+"」"; sel.appendChild(o);
+      var o=document.createElement("option"); o.value=s.submission_id; o.textContent="再提出（新しい版）：「"+(s.title||s.submission_id)+"」"; sel.appendChild(o);
     });
+    // 1ライセンス＝1作品。既に提出があれば「新しい作品」は選べない（サーバー側でも拒否する）
+    var newOpt=sel.querySelector('option[value=""]'); if(newOpt) newOpt.remove();
+    sel.value=subs[0].submission_id;
+    document.getElementById("title").value=subs[0].title||"";
+    document.getElementById("reSubmitLabel").textContent="再提出する作品（修正版は新しい版として提出されます）";
   }
   sel.addEventListener("change",function(){
     var s=(CTX.submissions||[]).find(function(x){return x.submission_id===sel.value;});
