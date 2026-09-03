@@ -136,6 +136,19 @@ function logError_(code, where, message, detail){
   }catch(e){ /* エラーログ自体の失敗は無視（無限ループ防止） */ }
 }
 
+/**
+ * ブラウザから直接送れるファイルの上限（Config: UPLOAD_MAX_MB・既定20MB）。
+ * 経路の制約でここが天井になる：
+ *   ・Base64にすると約1.33倍に膨らみ、Cloud Run のリクエスト上限（31MB）に収める必要がある
+ *   ・AIへ渡すときも1リクエストに載せるため、あまり大きなファイルは審査に回せない
+ * これを超えるものは「大容量ファイルを提出」（Drive の受け口・既定5GB）を使う。
+ */
+const UPLOAD_MAX_MB_CAP = 22;
+function uploadMaxBytes_(){
+  const mb = num_(getConfig_('UPLOAD_MAX_MB','20')) || 20;
+  return Math.max(1, Math.min(UPLOAD_MAX_MB_CAP, mb)) * 1024 * 1024;
+}
+
 /** 外部入力のSpreadsheet数式インジェクション対策（修正設計書 §6.2）。先頭が =,+,-,@ なら文字列化。 */
 function sanitizeCell_(v){
   if(typeof v !== 'string') return v;

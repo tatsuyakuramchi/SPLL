@@ -286,8 +286,8 @@ async function rpc(payload, opts){ return server.handleRpc(payload, opts || {});
   await new Promise((r) => srv.close(r));
 
   // 作品提出は最大20MBのファイルを Base64 で載せる。上限が小さいと提出だけが通らない
-  ok(server.MAX_BODY_BYTES >= 20 * 1024 * 1024 * 4 / 3,
-    'リクエスト上限は20MBの提出（Base64で約27MB）を通せる: ' + Math.round(server.MAX_BODY_BYTES / 1024 / 1024) + 'MB');
+  ok(server.MAX_BODY_BYTES >= 22 * 1024 * 1024 * 4 / 3,
+    'リクエスト上限は22MB（GAS側の上限）の提出をBase64で通せる: ' + Math.round(server.MAX_BODY_BYTES / 1024 / 1024) + 'MB');
   const bigSrv = server.createServer({ fetchImpl: async () => ({ status: 200, text: async () => JSON.stringify({ ok: true, result: { submission_id: 'SUB-1' } }) }) });
   await new Promise((r) => bigSrv.listen(0, r));
   const bigOrigin = 'http://127.0.0.1:' + bigSrv.address().port;

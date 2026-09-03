@@ -578,6 +578,44 @@ function admin_issueGuideLink(idOrLicense){ const actor = requireRole_(['OPERATI
     contact_email: c.contact_email || kase.contact_email || '', contact_email_source: c.contact_email_source || '' };
 }
 
+// ---- 作品提出の受け入れ条件（Config）----
+/**
+ * 直接アップロードの上限は UPLOAD_MAX_MB_CAP（22MB）が天井。
+ * Base64で約1.33倍に膨らみ、公開サイト（Cloud Run）のリクエスト上限に収める必要があるため。
+ * これを超える作品は「大容量ファイルを提出」（Driveの受け口）で受ける。
+ */
+const SUBMIT_CONFIG_KEYS = [
+  ['upload_max_mb','UPLOAD_MAX_MB','20'],
+  ['folder_max_files','SUBMIT_FOLDER_MAX_FILES','50'],
+  ['folder_max_gb','SUBMIT_FOLDER_MAX_GB','5'],
+  ['folder_open_days','SUBMIT_FOLDER_OPEN_DAYS','14']
+];
+const SUBMIT_CONFIG_RANGES = {
+  upload_max_mb:    { min:1, max:UPLOAD_MAX_MB_CAP, label:'直接アップロードの上限（MB）' },
+  folder_max_files: { min:1, max:500,  label:'大容量提出のファイル数上限' },
+  folder_max_gb:    { min:1, max:100,  label:'大容量提出の合計サイズ上限（GB）' },
+  folder_open_days: { min:1, max:180,  label:'投入用リンクの開放日数' }
+};
+function admin_getSubmitConfig(){ requireRole_([]);
+  const out = { upload_max_mb_cap: UPLOAD_MAX_MB_CAP };
+  SUBMIT_CONFIG_KEYS.forEach(function(x){ out[x[0]] = getConfig_(x[1], x[2]); });
+  return out;
+}
+function admin_saveSubmitConfig(c){ const actor = requireRole_(['SYSTEM_ADMIN','OPERATIONS']);
+  c = c || {};
+  const changed = [];
+  SUBMIT_CONFIG_KEYS.forEach(function(x){
+    if(c[x[0]] === undefined) return;
+    const r = SUBMIT_CONFIG_RANGES[x[0]];
+    const v = num_(c[x[0]]);
+    if(!v || v < r.min || v > r.max)
+      throw new Error('VALIDATION_ERROR: ' + r.label + ' は ' + r.min + '〜' + r.max + ' の範囲で指定してください（指定値: ' + c[x[0]] + '）');
+    if(String(v) !== String(getConfig_(x[1], x[2]))){ setConfig_(x[1], String(v)); changed.push(x[0]); }
+  });
+  logEvent_('config', 'SUBMIT_LIMITS', actor.email, null, { changed: changed });
+  return admin_getSubmitConfig();
+}
+
 // ---- 申込窓口の案内先（Config・環境ごとに切替可能） ----
 /**
  * 申込窓口の経路別フォームURLと、法人の退避先（個別契約の問い合わせ窓口）。

@@ -417,6 +417,22 @@
     <!-- AI一次審査 -->
     <div class="setpane" id="p-ai">
       <div class="panel">
+        <div class="ph"><h3>作品提出の受け入れ条件</h3><span class="hint">Config（台帳）／保存後の提出から適用</span></div>
+        <div class="pbody">
+          <p class="setnote">提出ページで受け付けるファイルの上限です。<b>直接アップロードは経路の制約で上限があります</b>（Base64で約1.33倍に膨らみ、公開サイトのリクエスト上限に収める必要があるため）。これを超える作品は「大容量ファイルを提出」（専用Driveフォルダ）で受け取ります。AI一次審査に回せるのは、直接アップロードの上限以内のPDF・PNG・JPEGです。</p>
+          <div class="grid2">
+            <div class="fld"><label>直接アップロードの上限（MB） <span class="h" id="sc-cap">UPLOAD_MAX_MB</span></label><input id="sc-upload_max_mb" type="number" min="1" placeholder="20"></div>
+            <div class="fld"><label>投入用リンクの開放日数 <span class="h">SUBMIT_FOLDER_OPEN_DAYS（超過で自動的に共有解除）</span></label><input id="sc-folder_open_days" type="number" min="1" placeholder="14"></div>
+          </div>
+          <div class="grid2">
+            <div class="fld"><label>大容量提出のファイル数上限 <span class="h">SUBMIT_FOLDER_MAX_FILES</span></label><input id="sc-folder_max_files" type="number" min="1" placeholder="50"></div>
+            <div class="fld"><label>大容量提出の合計サイズ上限（GB） <span class="h">SUBMIT_FOLDER_MAX_GB</span></label><input id="sc-folder_max_gb" type="number" min="1" placeholder="5"></div>
+          </div>
+          <div class="note" id="sc-status" style="margin:0"></div>
+        </div>
+        <div class="pfoot"><button class="save" onclick="saveSubmitConfig()">提出の上限を保存</button></div>
+      </div>
+      <div class="panel">
         <div class="ph"><h3>AI一次審査のプロンプト</h3><span class="hint">Config: AI_REVIEW_PROMPT ／ 保存後の提出から適用</span></div>
         <div class="pbody">
           <p class="setnote">提出作品をGeminiへ渡すときの指示文です。<b><span class="mono">{{rules}}</span> の位置に、対象原作のルール・契約条件がJSONで差し込まれます</b>（書き忘れても末尾へ自動付与されます）。出力の形式（総合結果・指摘一覧など）はサーバー側のスキーマで固定しているため、文面を変えても壊れません。</p>
@@ -656,6 +672,7 @@ var _mFee = [
 ];
 var _mDS = {SS_MASTER:"",SS_OPS:"",DRIVE_ROOT:"",GCP_PROJECT:"",GCP_REGION:"",GEMINI_MODEL:"",
   defaults:{SS_MASTER:"PUT_WORKS_MASTER_SPREADSHEET_ID",SS_OPS:"PUT_OPS_SPREADSHEET_ID",DRIVE_ROOT:"PUT_SHARED_DRIVE_FOLDER_ID",GCP_PROJECT:"PUT_GCP_PROJECT_ID",GCP_REGION:"us-central1",GEMINI_MODEL:"gemini-2.5-flash"}};
+var _mSubmit={upload_max_mb:"20",folder_max_files:"50",folder_max_gb:"5",folder_open_days:"14"};
 var _mAiDefault="あなたは審査者ではなく一次スクリーナーです。根拠箇所を示し、不明は不明としてください。\n本提出作品は、複数の原作を同時に利用している可能性があります。\n各指摘(finding)には、どの原作(work_id)のルールに関するものかを必ず付与してください。\n次の原作別ルールと契約条件に対する適合候補・要確認・高リスク候補を抽出してください。\n{{rules}}";
 var _mAiPrompt=_mAiDefault;
 var _mGuide = {office_contact:"spll@example.com",workflow_url:"",
@@ -683,6 +700,8 @@ var MOCK = {
   admin_getIntegrationConfig:function(){ return _mInt; },
   admin_saveCloudSignConfig:function(c){ _mInt.cloudsign.client_id=c.client_id; _mInt.cloudsign.template_id=c.template_id; _mInt.cloudsign.callback_url=c.callback_url; _mInt.cloudsign.sandbox=c.sandbox; if(c.secret) _mInt.cloudsign.secret_set=true; return true; },
   admin_saveFormRunConfig:function(c){ _mInt.formrun.form_url=c.form_url; _mInt.formrun.field_map=c.field_map; _mInt.formrun.ref_param=c.ref_param; _mInt.formrun.hidden_map=c.hidden_map; _mInt.formrun.max_works=c.max_works; if(c.webhook_secret) _mInt.formrun.webhook_secret_set=true; return true; },
+  admin_getSubmitConfig:function(){ return Object.assign({upload_max_mb_cap:22}, _mSubmit); },
+  admin_saveSubmitConfig:function(c){ Object.keys(c||{}).forEach(function(k){ _mSubmit[k]=c[k]; }); return Object.assign({upload_max_mb_cap:22}, _mSubmit); },
   admin_getAiConfig:function(){ return { prompt:_mAiPrompt, is_default:_mAiPrompt===_mAiDefault, default_prompt:_mAiDefault,
     version_label:"v1", effective_version:"v1:1a2b3c4d", model:"gemini-2.0-flash", region:"asia-northeast1", project_set:true,
     schema_fields:["overall_result","risk_score","human_review_required","findings"] }; },
@@ -700,7 +719,7 @@ var MOCK = {
 
 // ===== 設定ロード =====
 var settingsLoaded = false;
-function loadSettings(){ if(settingsLoaded) return; settingsLoaded=true; loadLegal(); loadWorksPane(); loadFeePane(); loadIntegration(); loadGuideConfig(); loadAiConfig(); loadXConfig(); loadBadgeConfig(); loadAdminAccess(); }
+function loadSettings(){ if(settingsLoaded) return; settingsLoaded=true; loadLegal(); loadWorksPane(); loadFeePane(); loadIntegration(); loadGuideConfig(); loadSubmitConfig(); loadAiConfig(); loadXConfig(); loadBadgeConfig(); loadAdminAccess(); }
 
 // 同意文・規約（PRIVACY／GUIDELINE／TERMS の3文書・文書ごとに版管理）
 var LEGAL_TYPES=["PRIVACY","GUIDELINE","TERMS"];
@@ -857,6 +876,23 @@ function loadIntegration(){
   });
   loadPortalRouting();
 }
+// ---- 作品提出の受け入れ条件 ----
+var SC_FIELDS=["upload_max_mb","folder_max_files","folder_max_gb","folder_open_days"];
+function loadSubmitConfig(){
+  call("admin_getSubmitConfig",[],function(c){
+    if(!c) return;
+    SC_FIELDS.forEach(function(k){ var el=$("sc-"+k); if(el) el.value=c[k]||""; });
+    var cap=$("sc-cap"); if(cap) cap.textContent="UPLOAD_MAX_MB（上限 "+esc(c.upload_max_mb_cap)+"MB）";
+    var el=$("sc-status"); if(el) el.innerHTML="提出ページには「PDF・PNG・JPEG／"+esc(c.upload_max_mb)+
+      "MBまで」「専用フォルダ：最大"+esc(c.folder_max_files)+"ファイル・合計"+esc(c.folder_max_gb)+
+      "GB・"+esc(c.folder_open_days)+"日間有効」と表示されます。";
+  });
+}
+function saveSubmitConfig(){
+  var c={}; SC_FIELDS.forEach(function(k){ var el=$("sc-"+k); if(el&&el.value!=="") c[k]=el.value; });
+  call("admin_saveSubmitConfig",[c],function(){ toast("提出の上限を保存しました"); loadSubmitConfig(); });
+}
+
 // ---- AI一次審査のプロンプト ----
 var _aiDefaultPrompt="";
 function loadAiConfig(){

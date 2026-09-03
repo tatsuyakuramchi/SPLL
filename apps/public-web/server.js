@@ -34,11 +34,11 @@ const CACHE_TTL_MS = Number(process.env.CACHE_TTL_SECONDS || 60) * 1000;
 const APPLY_LIMIT = Number(process.env.APPLY_RATE_LIMIT || 5);        // 申込作成／IP／時間
 /**
  * リクエスト本文の上限。
- * 作品提出（web_submitWork）は最大20MBのファイルを Base64 で載せるため、
- * 20MB × 4/3（Base64の膨張）＋ JSONの分の余裕をとる。ここを小さくすると、
- * 提出だけが「応答を解釈できませんでした」で落ちる（GASまで届かない・届いても壊れる）。
+ * 作品提出（web_submitWork）はファイルを Base64 で載せる。GAS側の上限は Config の UPLOAD_MAX_MB
+ * （既定20MB・上限22MB）なので、22MB × 4/3（Base64の膨張）＋ JSONの分の余裕をとる。
+ * ここを小さくすると、提出だけが「応答を解釈できませんでした」で落ちる（GASまで届かない・届いても壊れる）。
  */
-const MAX_BODY_BYTES = 28 * 1024 * 1024;
+const MAX_BODY_BYTES = 31 * 1024 * 1024;
 
 /** キャッシュしてよい＝副作用のない読み取り。トークンで内容が変わるものは含めない。 */
 const CACHEABLE = new Set([

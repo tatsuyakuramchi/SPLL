@@ -162,7 +162,7 @@ function scanSubmissionFolder_(folderId){
     out.files.push({ id:f.getId(), name:name, size:size, mime:mime });
     out.totalBytes += size;
     if(/^(application\/pdf|image\/png|image\/jpeg)$/.test(mime) || /\.(pdf|png|jpe?g)$/i.test(name)){
-      if(size <= UPLOAD_MAX_BYTES) out.screenable = true;   // AIへ渡せる形式・サイズが1つでもあるか
+      if(size <= uploadMaxBytes_()) out.screenable = true;   // AIへ渡せる形式・サイズが1つでもあるか
     }
   }
   return out;

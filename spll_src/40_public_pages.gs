@@ -54,13 +54,12 @@ function web_getSubmitContext(token){
     badge_url:badgeUrl, cert_status:(cert ? cert.status : 'NONE'),
     expires_at:String(tok.expires_at||'').slice(0,10), remaining_uploads:remaining,
     // 大容量提出（専用Driveフォルダ）の案内値
-    upload_max_mb: Math.round(UPLOAD_MAX_BYTES/1024/1024),
+    upload_max_mb: Math.round(uploadMaxBytes_()/1024/1024),
     folder_max_files: lim.maxFiles, folder_max_gb: Math.round(lim.maxBytes/(1024*1024*1024)),
     folder_open_days: lim.openDays };
 }
 
 /** アップロードのサーバー側検証（修正設計書 SEC-05/§6.3）：サイズ・拡張子・MIME・マジックバイト */
-const UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
 const UPLOAD_TYPES = {
   pdf:  { mimes:['application/pdf'], magic:function(b){ return b.length>4 && b[0]===0x25 && b[1]===0x50 && b[2]===0x44 && b[3]===0x46; } },   // %PDF
   png:  { mimes:['image/png'],       magic:function(b){ return b.length>8 && (b[0]&255)===0x89 && b[1]===0x50 && b[2]===0x4E && b[3]===0x47; } },
@@ -75,7 +74,9 @@ function validateUpload_(data){
   let bytes;
   try{ bytes = Utilities.base64Decode(data.dataBase64); }catch(e){ throw new Error('VALIDATION_ERROR: ファイルデータを読み取れません。'); }
   if(!bytes || !bytes.length) throw new Error('VALIDATION_ERROR: 空のファイルは提出できません。');
-  if(bytes.length > UPLOAD_MAX_BYTES) throw new Error('VALIDATION_ERROR: ファイルが20MBを超えています（' + Math.round(bytes.length/1024/1024) + 'MB）。');
+  const maxBytes = uploadMaxBytes_();
+  if(bytes.length > maxBytes) throw new Error('VALIDATION_ERROR: ファイルが' + Math.round(maxBytes/1024/1024) + 'MBを超えています（' +
+    Math.round(bytes.length/1024/1024) + 'MB）。大容量ファイルの提出をご利用ください。');
   const mime = String(data.mimeType||'').toLowerCase();
   if(mime && rule.mimes.indexOf(mime) < 0) throw new Error('VALIDATION_ERROR: MIMEタイプが拡張子と一致しません: ' + mime);
   const head = []; for(var i=0;i<Math.min(16,bytes.length);i++){ var v=bytes[i]; head.push(v<0 ? v+256 : v); }

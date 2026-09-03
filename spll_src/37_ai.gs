@@ -142,7 +142,7 @@ function runAiReview_(aiReviewId){
 /**
  * ジョブの提出ファイルをBlobで取得。作品ファイルのみで個人情報は含めない。
  * 大容量提出（DRIVE_FOLDER）では動画・立体データ等が混在するため、先頭ではなく
- * AIが読める形式・サイズ（PDF/PNG/JPEG かつ UPLOAD_MAX_BYTES 以内）の最小ファイルを選ぶ。
+ * AIが読める形式・サイズ（PDF/PNG/JPEG かつ直接アップロードの上限以内）の最小ファイルを選ぶ。
  * 巨大ファイルへ getBlob() するとメモリ超過で審査ごと落ちるため、必ず候補を絞ってから取得する。
  */
 function resolveSubmissionBlob_(job){
@@ -154,7 +154,7 @@ function resolveSubmissionBlob_(job){
     const okType = /^(application\/pdf|image\/png|image\/jpeg)$/.test(String(f.mime_type||'')) ||
       /\.(pdf|png|jpe?g)$/i.test(String(f.original_filename||''));
     const size = num_(f.size);
-    return f.drive_file_id && okType && (!size || size <= UPLOAD_MAX_BYTES);
+    return f.drive_file_id && okType && (!size || size <= uploadMaxBytes_());
   }).sort(function(a,b){ return num_(a.size) - num_(b.size); });
   const f = screenable[0];
   if(!f) return null;                                   // 読める形式が無ければAI審査対象外（人手審査へ）
