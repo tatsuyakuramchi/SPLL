@@ -127,19 +127,35 @@ td .mono{color:var(--soft);}
 .mail .tag.on{background:var(--teal-bg);color:var(--teal);}
 .mail .tag.off{background:var(--gold-bg);color:var(--gold);}
 
-/* ---- 流れの図 ---- */
-.flow{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:4px 0;margin:0 0 24px;overflow-x:auto;}
-.flow .hd{display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;background:var(--hair);border-bottom:1px solid var(--line);}
-.flow .hd div{background:var(--surface);padding:11px 14px;font-size:11.5px;font-weight:700;letter-spacing:.04em;}
-.flow .hd .a{color:var(--cyan);} .flow .hd .b{color:var(--soft);} .flow .hd .c{color:var(--teal);}
-.flow .row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;background:var(--hair);}
-.flow .row > div{background:var(--surface);padding:9px 14px;font-size:12.5px;min-height:42px;line-height:1.65;}
-.flow .row .cr{color:var(--ink);border-left:3px solid var(--cyan);}
-.flow .row .sy{color:var(--soft);font-size:12px;}
-.flow .row .op{color:var(--ink);border-left:3px solid var(--teal);}
-.flow .row .em{font-weight:700;}
-.flow .mail-ico{color:var(--teal);font-weight:700;}
-.flow .sep{grid-column:1/-1;background:var(--raise);padding:5px 14px;font-size:10.5px;letter-spacing:.1em;color:var(--faint);font-weight:700;}
+/* ---- 流れ：上から一本道で読む ---- */
+.tl{list-style:none;margin:0 0 26px;padding:0;position:relative;}
+.tl::before{content:"";position:absolute;left:15px;top:16px;bottom:26px;width:2px;background:var(--line);}
+.tl li{position:relative;padding:0 0 20px 50px;}
+.tl li .dot{
+  position:absolute;left:0;top:0;width:32px;height:32px;border-radius:50%;
+  display:grid;place-items:center;font-family:"IBM Plex Mono";font-size:13px;font-weight:600;
+  background:var(--surface);border:2px solid var(--line);color:var(--soft);z-index:1;
+}
+.tl li.cr .dot{border-color:var(--cyan);color:var(--cyan);}
+.tl li.op .dot{border-color:var(--teal);color:var(--teal);}
+.tl li.mile .dot{background:var(--ink);border-color:var(--ink);color:var(--surface);}
+.tl .act{font-size:10.5px;font-weight:700;letter-spacing:.04em;padding:2px 9px;border-radius:999px;
+  display:inline-block;margin-bottom:5px;white-space:nowrap;}
+.tl li.cr .act{background:var(--cyan-bg);color:var(--cyan);}
+.tl li.op .act{background:var(--teal-bg);color:var(--teal);}
+.tl li.sy .act{background:var(--raise);color:var(--soft);border:1px solid var(--line);}
+.tl li.mile .act{background:var(--ink);color:var(--surface);}
+.tl h4{margin:0 0 3px;font-size:15px;font-weight:700;color:var(--ink);}
+.tl li.mile h4{font-size:16.5px;}
+.tl p{margin:0;font-size:13px;color:var(--soft);line-height:1.75;}
+.tl .where{font-family:"IBM Plex Mono";font-size:11px;color:var(--faint);}
+.tl .sent{display:inline-flex;align-items:center;gap:6px;margin-top:7px;font-size:12px;font-weight:700;
+  color:var(--teal);background:var(--teal-bg);border-radius:7px;padding:4px 11px;}
+.tl .back{margin-top:7px;font-size:12px;color:var(--warn);background:var(--warn-bg);
+  border-radius:7px;padding:4px 11px;display:inline-block;}
+.tl .lane{display:flex;gap:26px;flex-wrap:wrap;font-size:11.5px;color:var(--faint);margin:0 0 14px;}
+.tl .lane span{display:inline-flex;align-items:center;gap:6px;}
+.tl .lane i{width:11px;height:11px;border-radius:50%;border:2px solid;display:inline-block;}
 
 /* ---- 手順 ---- */
 .steps{counter-reset:s;list-style:none;padding:0;margin:0 0 22px;}
@@ -171,7 +187,7 @@ footer{border-top:1px solid var(--line);padding-top:22px;font-size:12px;color:va
   h2{font-size:17pt;margin-bottom:16px;}
   h3{font-size:12.5pt;margin:20px 0 8px;break-after:avoid;}
   h4{font-size:11pt;margin:16px 0 6px;break-after:avoid;}
-  figure,.mail,.note,.tw,.flow,.steps{break-inside:avoid;}
+  figure,.mail,.note,.tw,.steps,.tl li{break-inside:avoid;}
   figure{margin:12px 0 16px;}
   /* 縦に長い画面は1ページに収まる高さまで縮める（幅・高さの両方に上限をかけ、比率は保つ） */
   figure img{box-shadow:none;width:auto;height:auto;max-width:100%;max-height:20.5cm;margin:0 auto;}
@@ -179,7 +195,7 @@ footer{border-top:1px solid var(--line);padding-top:22px;font-size:12px;color:va
   table{font-size:9.5pt;}
   th,td{padding:6px 10px;}
   .mail pre{font-size:9pt;line-height:1.7;}
-  .flow .row > div{min-height:0;padding:6px 12px;font-size:9.5pt;}
+  .tl h4{font-size:11pt;} .tl p{font-size:9.5pt;}
   a{color:inherit;text-decoration:none;}
   footer{break-inside:avoid;}
 }
@@ -198,7 +214,7 @@ footer{border-top:1px solid var(--line);padding-top:22px;font-size:12px;color:va
   nav .grp{display:none;} nav .sub{display:none;}
   main{padding:0 20px 70px;}
   header.top h1{font-size:28px;}
-  .flow .hd,.flow .row{grid-template-columns:1fr;}
+
 }
 </style>
 
@@ -295,21 +311,70 @@ footer{border-top:1px solid var(--line);padding-top:22px;font-size:12px;color:va
 <!-- ===================== 1 ===================== -->
 <section id="s1">
   <h2><span class="n">01</span>全体の流れ</h2>
-  <div class="flow">
-    <div class="hd"><div class="a">クリエーター</div><div class="b">システム</div><div class="c">事務局（ユーザー）</div></div>
-    <div class="row"><div class="sep">申込</div></div>
-    <div class="row"><div class="cr">原作をえらぶ／利用目的をえらぶ<br>同意して申込</div><div class="sy"><b>SPLL番号を発行</b>し、申込を記録</div><div class="op"></div></div>
-    <div class="row"><div class="sep">契約</div></div>
-    <div class="row"><div class="cr">クラウドサインフォームに<br>契約者情報を入力</div><div class="sy">フォーム内容を受信し、<br>クラウドサインへ契約書を送信</div><div class="op">個別確認が必要な申込だけ<br>手動で対応</div></div>
-    <div class="row"><div class="cr em">契約書に合意 ＝ 契約成立</div><div class="sy">締結を受信 → 案内ページを発行<br><span class="mail-ico">✉ 締結直後のご案内</span></div><div class="op"></div></div>
-    <div class="row"><div class="sep">提出・審査</div></div>
-    <div class="row"><div class="cr">作品を提出</div><div class="sy">AI一次審査（Gemini）</div><div class="op em">作品審査で最終判断<br>承認／是正のお願い／上申</div></div>
-    <div class="row"><div class="sep">認証</div></div>
-    <div class="row"><div class="cr"></div><div class="sy">承認されると<b>認証を発行</b><br>認証バッジ（QR付き）を生成<br><span class="mail-ico">✉ 審査完了 ／ ✉ バッジ発行</span></div><div class="op"></div></div>
-    <div class="row"><div class="cr">バッジをダウンロードし<br>頒布物に掲載</div><div class="sy"></div><div class="op">入金が確認できないときは<br>認証を停止</div></div>
-    <div class="row"><div class="cr">第三者がQRを読み取る</div><div class="sy">検証ページ「確認済み」</div><div class="op"></div></div>
+  <p>申込から頒布までは<b>10のステップ</b>です。上から順に進み、途中で戻るのは「是正のお願い」のときだけです。</p>
+  <div class="lane" style="display:flex;gap:26px;flex-wrap:wrap;font-size:11.5px;color:var(--faint);margin:0 0 16px;">
+    <span style="display:inline-flex;align-items:center;gap:6px;"><i style="width:11px;height:11px;border-radius:50%;border:2px solid var(--cyan);display:inline-block;"></i>クリエーターが操作</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;"><i style="width:11px;height:11px;border-radius:50%;border:2px solid var(--teal);display:inline-block;"></i>事務局（ユーザー）が操作</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;"><i style="width:11px;height:11px;border-radius:50%;border:2px solid var(--line);display:inline-block;"></i>システムが自動で行う</span>
   </div>
-  <div class="note"><p><b>契約が成立するのは、クラウドサイン上で契約書に合意した時点です。</b>申込フォームの送信時点ではありません。<br><b>認証とバッジは、作品の審査が完了してから</b>発行されます（締結しただけでは発行されません）。</p></div>
+
+  <ol class="tl">
+    <li class="cr"><div class="dot">1</div>
+      <div class="act">クリエーター</div>
+      <h4>原作と利用目的をえらび、同意して申し込む</h4>
+      <p>この時点で <b>SPLL番号が発行</b>されます。利用料は「利用目的 × 選択した原作」で自動的に決まります。<br><span class="where">申込窓口（公開サイト）→ 2.1〜2.3</span></p>
+    </li>
+    <li class="cr"><div class="dot">2</div>
+      <div class="act">クリエーター</div>
+      <h4>クラウドサインフォームで契約者情報を入力する</h4>
+      <p>氏名・住所・連絡先だけを入力します。<b>SPLL番号・対象原作・利用条件は自動で引き継がれる</b>ので、条件の再入力はありません。<br><span class="where">クラウドサインフォーム（formrun）</span></p>
+    </li>
+    <li class="sy"><div class="dot">3</div>
+      <div class="act">システム</div>
+      <h4>入力内容をもとに、クラウドサインへ契約書を送信する</h4>
+      <p>個別確認が必要な申込（未成年・イベント等）だけは、事務局が手動で対応します。</p>
+    </li>
+    <li class="mile cr"><div class="dot">4</div>
+      <div class="act">契約成立</div>
+      <h4>クリエーターが契約書に合意する</h4>
+      <p><b>ここが契約の成立時点です。</b>申込フォームを送った時点ではありません。<br>合意を受け取ると、システムが<b>手続き案内ページ</b>を発行します。</p>
+      <div class="sent">✉ 締結直後のご案内メール（5分以内）</div>
+    </li>
+    <li class="cr"><div class="dot">5</div>
+      <div class="act">クリエーター</div>
+      <h4>完成した作品を提出する</h4>
+      <p>案内ページの「作品提出ページを開く」から提出します。20MBを超えるものは専用フォルダから提出できます。<br><span class="where">作品提出ページ → 2.5</span></p>
+    </li>
+    <li class="sy"><div class="dot">6</div>
+      <div class="act">システム</div>
+      <h4>AIが一次審査をする（Vertex AI Gemini）</h4>
+      <p>原作ごとのルールと契約条件に照らして、PASS候補／要確認／高リスク候補に振り分けます。<b>これは下読みで、承認ではありません。</b></p>
+    </li>
+    <li class="op"><div class="dot">7</div>
+      <div class="act">事務局（ユーザー）</div>
+      <h4>作品審査で最終判断をする</h4>
+      <p>AIの結果を見て、<b>承認</b>・<b>是正のお願い</b>・<b>上申</b>のいずれかを記録します。<br><span class="where">管理コンソール「作品審査」→ 3.4</span></p>
+      <div class="back">↩ 是正のお願いのときは、修正版を再提出してステップ5へ戻ります</div>
+    </li>
+    <li class="mile sy"><div class="dot">8</div>
+      <div class="act">認証発行</div>
+      <h4>承認されると、認証と認証バッジが発行される</h4>
+      <p><b>締結しただけでは発行されません。</b>審査の完了が条件です。バッジのPNGには検証用QRコードが焼き込まれます。</p>
+      <div class="sent">✉ 審査完了のご連絡　＋　✉ バッジ発行のご連絡</div>
+    </li>
+    <li class="cr"><div class="dot">9</div>
+      <div class="act">クリエーター</div>
+      <h4>バッジをダウンロードして、頒布物に掲載する</h4>
+      <p>案内ページ・提出ページのどちらからでも取得できます（大・中・小の3サイズ）。<br><span class="where">認証バッジのダウンロード → 2.6</span></p>
+    </li>
+    <li class="sy"><div class="dot">10</div>
+      <div class="act">第三者</div>
+      <h4>QRコードを読み取ると、正規ライセンスか確認できる</h4>
+      <p>検証ページに「確認済み」とSPLL番号・対象原作・クレジット表記が表示されます。<br><span class="where">検証ページ → 2.7</span></p>
+    </li>
+  </ol>
+
+  <div class="note gold"><p><b>このあと、事務局が認証を止めることがあります。</b>利用許諾料の入金が確認できないときなど、管理コンソールから認証を停止すると、<b>QRの検証が「有効ではありません」に変わり、バッジも取得できなくなります</b>。入金を確認したら復帰させます（→ 3.5）。</p></div>
 </section>
 
 <!-- ===================== 2 ===================== -->
