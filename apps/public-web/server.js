@@ -115,6 +115,13 @@ function gasUrlFor(fn){
  */
 const HOOK_PROVIDERS = { '/hooks/formrun': 'formrun', '/hooks/cloudsign': '' };
 const HOOK_PASSTHROUGH_PARAMS = ['key', 'sig', 'signature'];
+/**
+ * 送信側へ応答を返すまでの上限。GASの実行には数秒かかることがあり、送信側の待ち時間が短いと
+ * 受信できていても「失敗」と判定される。この時間を過ぎたら 200 を返し、転送は裏で走らせる。
+ * GAS は最初の POST の時点で doPost を実行する（302はその結果の受け渡しにすぎない）ので、
+ * 応答を読まなくても受信・処理・Webhook_Receipts への記録は成立する。
+ */
+const HOOK_ACK_MS = Number(process.env.HOOK_ACK_MS || 1500);
 
 function hookTargetUrl(provider, incomingParams){
   const base = GAS_WORKFLOW_URL;
@@ -265,16 +272,30 @@ function createServer(options){
       let raw;
       try{ raw = await readBody(request); }
       catch(e){ return send(response, 413, 'text/plain; charset=utf-8', 'payload too large', { 'Cache-Control': 'no-store' }); }
-      try{
-        const out = await forwardHook(provider, raw, request.headers['content-type'], q, options.fetchImpl);
+      const forwarded = forwardHook(provider, raw, request.headers['content-type'], q, options.fetchImpl)
+        .then((out) => ({ ok: true, out }), (error) => ({ ok: false, error }));
+      const ackMs = options.hookAckMs === undefined ? HOOK_ACK_MS : options.hookAckMs;
+      let timer = null;
+      const deadline = new Promise((r) => { timer = setTimeout(() => r(null), ackMs); });
+      const first = await Promise.race([forwarded, deadline]);
+      if(timer) clearTimeout(timer);
+
+      if(first === null){
+        // GAS の応答が遅い。送信側を待たせるとタイムアウトで「失敗」と判定されるため先に 200 を返す。
+        // 転送はそのまま続き、結果はログに残す（受信の成否は Webhook_Receipts で確認できる）。
+        forwarded.then((r) => {
+          if(!r.ok) console.error('[hook] ' + pathname + ' の中継に失敗しました（応答返却後）: ' + String((r.error && r.error.message) || r.error));
+        });
+        return send(response, 200, 'text/plain; charset=utf-8', 'accepted', { 'Cache-Control': 'no-store' });
+      }
+      if(first.ok){
         // GAS が受け取れていれば、業務上の判断（manual-review 等）に関わらず送信側へは成功を返す。
         // 再送で直る種類の失敗ではないうえ、受信自体は Webhook_Receipts に記録済みだから。
-        return send(response, 200, 'text/plain; charset=utf-8', out.text || 'ok', { 'Cache-Control': 'no-store' });
-      }catch(error){
-        // 転送そのものに失敗（GAS へ届いていない）。送信側の再送に任せる
-        console.error('[hook] ' + pathname + ' の中継に失敗しました: ' + String((error && error.message) || error));
-        return send(response, 502, 'text/plain; charset=utf-8', 'upstream unavailable', { 'Cache-Control': 'no-store' });
+        return send(response, 200, 'text/plain; charset=utf-8', first.out.text || 'ok', { 'Cache-Control': 'no-store' });
       }
+      // 転送そのものに失敗（GAS へ届いていない）。送信側の再送に任せる
+      console.error('[hook] ' + pathname + ' の中継に失敗しました: ' + String((first.error && first.error.message) || first.error));
+      return send(response, 502, 'text/plain; charset=utf-8', 'upstream unavailable', { 'Cache-Control': 'no-store' });
     }
 
     if(request.method !== 'GET' && request.method !== 'HEAD')
@@ -334,4 +355,4 @@ if(require.main === module){
 }
 
 module.exports = { createServer, handleRpc, callGas, gasUrlFor, ALLOWED, CACHEABLE, RETRYABLE,
-  HOOK_PROVIDERS, hookTargetUrl, forwardHook };
+  HOOK_PROVIDERS, HOOK_ACK_MS, hookTargetUrl, forwardHook };

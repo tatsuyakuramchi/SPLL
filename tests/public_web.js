@@ -327,6 +327,27 @@ async function rpc(payload, opts){ return server.handleRpc(payload, opts || {});
   ok(bad.status === 502, '転送に失敗したら 502（送信側の再送に任せる）');
   await new Promise((r) => hookSrv.close(r));
 
+  // GAS の実行に数秒かかっても送信側を待たせない（待たせるとテスト送信がタイムアウトで失敗する）。
+  // GAS は最初の POST で doPost を実行するので、応答を読まなくても受信・記録は成立する。
+  let slowDone = null, slowStarted = 0;
+  const slowSrv = server.createServer({ hookAckMs: 60, fetchImpl: async () => {
+    slowStarted++;
+    await new Promise((r) => setTimeout(r, 120));
+    slowDone = 'forwarded';
+    return { status: 200, text: async () => 'ok' };
+  } });
+  await new Promise((r) => slowSrv.listen(0, r));
+  const slowOrigin = 'http://127.0.0.1:' + slowSrv.address().port;
+  const t0 = Date.now();
+  const slow = await fetch(slowOrigin + '/hooks/formrun', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  const waited = Date.now() - t0;
+  ok(slow.status === 200 && (await slow.text()) === 'accepted', 'GASの応答が遅いときは先に200（accepted）を返す');
+  ok(waited < 120 && slowStarted === 1, '送信側をGASの処理時間ぶん待たせない: ' + waited + 'ms');
+  await new Promise((r) => setTimeout(r, 150));
+  ok(slowDone === 'forwarded', '応答を返したあとも転送は最後まで走る（取りこぼさない）');
+  await new Promise((r) => slowSrv.close(r));
+
   console.log('\nPUBLIC WEB RESULT: ' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })();
