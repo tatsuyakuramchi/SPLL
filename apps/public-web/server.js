@@ -32,7 +32,13 @@ const GAS_WORKFLOW_URL = String(process.env.GAS_WORKFLOW_URL || '').trim();
 const RPC_KEY = String(process.env.PUBLIC_WEB_KEY || '').trim();
 const CACHE_TTL_MS = Number(process.env.CACHE_TTL_SECONDS || 60) * 1000;
 const APPLY_LIMIT = Number(process.env.APPLY_RATE_LIMIT || 5);        // 申込作成／IP／時間
-const MAX_BODY_BYTES = 512 * 1024;                                    // 提出のメタデータを通すぶんの余裕
+/**
+ * リクエスト本文の上限。
+ * 作品提出（web_submitWork）は最大20MBのファイルを Base64 で載せるため、
+ * 20MB × 4/3（Base64の膨張）＋ JSONの分の余裕をとる。ここを小さくすると、
+ * 提出だけが「応答を解釈できませんでした」で落ちる（GASまで届かない・届いても壊れる）。
+ */
+const MAX_BODY_BYTES = 28 * 1024 * 1024;
 
 /** キャッシュしてよい＝副作用のない読み取り。トークンで内容が変わるものは含めない。 */
 const CACHEABLE = new Set([
@@ -255,7 +261,13 @@ function createServer(options){
         return send(response, 405, 'application/json; charset=utf-8', JSON.stringify({ ok: false, error: 'POSTのみ受け付けます' }), { Allow: 'POST' });
       let payload;
       try{ payload = JSON.parse(await readBody(request) || '{}'); }
-      catch(e){ return send(response, 400, 'application/json; charset=utf-8', JSON.stringify({ ok: false, error: 'リクエストを解釈できませんでした' })); }
+      catch(e){
+        // 大きすぎる提出は「解釈できません」ではなく、上限を超えたことが分かる文言で返す
+        const tooLarge = String((e && e.message) || e) === 'PAYLOAD_TOO_LARGE';
+        return send(response, tooLarge ? 413 : 400, 'application/json; charset=utf-8', JSON.stringify({ ok: false,
+          error: tooLarge ? ('ファイルが大きすぎます（' + Math.floor(MAX_BODY_BYTES / 1024 / 1024 * 3 / 4) + 'MBまで）。大容量ファイルの提出をご利用ください。')
+                          : 'リクエストを解釈できませんでした' }));
+      }
       const out = await handleRpc(payload, { ip: clientIp(request), fetchImpl: options.fetchImpl });
       return send(response, out.status, 'application/json; charset=utf-8', JSON.stringify(out.body), { 'Cache-Control': 'no-store' });
     }
@@ -355,4 +367,4 @@ if(require.main === module){
 }
 
 module.exports = { createServer, handleRpc, callGas, gasUrlFor, ALLOWED, CACHEABLE, RETRYABLE,
-  HOOK_PROVIDERS, HOOK_ACK_MS, hookTargetUrl, forwardHook };
+  MAX_BODY_BYTES, HOOK_PROVIDERS, HOOK_ACK_MS, hookTargetUrl, forwardHook };

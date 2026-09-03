@@ -285,6 +285,17 @@ async function rpc(payload, opts){ return server.handleRpc(payload, opts || {});
     '未知のパスは申込窓口へ戻す（導線を袋小路にしない）');
   await new Promise((r) => srv.close(r));
 
+  // 作品提出は最大20MBのファイルを Base64 で載せる。上限が小さいと提出だけが通らない
+  ok(server.MAX_BODY_BYTES >= 20 * 1024 * 1024 * 4 / 3,
+    'リクエスト上限は20MBの提出（Base64で約27MB）を通せる: ' + Math.round(server.MAX_BODY_BYTES / 1024 / 1024) + 'MB');
+  const bigSrv = server.createServer({ fetchImpl: async () => ({ status: 200, text: async () => JSON.stringify({ ok: true, result: { submission_id: 'SUB-1' } }) }) });
+  await new Promise((r) => bigSrv.listen(0, r));
+  const bigOrigin = 'http://127.0.0.1:' + bigSrv.address().port;
+  const bigBody = JSON.stringify({ fn: 'web_submitWork', args: ['tok', { dataBase64: 'A'.repeat(3 * 1024 * 1024) }] });
+  const bigRes = await fetch(bigOrigin + '/api/rpc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: bigBody });
+  ok(bigRes.status === 200 && (await bigRes.json()).ok === true, '3MB級の提出を受け付ける（512KB制限では落ちていた）');
+  await new Promise((r) => bigSrv.close(r));
+
   // ---- 7. Webhook の中継口 ----
   // GAS は POST に 302 を返すため、リダイレクトを追わない送信側（formrun のテスト送信）が失敗する。
   // 中継口が代わりにリダイレクトを追い、送信側へは 200 を返すことを確かめる。
