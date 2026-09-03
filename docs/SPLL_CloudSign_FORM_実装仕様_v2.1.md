@@ -385,21 +385,37 @@ CloudSign公式案内では、CloudSign FORM powered by formrunは、Webフォ�
 
 ---
 
-## 13. 締結後の案内メール（自動送信）
+## 13. 契約者への自動メール
 
-締結すると `Notification_Queue` に `GUIDE_READY` が起票され、**GAS②の5分バッチ**が案内メールを送信する。
-締結Webhookの中で送らないのは、メール障害・送信上限で締結処理そのものを失敗させないため。
+出来事ごとに `Notification_Queue` へ通知が起票され、**GAS②の5分バッチ**がメールを送信する。
+処理の中で送らないのは、メール障害・送信上限で締結や審査の処理そのものを失敗させないため。
 
-**本文には案内ページのURLだけを載せ、口座情報は書かない。** 振込先は**契約書本文に記載**する（RP-002 §9.1・2026-09-02 変更。以前は案内ページで表示していたが、口座情報の正本を契約書だけにした）。
-本文には「事務局がメール本文で口座情報を知らせることはない」旨の注意書きを含める。
+| 場面 | 通知タイプ | 起票する場所 | 既定 |
+|---|---|---|---|
+| 締結直後のご案内 | `GUIDE_READY` | 締結Webhook後の `preparePostSigningWorkflow_` | 送る |
+| 作品の審査完了 | `REVIEW_RESULT` | `admin_setHumanReview`（**CLEARED のときだけ送る**） | 送る |
+| 認証バッジの発行完了 | `BADGE_READY` | `runBadgeJob_`（バッジ画像の生成完了時。バッジIDで重複排除） | 送る |
+| 是正のお願い | `CORRECTION_REQUEST` | `admin_setHumanReview`（CORRECTION_REQUIRED） | **送らない**（人が文面を確認してから連絡する） |
+
+上申（`ESCALATED`）も `REVIEW_RESULT` として起票されるが、社内判断の途中であり
+「審査が完了しました」と伝えてはならないため、自動送信の対象から外して要対応一覧に残す。
+
+**どの本文にも案内ページのURLだけを載せ、口座情報は書かない。** 振込先は**契約書本文に記載**する（RP-002 §9.1・2026-09-02 変更。以前は案内ページで表示していたが、口座情報の正本を契約書だけにした）。
+締結メールには「事務局がメール本文で口座情報を知らせることはない」旨の注意書きを含める。
+
+**案内ページのリンクは1本に保つ。** 審査完了・バッジ発行のメールも、締結時に払い出したURLを再利用する
+（`guideUrlFor_`：`GUIDE_READY` 通知に残したURLのトークンがまだ有効ならそれを使い、失効していれば新規発行）。
+毎回別のリンクを送ると、契約者から見てどれが正規のものか判別できなくなるため。
 
 | 設定（Config） | 内容 |
 |---|---|
-| `GUIDE_EMAIL_AUTO_SEND` | 自動送信の有効・無効（既定 true） |
-| `GUIDE_EMAIL_SUBJECT` / `GUIDE_EMAIL_BODY` | 件名・本文テンプレート（差込 `{{license_id}}` `{{party_name}}` `{{guide_url}}` `{{usage_category}}` `{{works}}` `{{office_contact}}`） |
-| `MAIL_FROM_NAME` / `MAIL_REPLY_TO` | 差出人名・返信先 |
+| `GUIDE_EMAIL_*` / `REVIEW_EMAIL_*` / `BADGE_EMAIL_*` / `CORRECTION_EMAIL_*` | 種類ごとの `_AUTO_SEND`（停止スイッチ）・`_SUBJECT`・`_BODY` |
+| `MAIL_FROM_NAME` / `MAIL_REPLY_TO` | 差出人名・返信先（全種類で共通） |
 
-すべて管理コンソール「設定 → 手続き案内 → 案内メールの自動送信」から編集し、テスト送信もできる。
+差込は `{{license_id}}` `{{party_name}}` `{{guide_url}}` `{{usage_category}}` `{{works}}` `{{office_contact}}`。
+審査系はさらに `{{review_comment}}`（審査コメント）と `{{badge_note}}`（バッジ発行済みかで文が変わる案内文）が使える。
+
+すべて管理コンソール「設定 → 手続き案内 → 自動メールの送信」から編集し、種類を選んでテスト送信もできる。
 
 ### 送信されない場合の扱い
 

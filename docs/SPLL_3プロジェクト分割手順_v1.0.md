@@ -123,7 +123,7 @@ npm run deploy:portal       # 個別（deploy:workflow / deploy:admin）
 | 法人の退避先：`CORPORATE_INQUIRY_URL` / `CORPORATE_INQUIRY_EMAIL`（窓口は個人専用）※Config | ✔ | — | ✔ |
 | 大容量提出：`SUBMIT_FOLDER_MAX_FILES` / `SUBMIT_FOLDER_MAX_GB` / `SUBMIT_FOLDER_OPEN_DAYS` ※Config | — | ✔ | ✔ |
 | 手続き案内：`WORKFLOW_URL`（GAS②の /exec。**adminから発行するリンクの宛先**）／`OFFICE_CONTACT`／`OFFICE_EMAIL_DOMAIN` ※Config | — | ✔ | ✔ |
-| 案内メール：`GUIDE_EMAIL_AUTO_SEND` / `GUIDE_EMAIL_SUBJECT` / `GUIDE_EMAIL_BODY` / `MAIL_FROM_NAME` / `MAIL_REPLY_TO` ※Config（**送信はGAS②**） | — | ✔ | ✔ |
+| 自動メール：`GUIDE_EMAIL_*` / `REVIEW_EMAIL_*` / `BADGE_EMAIL_*` / `CORRECTION_EMAIL_*`（各 `_AUTO_SEND` / `_SUBJECT` / `_BODY`）／ `MAIL_FROM_NAME` / `MAIL_REPLY_TO` ※Config（**送信はGAS②**） | — | ✔ | ✔ |
 | `CLOUDSIGN_CLIENT_ID` ほかCloudSign系 | — | ✔ | ✔ |
 | `FORMRUN_WEBHOOK_SECRET` / `CLOUDSIGN_WEBHOOK_KEY` | — | ✔ | — |
 | `X_API_KEY` ほかX系 | — | — | ✔ |

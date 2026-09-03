@@ -19,6 +19,31 @@ function prepareGuideToken_(idOrLicense){
   return issueToken_(idOrLicense, 'GUIDE', guideTokenDays_(), 0);   // 回数制限なし（何度でも開ける）
 }
 
+/**
+ * 案件の案内ページURL。締結時に払い出したURLを再利用する。
+ *
+ * 契約者は締結メールのリンクをブックマークしている前提なので、審査完了・バッジ発行の連絡でも
+ * 同じURLを案内する（毎回別のリンクを送ると、どれが正規のものか分からなくなる）。
+ * トークンの平文は台帳に残らないため、既に払い出したURLは GUIDE_READY 通知の記録から取り出し、
+ * そのトークンがまだ有効なときだけ使う。失効・不在なら新しく発行する（古いリンクは失効させない）。
+ */
+function guideUrlFor_(idOrLicense){
+  const ref = resolveLicenseRef_(idOrLicense);
+  const known = readRows_(ssOps_(),'Notification_Queue').filter(function(n){
+    return n.type === 'GUIDE_READY' &&
+      ((ref.licenseId && String(n.license_id) === ref.licenseId) ||
+       (ref.contractId && String(n.contract_id) === ref.contractId));
+  });
+  for(let i = known.length - 1; i >= 0; i--){
+    const url = String(parseJson_(known[i].payload_json, {}).guide_url || '');
+    const m = url.match(/[?&]t=([^&]+)/);
+    if(!m) continue;
+    let token = m[1]; try{ token = decodeURIComponent(m[1]); }catch(e){}
+    if(resolveToken_(token, 'GUIDE')) return url;
+  }
+  return userPageUrl_('guide','t', prepareGuideToken_(ref.licenseId || ref.contractId || idOrLicense));
+}
+
 function serveGuide_(e){
   const t = HtmlService.createTemplateFromFile('guide');
   t.token = (e.parameter && (e.parameter.t || e.parameter.token)) || '';

@@ -513,37 +513,64 @@ function admin_previewAiPrompt(contractId){ requireRole_([]);
     effective_version: aiPromptVersion_() };
 }
 
-// ---- 案内メールの自動送信（管理コンソール操作）----
-/** 管理コンソールからのテスト送信（本番の宛先には送らず、指定アドレスへ見本を送る） */
-function admin_sendGuideEmailTest(toEmail, contractId){
+// ---- 自動メールの送信（管理コンソール操作）----
+/**
+ * 管理コンソールからのテスト送信（本番の宛先には送らず、指定アドレスへ見本を送る）。
+ * mailType を省略すると締結直後の案内メール。案件を指定すると、その案件の実データで差し込む。
+ */
+function admin_sendGuideEmailTest(toEmail, contractId, mailType){
   const actor = requireRole_(['SYSTEM_ADMIN','OPERATIONS']);
   const to = normalizeEmail_(toEmail);
   if(!to) throw new Error('VALIDATION_ERROR: 送信先メールアドレスの形式が正しくありません');
+  const type = mailKind_(mailType) ? String(mailType) : 'GUIDE_READY';
   let v = { to:to, license_id:'SPLL-000000-0000', party_name:'テスト 太郎', usage_category:'書籍',
-    works:'（テスト作品）', guide_url: workflowUrl_() + '?page=guide&t=TEST', office_contact:getConfig_('OFFICE_CONTACT','') };
+    works:'（テスト作品）', guide_url: workflowUrl_() + '?page=guide&t=TEST',
+    review_comment:'（審査コメントの見本です）',
+    badge_note:'認証バッジの発行手続きに進みますので、しばらくお待ちください。',
+    office_contact:getConfig_('OFFICE_CONTACT','') };
   if(contractId){
-    const n = readRows_(ssOps_(),'Notification_Queue')
-      .find(function(x){ return x.type === 'GUIDE_READY' && x.contract_id === String(contractId); });
-    if(n){ v = guideMailVars_(n); v.to = to; }             // 実データの見本を、指定した宛先だけへ送る
+    const rows = readRows_(ssOps_(),'Notification_Queue')
+      .filter(function(x){ return x.contract_id === String(contractId); });
+    // その案件で同じ種類の通知があれば実データで、無ければ締結時の案内通知で差し込む
+    const n = rows.filter(function(x){ return x.type === type; })[0] ||
+              rows.filter(function(x){ return x.type === 'GUIDE_READY'; })[0];
+    if(n){ v = notificationMailVars_(n); v.to = to; }       // 実データの見本を、指定した宛先だけへ送る
   }
-  sendGuideEmail_(v);
-  logEvent_('notification', 'TEST', actor.email, null, { channel:'EMAIL', to_domain:(to.split('@')[1] || '') });
-  return { sent:true, to:to };
+  sendNotificationEmail_(type, v);
+  logEvent_('notification', 'TEST', actor.email, null, { channel:'EMAIL', mail_type:type, to_domain:(to.split('@')[1] || '') });
+  return { sent:true, to:to, mail_type:type };
 }
 
-/** 自動送信の状況（管理コンソール表示用） */
+/** 自動送信の状況（管理コンソール表示用）。種類ごとの有効・件数を返す。 */
 function admin_getMailStatus(){ requireRole_([]);
-  const rows = readRows_(ssOps_(),'Notification_Queue').filter(function(n){ return n.type === 'GUIDE_READY'; });
+  const queue = readRows_(ssOps_(),'Notification_Queue');
   let quota = null; try{ quota = num_(MailApp.getRemainingDailyQuota()); }catch(e){}
+  const count = function(types, status){
+    return queue.filter(function(n){ return types.indexOf(n.type) >= 0 && n.status === status; }).length;
+  };
+  const all = MAIL_KINDS.map(function(k){ return k.type; });
   return {
-    enabled: guideEmailEnabled_(),
-    sent: rows.filter(function(n){ return n.status === 'SENT'; }).length,
-    pending: rows.filter(function(n){ return n.status === 'MANUAL_REQUIRED'; }).length,
-    failed: rows.filter(function(n){ return n.status === 'SEND_FAILED'; }).length,
+    enabled: guideEmailEnabled_(),                          // 締結直後の案内（旧来の表示との互換）
+    sent:    count(all,'SENT'),
+    pending: count(all,'MANUAL_REQUIRED'),
+    failed:  count(all,'SEND_FAILED'),
+    kinds: MAIL_KINDS.map(function(k){
+      return { type:k.type, label:k.label, enabled:mailKindEnabled_(k.type),
+        sent:count([k.type],'SENT'), pending:count([k.type],'MANUAL_REQUIRED'), failed:count([k.type],'SEND_FAILED') };
+    }),
     remaining_quota: quota,
     from_name: getConfig_('MAIL_FROM_NAME','TRPGライツ事務局'),
     reply_to: getConfig_('MAIL_REPLY_TO','')
   };
+}
+/** テンプレート編集画面用：各種メールの既定文（「既定に戻す」で使う） */
+function admin_getMailTemplates(){ requireRole_(['SYSTEM_ADMIN','OPERATIONS','LEGAL_ADMIN']);
+  return MAIL_KINDS.map(function(k){
+    return { type:k.type, label:k.label, prefix:k.prefix, auto_default:k.auto,
+      default_subject:k.subject, default_body:k.body,
+      subject:getConfig_(k.prefix + '_SUBJECT', k.subject), body:getConfig_(k.prefix + '_BODY', k.body),
+      enabled:mailKindEnabled_(k.type) };
+  });
 }
 
 // ---- 締結後の手続き案内（案内ページ・メール・公開URL）----
@@ -552,7 +579,10 @@ const GUIDE_CONFIG_KEYS = [
   ['office_contact','OFFICE_CONTACT'],
   ['workflow_url','WORKFLOW_URL'], ['public_base_url','PUBLIC_BASE_URL'], ['office_email_domain','OFFICE_EMAIL_DOMAIN'],
   ['mail_from_name','MAIL_FROM_NAME'], ['mail_reply_to','MAIL_REPLY_TO'],
-  ['guide_email_auto_send','GUIDE_EMAIL_AUTO_SEND'], ['guide_email_subject','GUIDE_EMAIL_SUBJECT'], ['guide_email_body','GUIDE_EMAIL_BODY']
+  ['guide_email_auto_send','GUIDE_EMAIL_AUTO_SEND'], ['guide_email_subject','GUIDE_EMAIL_SUBJECT'], ['guide_email_body','GUIDE_EMAIL_BODY'],
+  ['review_email_auto_send','REVIEW_EMAIL_AUTO_SEND'], ['review_email_subject','REVIEW_EMAIL_SUBJECT'], ['review_email_body','REVIEW_EMAIL_BODY'],
+  ['badge_email_auto_send','BADGE_EMAIL_AUTO_SEND'], ['badge_email_subject','BADGE_EMAIL_SUBJECT'], ['badge_email_body','BADGE_EMAIL_BODY'],
+  ['correction_email_auto_send','CORRECTION_EMAIL_AUTO_SEND'], ['correction_email_subject','CORRECTION_EMAIL_SUBJECT'], ['correction_email_body','CORRECTION_EMAIL_BODY']
 ];
 /** 案内ページ・案内メール設定の取得 */
 function admin_getGuideConfig(){ requireRole_(['SYSTEM_ADMIN','OPERATIONS','LEGAL_ADMIN']);
@@ -579,7 +609,7 @@ function admin_saveGuideConfig(c){ const actor = requireRole_(['SYSTEM_ADMIN','O
     if(c[x[0]] === undefined) return;
     // 本文テンプレートは長文・改行を含むため、サニタイズ短縮の対象外にする
     const raw = String(c[x[0]]);
-    setConfig_(x[1], x[0] === 'guide_email_body' ? raw.slice(0,4000) : sanitizeCell_(raw.trim()).slice(0,300));
+    setConfig_(x[1], /_email_body$/.test(x[0]) ? raw.slice(0,4000) : sanitizeCell_(raw.trim()).slice(0,300));
   });
   const changed = GUIDE_CONFIG_KEYS.filter(function(x){ return c[x[0]] !== undefined && String(c[x[0]]).trim() !== before[x[0]]; })
     .map(function(x){ return x[0]; });

@@ -422,6 +422,13 @@ function runBadgeJob_(jobId, verifyUrl){
     }
     updateRow_(ssOps_(),'Badge_Jobs','badge_job_id',jobId,{ status:'ISSUED', finished_at:new Date().toISOString(), last_error:'',
       cert_id: cert.cert_id, license_id: licenseId });
+    // 契約者への「バッジを発行しました」通知。バッジIDで重複を防ぐので、
+    // 再試行や既存バッジの再利用で二重に届くことはない。
+    // 通知の起票に失敗してもバッジ発行そのものは成功として扱う（5分バッチが拾えなくなるだけ）。
+    try{
+      enqueueLicenseNotification_(licenseId, 'BADGE_READY', out.badge_id,
+        { badge_id: out.badge_id, cert_id: cert.cert_id, guide_url: guideUrlFor_(licenseId) });
+    }catch(e){ logError_('INTERNAL_ERROR','badgeNotify', e, { badge_job_id:jobId, license_id:licenseId }); }
     return out;
   }catch(err){
     const retry = num_(job.retry_count) + 1;

@@ -146,17 +146,23 @@ admin のウェブアプリURL（`/exec`）を開き、「設定」タブで入�
 - [ ] `OFFICE_CONTACT` / `OFFICE_EMAIL_DOMAIN` を入力・保存した
 - [ ] CloudSign テンプレートの個別条件に振込先（金融機関・支店・口座種別・口座番号・口座名義）を記載した
 
-### 4-3. 案内メールの自動送信
+### 4-3. 自動メールの送信
 
 | 項目 | Configキー | 既定 |
 |---|---|---|
-| 自動送信 | `GUIDE_EMAIL_AUTO_SEND` | `true`（有効） |
 | 差出人名 | `MAIL_FROM_NAME` | TRPGライツ事務局 |
 | 返信先 | `MAIL_REPLY_TO` | （空＝実行アカウント） |
-| 件名 | `GUIDE_EMAIL_SUBJECT` | 既定文面あり |
-| 本文 | `GUIDE_EMAIL_BODY` | 既定文面あり |
+| 締結直後のご案内 | `GUIDE_EMAIL_AUTO_SEND` / `_SUBJECT` / `_BODY` | `true`（送る）・既定文面あり |
+| 作品の審査完了 | `REVIEW_EMAIL_AUTO_SEND` / `_SUBJECT` / `_BODY` | `true`（送る）・既定文面あり |
+| 認証バッジの発行完了 | `BADGE_EMAIL_AUTO_SEND` / `_SUBJECT` / `_BODY` | `true`（送る）・既定文面あり |
+| 是正のお願い | `CORRECTION_EMAIL_AUTO_SEND` / `_SUBJECT` / `_BODY` | **`false`（送らない）**・既定文面あり |
+
+是正のお願いだけ既定で停止しているのは、審査コメントをそのまま契約者へ送る内容になるためです。
+自動送信を有効にするか、要対応一覧から文面を確認して手動で連絡するかを選べます。
+審査結果のうち**上申（ESCALATED）は自動送信しません**（社内判断の途中のため）。
 
 差込変数：`{{license_id}}` `{{party_name}}` `{{guide_url}}` `{{office_contact}}` `{{usage_category}}` `{{works}}`
+審査系はさらに `{{review_comment}}`（審査コメント）と `{{badge_note}}`（バッジ発行済みかで自動的に変わる案内文）。
 
 入力後、同じ画面の **「テスト送信」** で自分宛に届くことを確認してください。
 （送信は workflow の5分バッチが行います。admin からのテスト送信は admin のアカウントで送られます。）

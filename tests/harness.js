@@ -1173,6 +1173,62 @@ let badTo=false; try{ G.admin_sendGuideEmailTest('not-an-email',''); }catch(e){ 
 ok(badTo,'不正なテスト送信先は拒否');
 const ms=G.admin_getMailStatus();
 ok(ms.enabled===true&&ms.sent>=1&&typeof ms.failed==='number','送信状況（有効・送信済・失敗数）を表示');
+ok((ms.kinds||[]).length===4&&ms.kinds.every(k=>typeof k.enabled==='boolean'),'種類ごとの有効・件数を返す');
+
+// 105-2. 審査完了・バッジ発行の自動メール（手続き案内のリンク付き）
+const rvApp=mkApp(['WRK-BKK00019'],'書籍',docExtra2);
+frPost(rvApp,'FR-RVMAIL');
+G.doPost({parameter:{},postData:{contents:JSON.stringify({ document_id:'DOC-RVMAIL', status:'COMPLETED', application_ref:rvApp.application_ref })}});
+const cRv=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-RVMAIL');
+G.updateRow_(OPS,'Contracts','contract_id',cRv.contract_id,{ contact_email:'review-mail@example.com' });
+_sentMail.length=0;
+G.batch_sendNotificationEmails_();                       // 締結直後の案内メール
+const guideUrlSent=String((_sentMail.find(m=>m.to==='review-mail@example.com')||{}).body||'').match(/https?:\/\/\S*page=guide\S*/);
+ok(!!guideUrlSent,'締結の案内メールに案内ページURLが入る');
+_sentMail.length=0;
+const rvLink=G.admin_sendUploadLink(cRv.contract_id);
+const rvSub=G.web_submitWork(rvLink.token,{ title:'審査メール', filename:'rv.pdf', mimeType:'application/pdf', dataBase64:b64 });
+G.admin_setHumanReview(rvSub.submission_id,'CLEARED','ok');
+ok(rows(OPS,'Notification_Queue').some(n=>n.type==='REVIEW_RESULT'&&n.license_id===rvApp.license_id),'審査確定でREVIEW_RESULTを起票');
+ok(rows(OPS,'Notification_Queue').some(n=>n.type==='BADGE_READY'&&n.license_id===rvApp.license_id),'バッジ発行でBADGE_READYを起票');
+G.batch_sendNotificationEmails_();
+const rvMails=_sentMail.filter(m=>m.to==='review-mail@example.com');
+const revMail=rvMails.find(m=>/審査が完了/.test(m.subject));
+const bdgMail=rvMails.find(m=>/認証バッジを発行/.test(m.subject));
+ok(!!revMail,'審査完了で自動送信');
+ok(!!bdgMail,'バッジ発行完了で自動送信');
+ok(revMail.body.indexOf(guideUrlSent[0])>=0&&bdgMail.body.indexOf(guideUrlSent[0])>=0,
+  'どちらも締結時と同じ案内ページのリンクを載せる（契約者のブックマークが使える）');
+ok(!/銀行|口座番号|支店/.test(revMail.body+bdgMail.body),'本文に口座情報を含めない');
+const rvCount=_sentMail.length;
+G.batch_sendNotificationEmails_();
+ok(_sentMail.length===rvCount,'送信済みは再送しない');
+
+// 105-3. 上申は送らない／是正のお願いは既定で自動送信しない
+const esApp=mkApp(['WRK-BKK00019'],'書籍',docExtra2);
+frPost(esApp,'FR-ESMAIL');
+G.doPost({parameter:{},postData:{contents:JSON.stringify({ document_id:'DOC-ESMAIL', status:'COMPLETED', application_ref:esApp.application_ref })}});
+const cEs=rows(OPS,'Contracts').find(c=>c.cloudsign_document_id==='DOC-ESMAIL');
+G.updateRow_(OPS,'Contracts','contract_id',cEs.contract_id,{ contact_email:'escalate-mail@example.com' });
+G.batch_sendNotificationEmails_();
+const esLink=G.admin_sendUploadLink(cEs.contract_id);
+const esSub=G.web_submitWork(esLink.token,{ title:'上申', filename:'es.pdf', mimeType:'application/pdf', dataBase64:b64 });
+G.admin_setHumanReview(esSub.submission_id,'ESCALATED','法務確認が必要です');
+_sentMail.length=0;
+G.batch_sendNotificationEmails_();
+ok(!_sentMail.some(m=>m.to==='escalate-mail@example.com'),'上申（ESCALATED）は契約者へ自動送信しない');
+ok(rows(OPS,'Notification_Queue').find(n=>n.type==='REVIEW_RESULT'&&n.license_id===esApp.license_id).status==='MANUAL_REQUIRED',
+  '上申は要対応のまま残る');
+G.admin_setHumanReview(esSub.submission_id,'CORRECTION_REQUIRED','クレジット表記を追記してください');
+G.batch_sendNotificationEmails_();
+ok(!_sentMail.some(m=>/確認のお願い/.test(m.subject)),'是正のお願いは既定で自動送信しない（人が文面を確認する）');
+G.admin_saveGuideConfig({ correction_email_auto_send:'true' });
+G.batch_sendNotificationEmails_();
+const corMail=_sentMail.find(m=>/確認のお願い/.test(m.subject));
+ok(!!corMail&&/クレジット表記を追記してください/.test(corMail.body),'有効にすると審査コメント入りで送信');
+G.admin_saveGuideConfig({ correction_email_auto_send:'false' });
+const mtBadge=G.admin_sendGuideEmailTest('tester@example.com','','BADGE_READY');
+ok(mtBadge.mail_type==='BADGE_READY'&&/認証バッジを発行/.test(_sentMail.slice(-1)[0].subject),'種類を選んでテスト送信できる');
 
 
 // ============ 認証のオン／オフスイッチ（未入金対応） ============

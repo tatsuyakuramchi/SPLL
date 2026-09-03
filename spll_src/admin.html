@@ -88,6 +88,9 @@
   .save:hover{background:#0a5a51;}
   .chk{display:flex;align-items:center;gap:8px;font-size:12px;margin-top:4px;}
   .chk input{width:auto;}
+  .check{display:flex;align-items:flex-start;gap:8px;font-size:12.5px;margin:0 0 10px;cursor:pointer;}
+  .check input{width:auto;margin-top:2px;}
+  .mailkind{border:1px solid var(--line);border-radius:9px;padding:13px 14px 4px;margin-bottom:14px;background:#FBFCFC;}
   .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:11px 20px;border-radius:9px;font-size:13px;z-index:50;opacity:0;transition:.2s;pointer-events:none;box-shadow:0 6px 24px rgba(0,0,0,.25);}
   .toast.show{opacity:1;}
   .toast.err{background:var(--fail);}
@@ -482,25 +485,57 @@
         <div class="pfoot"><button class="save" onclick="saveGuideConfig()">案内設定を保存</button></div>
       </div>
       <div class="panel">
-        <div class="ph"><h3>案内メールの自動送信</h3><span class="hint">Config／5分バッチが送信（GAS②）</span></div>
+        <div class="ph"><h3>自動メールの送信</h3><span class="hint">Config／5分バッチが送信（GAS②）</span></div>
         <div class="pbody">
-          <p class="setnote">締結後、CloudSignが契約書を送付した宛先へ<b>案内ページのURLだけ</b>を自動送信します。<b>本文に口座情報は入りません</b>（振込先は契約書本文に記載）。宛先が取得できない案件は送信されず、ダッシュボードの「要対応の通知」に残ります。</p>
-          <label class="check" style="margin-bottom:10px;"><input type="checkbox" id="gc-guide_email_auto_send"><span>締結後に案内メールを自動送信する<span class="h" style="display:block">GUIDE_EMAIL_AUTO_SEND</span></span></label>
+          <p class="setnote">契約者へ<b>案内ページのURLだけ</b>を自動送信します。<b>どの本文にも口座情報は入りません</b>（振込先は契約書本文に記載）。宛先が取得できない案件は送信されず、ダッシュボードの「要対応の通知」に残ります。差込は <span class="mono">{{license_id}} {{party_name}} {{guide_url}} {{usage_category}} {{works}} {{office_contact}}</span>、審査系はさらに <span class="mono">{{review_comment}} {{badge_note}}</span> が使えます。</p>
           <div class="grid2">
             <div class="fld"><label>差出人名 <span class="h">MAIL_FROM_NAME</span></label><input id="gc-mail_from_name" placeholder="TRPGライツ事務局"></div>
             <div class="fld"><label>返信先アドレス <span class="h">MAIL_REPLY_TO（任意）</span></label><input id="gc-mail_reply_to" placeholder="spll@example.com"></div>
           </div>
-          <div class="fld"><label>件名 <span class="h">GUIDE_EMAIL_SUBJECT</span></label><input id="gc-guide_email_subject"></div>
-          <div class="fld"><label>本文 <span class="h">GUIDE_EMAIL_BODY（差込：{{license_id}} {{party_name}} {{guide_url}} {{usage_category}} {{works}} {{office_contact}}）</span></label><textarea id="gc-guide_email_body" class="code" style="min-height:200px"></textarea></div>
+
+          <div class="mailkind">
+            <label class="check"><input type="checkbox" id="gc-guide_email_auto_send"><span><b>締結直後のご案内</b>を自動送信する<span class="h" style="display:block">GUIDE_EMAIL_AUTO_SEND ／ 締結Webhookの受信時</span></span></label>
+            <div class="fld"><label>件名 <span class="h">GUIDE_EMAIL_SUBJECT</span></label><input id="gc-guide_email_subject"></div>
+            <div class="fld"><label>本文 <span class="h">GUIDE_EMAIL_BODY</span></label><textarea id="gc-guide_email_body" class="code" style="min-height:170px"></textarea></div>
+          </div>
+
+          <div class="mailkind">
+            <label class="check"><input type="checkbox" id="gc-review_email_auto_send"><span><b>作品の審査完了</b>を自動送信する<span class="h" style="display:block">REVIEW_EMAIL_AUTO_SEND ／ 人手審査で「適合（CLEARED）」と記録したとき</span></span></label>
+            <div class="fld"><label>件名 <span class="h">REVIEW_EMAIL_SUBJECT</span></label><input id="gc-review_email_subject"></div>
+            <div class="fld"><label>本文 <span class="h">REVIEW_EMAIL_BODY（{{badge_note}} はバッジ発行済みかで自動的に文が変わります）</span></label><textarea id="gc-review_email_body" class="code" style="min-height:170px"></textarea></div>
+            <div class="setnote" style="margin:0">上申（ESCALATED）は社内判断の途中のため送信しません。要対応一覧に残ります。</div>
+          </div>
+
+          <div class="mailkind">
+            <label class="check"><input type="checkbox" id="gc-badge_email_auto_send"><span><b>認証バッジの発行完了</b>を自動送信する<span class="h" style="display:block">BADGE_EMAIL_AUTO_SEND ／ バッジ画像の生成が終わったとき</span></span></label>
+            <div class="fld"><label>件名 <span class="h">BADGE_EMAIL_SUBJECT</span></label><input id="gc-badge_email_subject"></div>
+            <div class="fld"><label>本文 <span class="h">BADGE_EMAIL_BODY</span></label><textarea id="gc-badge_email_body" class="code" style="min-height:170px"></textarea></div>
+          </div>
+
+          <div class="mailkind">
+            <label class="check"><input type="checkbox" id="gc-correction_email_auto_send"><span><b>是正のお願い</b>を自動送信する<span class="h" style="display:block">CORRECTION_EMAIL_AUTO_SEND ／ 既定は停止（審査コメントをそのまま送るため）</span></span></label>
+            <div class="fld"><label>件名 <span class="h">CORRECTION_EMAIL_SUBJECT</span></label><input id="gc-correction_email_subject"></div>
+            <div class="fld"><label>本文 <span class="h">CORRECTION_EMAIL_BODY（{{review_comment}} に審査コメントが入ります）</span></label><textarea id="gc-correction_email_body" class="code" style="min-height:170px"></textarea></div>
+            <div class="setnote" style="margin:0">自動送信を停止しているあいだは要対応一覧に残り、文面を確認してから手動でご連絡いただけます。</div>
+          </div>
+
           <div class="note" id="mail-status" style="margin:0"></div>
         </div>
         <div class="pfoot">
+          <select id="mail-test-type" style="border:1px solid var(--line);border-radius:7px;padding:8px 10px;font-size:12px;">
+            <option value="GUIDE_READY">締結直後のご案内</option>
+            <option value="REVIEW_RESULT">作品の審査完了</option>
+            <option value="BADGE_READY">認証バッジの発行完了</option>
+            <option value="CORRECTION_REQUEST">是正のお願い</option>
+          </select>
           <input id="mail-test-to" placeholder="テスト送信先アドレス" style="border:1px solid var(--line);border-radius:7px;padding:8px 10px;font-size:12px;min-width:220px;">
           <button class="btn" onclick="sendMailTest()">テスト送信</button>
-          <button class="save" onclick="saveGuideConfig()">案内メール設定を保存</button>
+          <button class="btn" onclick="loadMailDefaults()">既定文を読み込む</button>
+          <button class="save" onclick="saveGuideConfig()">自動メール設定を保存</button>
         </div>
       </div>
-      <div class="note"><b>送信の仕組み：</b>締結で <span class="mono">GUIDE_READY</span> が起票され、GAS②の5分バッチが送信します。失敗は最大3回まで自動再試行し、超えると <span class="mono">SEND_FAILED</span> として要対応一覧に出ます（そこから手動で案内できます）。Google Workspaceの1日あたり送信上限に達した場合は翌日へ持ち越します。</div>
+      <div class="note"><b>送信の仕組み：</b>それぞれの出来事で通知（<span class="mono">GUIDE_READY</span> / <span class="mono">REVIEW_RESULT</span> / <span class="mono">BADGE_READY</span> / <span class="mono">CORRECTION_REQUEST</span>）が起票され、GAS②の5分バッチが送信します。締結や審査の処理の中では送らないため、<b>メール障害で業務処理そのものが失敗することはありません</b>。失敗は最大3回まで自動再試行し、超えると <span class="mono">SEND_FAILED</span> として要対応一覧に出ます（そこから手動で案内できます）。Google Workspaceの1日あたり送信上限に達した場合は翌日へ持ち越します。</div>
+      <div class="note"><b>案内ページのリンクは1本です。</b>審査完了・バッジ発行のメールにも、締結時にお渡ししたものと同じURLを載せます（契約者がブックマークしているリンクがそのまま使えます）。有効期限が切れている場合だけ新しいURLを発行します。「契約管理」タブから手動で再発行した場合は、以前のURLは無効になります。</div>
       <div class="note"><b>案内ページの発行：</b>締結時に自動でURLが払い出され、ダッシュボードの「要対応の通知」に <span class="mono">GUIDE_READY</span> として表示されます。個別に再発行する場合は「契約管理」タブの契約一覧から「案内リンク」を押してください（再発行すると以前のURLは無効になります）。</div>
     </div>
 
@@ -690,7 +725,16 @@ var _mGuide = {office_contact:"spll@example.com",workflow_url:"",
   office_email_domain:"example.co.jp",mail_from_name:"TRPGライツ事務局",mail_reply_to:"spll@example.com",
   guide_email_auto_send:"true",
   guide_email_subject:"【SPLL】ご契約ありがとうございます／今後のお手続きのご案内（{{license_id}}）",
-  guide_email_body:"{{party_name}} 様\n\nこのたびはSPLL利用許諾契約をご締結いただき、ありがとうございます。\n\n　SPLL番号：{{license_id}}\n　ご案内ページ：{{guide_url}}\n\n※ 利用許諾料のお振込先は契約書に記載しています。当事務局がメール本文やご案内ページで口座情報をお知らせすることはありません。\n\n{{office_contact}}"};
+  guide_email_body:"{{party_name}} 様\n\nこのたびはSPLL利用許諾契約をご締結いただき、ありがとうございます。\n\n　SPLL番号：{{license_id}}\n　ご案内ページ：{{guide_url}}\n\n※ 利用許諾料のお振込先は契約書に記載しています。当事務局がメール本文やご案内ページで口座情報をお知らせすることはありません。\n\n{{office_contact}}",
+  review_email_auto_send:"true",
+  review_email_subject:"【SPLL】ご提出作品の審査が完了しました（{{license_id}}）",
+  review_email_body:"{{party_name}} 様\n\nご提出いただいた作品の審査が完了しました。\n{{badge_note}}\n\n　SPLL番号：{{license_id}}\n　ご案内ページ：{{guide_url}}\n\n{{office_contact}}",
+  badge_email_auto_send:"true",
+  badge_email_subject:"【SPLL】認証バッジを発行しました（{{license_id}}）",
+  badge_email_body:"{{party_name}} 様\n\n認証バッジの発行が完了しました。下記のご案内ページからダウンロードいただけます。\n\n　SPLL番号：{{license_id}}\n　ご案内ページ：{{guide_url}}\n\n{{office_contact}}",
+  correction_email_auto_send:"false",
+  correction_email_subject:"【SPLL】ご提出作品について確認のお願い（{{license_id}}）",
+  correction_email_body:"{{party_name}} 様\n\nご提出いただいた作品について、下記の点をご確認ください。\n\n【確認をお願いする点】\n{{review_comment}}\n\n　ご案内ページ：{{guide_url}}\n\n{{office_contact}}"};
 var _mRouting = {form_url_standard_fixed:"",form_url_standard_rate:"",form_url_individual:"https://form.run/@spll-individual",
   form_url_manual_review:"",corporate_inquiry_url:"",corporate_inquiry_email:"spll-corporate@example.com",
   corporate_inquiry_note:"",
@@ -725,7 +769,17 @@ var MOCK = {
       {key:"HANDOFF_SECRET",where:"GAS①・GAS②",what:"申込引き継ぎの署名鍵（両者で同じ値）"}] }; },
   admin_aiTest:function(){ return { ok:true, http:200, project:"legalbridge-488506", region:"asia-northeast1", model:"gemini-2.0-flash" }; },
   admin_setCertEnabled:function(id,on){ _mContracts&&0; return { status:on?"ACTIVE":"SUSPENDED", reason_code:on?"FEE_PAYMENT_CONFIRMED":"FEE_PAYMENT_UNCONFIRMED", changed:true }; },
-  admin_getMailStatus:function(){ return {enabled:_mGuide.guide_email_auto_send!=="false",sent:12,pending:1,failed:0,remaining_quota:1487,from_name:_mGuide.mail_from_name,reply_to:_mGuide.mail_reply_to}; },
+  admin_getMailStatus:function(){ return {enabled:_mGuide.guide_email_auto_send!=="false",sent:16,pending:1,failed:0,remaining_quota:1487,
+    kinds:[{type:"GUIDE_READY",label:"締結直後のご案内",enabled:_mGuide.guide_email_auto_send!=="false",sent:12,pending:1,failed:0},
+      {type:"REVIEW_RESULT",label:"作品の審査完了",enabled:_mGuide.review_email_auto_send!=="false",sent:2,pending:0,failed:0},
+      {type:"BADGE_READY",label:"認証バッジの発行完了",enabled:_mGuide.badge_email_auto_send!=="false",sent:2,pending:0,failed:0},
+      {type:"CORRECTION_REQUEST",label:"是正のお願い",enabled:_mGuide.correction_email_auto_send!=="false",sent:0,pending:0,failed:0}],
+    from_name:_mGuide.mail_from_name,reply_to:_mGuide.mail_reply_to}; },
+  admin_getMailTemplates:function(){ return [["GUIDE_READY","締結直後のご案内","guide_email"],["REVIEW_RESULT","作品の審査完了","review_email"],
+    ["BADGE_READY","認証バッジの発行完了","badge_email"],["CORRECTION_REQUEST","是正のお願い","correction_email"]].map(function(k){
+      return { type:k[0], label:k[1], prefix:k[2].toUpperCase(), auto_default:_mGuide[k[2]+"_auto_send"],
+        default_subject:_mGuide[k[2]+"_subject"], default_body:_mGuide[k[2]+"_body"],
+        subject:_mGuide[k[2]+"_subject"], body:_mGuide[k[2]+"_body"], enabled:_mGuide[k[2]+"_auto_send"]!=="false" }; }); },
   admin_sendGuideEmailTest:function(to){ return {sent:true,to:to}; },
   admin_getGuideConfig:function(){ return Object.assign({}, _mGuide, {workflow_url_effective:_mGuide.workflow_url||"https://script.google.com/macros/s/WORKFLOW/exec"}); },
   admin_saveGuideConfig:function(c){ Object.keys(c||{}).forEach(function(k){ _mGuide[k]=c[k]; }); return true; },
@@ -967,13 +1021,20 @@ function testAi(){
 }
 
 // ---- 締結後の手続き案内（振込先は契約書本文に記載するため設定を持たない）----
-var GC_FIELDS=["office_contact","workflow_url","public_base_url","office_email_domain",
-  "mail_from_name","mail_reply_to","guide_email_subject","guide_email_body"];
+// 自動メールの種類。既定の停止スイッチはサーバー側の MAIL_KINDS と揃える
+var MAIL_PREFIXES=[["guide_email","true"],["review_email","true"],["badge_email","true"],["correction_email","false"]];
+var GC_FIELDS=["office_contact","workflow_url","public_base_url","office_email_domain","mail_from_name","mail_reply_to"]
+  .concat(MAIL_PREFIXES.map(function(p){ return p[0]+"_subject"; }))
+  .concat(MAIL_PREFIXES.map(function(p){ return p[0]+"_body"; }));
 function loadGuideConfig(){
   call("admin_getGuideConfig",[],function(c){
     if(!c) return;
     GC_FIELDS.forEach(function(k){ var el=$("gc-"+k); if(el) el.value=c[k]||""; });
-    var au=$("gc-guide_email_auto_send"); if(au) au.checked=String(c.guide_email_auto_send||"true").toLowerCase()!=="false";
+    MAIL_PREFIXES.forEach(function(p){
+      var au=$("gc-"+p[0]+"_auto_send");
+      if(au) au.checked=String(c[p[0]+"_auto_send"]||p[1]).toLowerCase()!=="false";
+    });
+    loadMailTemplates();
     loadMailStatus();
     var el=$("gc-status"); if(!el) return;
     el.innerHTML='クリエーター向けページURL：<span class="mono">'+esc(c.workflow_url_effective||"（未設定・adminのURLが使われます）")+'</span>';
@@ -981,23 +1042,53 @@ function loadGuideConfig(){
 }
 function saveGuideConfig(){
   var c={}; GC_FIELDS.forEach(function(k){ var el=$("gc-"+k); if(el) c[k]=el.value; });
-  var au=$("gc-guide_email_auto_send"); if(au) c.guide_email_auto_send=au.checked?"true":"false";
+  MAIL_PREFIXES.forEach(function(p){
+    var au=$("gc-"+p[0]+"_auto_send"); if(au) c[p[0]+"_auto_send"]=au.checked?"true":"false";
+  });
   call("admin_saveGuideConfig",[c],function(){ toast("設定を保存しました"); loadGuideConfig(); });
+}
+
+// 未設定の種類は既定文を画面へ入れておく（空欄のまま保存して本文が消えるのを防ぐ）
+var _mailDefaults={};
+function loadMailTemplates(){
+  call("admin_getMailTemplates",[],function(list){
+    (list||[]).forEach(function(k){
+      var p=String(k.prefix||"").toLowerCase();
+      _mailDefaults[p]={subject:k.default_subject||"",body:k.default_body||""};
+      var s=$("gc-"+p+"_subject"), b=$("gc-"+p+"_body");
+      if(s&&!s.value) s.value=k.subject||k.default_subject||"";
+      if(b&&!b.value) b.value=k.body||k.default_body||"";
+    });
+  });
+}
+function loadMailDefaults(){
+  if(!confirm("編集中の件名・本文を、4種類とも既定文で置き換えます。よろしいですか？（保存するまで反映されません）")) return;
+  MAIL_PREFIXES.forEach(function(p){
+    var d=_mailDefaults[p[0]]; if(!d) return;
+    var s=$("gc-"+p[0]+"_subject"), b=$("gc-"+p[0]+"_body");
+    if(s) s.value=d.subject; if(b) b.value=d.body;
+  });
+  toast("既定文を読み込みました（保存すると反映されます）");
 }
 
 function loadMailStatus(){
   call("admin_getMailStatus",[],function(m){
     var el=$("mail-status"); if(!el||!m) return;
-    el.innerHTML=(m.enabled?'<b style="color:var(--pass)">✓ 自動送信 有効</b>':'<b style="color:var(--fail)">⚠ 自動送信 停止中</b>')+
-      "　／　送信済 "+m.sent+" 件・送信待ち "+m.pending+" 件・失敗 "+m.failed+" 件"+
-      (m.remaining_quota!=null?("　／　本日の残り送信可能数 "+m.remaining_quota):"");
+    var kinds=(m.kinds||[]).map(function(k){
+      return (k.enabled?'<b style="color:var(--pass)">✓</b> ':'<b style="color:var(--fail)">⚠</b> ')+esc(k.label)+
+        ' <span class="h">（送信済 '+k.sent+'・待ち '+k.pending+'・失敗 '+k.failed+'）</span>';
+    }).join('　／　');
+    el.innerHTML=(kinds||"")+
+      '<div style="margin-top:6px">合計：送信済 '+m.sent+" 件・送信待ち "+m.pending+" 件・失敗 "+m.failed+" 件"+
+      (m.remaining_quota!=null?("　／　本日の残り送信可能数 "+m.remaining_quota):"")+"</div>";
   });
 }
 function sendMailTest(){
   var to=($("mail-test-to")||{}).value||"";
+  var type=($("mail-test-type")||{}).value||"GUIDE_READY";
   if(!to.trim()){ toast("テスト送信先を入力してください",true); return; }
-  if(!confirm("入力したアドレスへ案内メールの見本を送信します。よろしいですか？")) return;
-  call("admin_sendGuideEmailTest",[to,""],function(r){ toast("テスト送信しました："+((r&&r.to)||to)); loadMailStatus(); });
+  if(!confirm("入力したアドレスへ、選択した種類のメールの見本を送信します。よろしいですか？")) return;
+  call("admin_sendGuideEmailTest",[to,"",type],function(r){ toast("テスト送信しました："+((r&&r.to)||to)); loadMailStatus(); });
 }
 
 // ---- 申込導線（経路別フォームURL・法人の案内先）----
