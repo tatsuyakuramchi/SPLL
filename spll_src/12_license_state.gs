@@ -42,8 +42,11 @@ function normalizeCaseStatus_(v){
 
 const LICENSE_STATE_COLUMNS = ['case_status','contract_status','review_status','certification_status'];
 
+/** 認証状態の旧値。PAYMENT_HOLD は「SUSPENDED＋理由 FEE_PAYMENT_UNCONFIRMED」に統合した（移行前の行が残っていても読める） */
+const LEGACY_CERT_STATUS_ALIAS = { PAYMENT_HOLD: 'SUSPENDED' };
+function normalizeCertStatus_(v){ const s = String(v || ''); return LEGACY_CERT_STATUS_ALIAS[s] || s; }
 /** 認証が「存在して効力の対象になっている」状態か（停止中も含む。失効・終了・未発行は含まない） */
-function certLive_(status){ return ['ACTIVE','SUSPENDED','PAYMENT_HOLD','EXPIRED'].indexOf(String(status || '')) >= 0; }
+function certLive_(status){ return ['ACTIVE','SUSPENDED','EXPIRED'].indexOf(normalizeCertStatus_(status)) >= 0; }
 /** 認証の行が存在するか（失効・終了済も含む。未発行だけを除く） */
 function certExists_(status){ const s = String(status || ''); return !!s && s !== 'NOT_ISSUED'; }
 
@@ -88,9 +91,9 @@ const LICENSE_TRANSITIONS = {
     from: ['REVIEWING','CORRECTION_REQUIRED','MANUAL_REVIEW','CERTIFIED','SUSPENDED'],
     to: function(ctx, cur){
       // 認証を持つ案件の再審査が通ったら現在地は認証の状態へ戻す。未発行なら発行待ち（REVIEWING のまま）
-      const c = String(cur.certification_status);
+      const c = normalizeCertStatus_(cur.certification_status);
       if(c === 'ACTIVE') return { case_status:'CERTIFIED', review_status:'CLEARED' };
-      if(['SUSPENDED','PAYMENT_HOLD','EXPIRED'].indexOf(c) >= 0) return { case_status:'SUSPENDED', review_status:'CLEARED' };
+      if(['SUSPENDED','EXPIRED'].indexOf(c) >= 0) return { case_status:'SUSPENDED', review_status:'CLEARED' };
       return { case_status:'REVIEWING', review_status:'CLEARED' };
     }
   },
@@ -120,7 +123,7 @@ const LICENSE_TRANSITIONS = {
   // 認証の状態変更は「認証を持っているか」で判定する。認証済の案件に新しい版が提出されて
   // 現在地が REVIEWING になっていても、認証そのものは停止・復帰できる必要がある。
   // 現在地が認証の状態を示しているとき（CERTIFIED / SUSPENDED）だけ現在地も追随させる。
-  // ctx.status で SUSPENDED / PAYMENT_HOLD / EXPIRED を区別する
+  // ctx.status で SUSPENDED / EXPIRED を区別する（停止理由は認証の reason_code が持つ）
   CERTIFICATE_SUSPENDED: {
     from: '*',
     guard: function(ctx, cur){ return certLive_(cur.certification_status) ? '' : '認証が発行されていません（certification_status=' + cur.certification_status + '）'; },
@@ -137,7 +140,7 @@ const LICENSE_TRANSITIONS = {
     guard: function(ctx, cur){
       if(cur.contract_status !== 'SIGNED')
         return '終了済み又は未成立の契約では認証を再有効化できません（contract_status=' + cur.contract_status + '）。再開は新しい契約の締結で行います';
-      if(['SUSPENDED','PAYMENT_HOLD','EXPIRED','REVOKED'].indexOf(cur.certification_status) < 0)
+      if(['SUSPENDED','EXPIRED','REVOKED'].indexOf(normalizeCertStatus_(cur.certification_status)) < 0)
         return '再有効化できる認証状態ではありません（certification_status=' + cur.certification_status + '）';
       return '';
     },
@@ -308,7 +311,7 @@ function certificateEventFor_(status, currentCertStatus){
   if(s === 'ACTIVE') return certExists_(currentCertStatus) ? 'CERTIFICATE_RESTORED' : 'CERTIFICATE_ISSUED';
   if(s === 'REVOKED') return 'CERTIFICATE_REVOKED';
   if(s === 'TERMINATED') return 'CONTRACT_TERMINATED';
-  return 'CERTIFICATE_SUSPENDED';   // SUSPENDED / PAYMENT_HOLD / EXPIRED
+  return 'CERTIFICATE_SUSPENDED';   // SUSPENDED / EXPIRED
 }
 
 /**

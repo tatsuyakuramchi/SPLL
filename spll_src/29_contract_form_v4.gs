@@ -4,9 +4,12 @@
 function api_getLegalTextsV4(){
   const p = publishedLegalDoc_('PRIVACY');
   const g = publishedLegalDoc_('GUIDELINE');
+  // 本番で公開版が無ければ既定文へ落とさず申込停止（web_createApplicationV4 も SERVICE_UNAVAILABLE で拒否する）
+  const blocked = legalApplyBlock_(p, g);
   return {
-    privacy: p ? p.content_html : getConfig_('LEGAL_PRIVACY_TEXT', DEFAULT_PRIVACY),
-    guideline: g ? g.content_html : getConfig_('LEGAL_GUIDELINE_TEXT', DEFAULT_GUIDELINE),
+    apply_blocked: !!blocked, blocked_reason: blocked,
+    privacy: p ? p.content_html : (blocked ? '' : getConfig_('LEGAL_PRIVACY_TEXT', DEFAULT_PRIVACY)),
+    guideline: g ? g.content_html : (blocked ? '' : getConfig_('LEGAL_GUIDELINE_TEXT', DEFAULT_GUIDELINE)),
     privacy_version: p ? p.version : '', privacy_doc_id: p ? p.legal_document_id : '',
     guideline_version: g ? g.version : '', guideline_doc_id: g ? g.legal_document_id : ''
   };
@@ -48,8 +51,8 @@ function web_createApplicationV4(params){
 
   const pubP = publishedLegalDoc_('PRIVACY');
   const pubG = publishedLegalDoc_('GUIDELINE');
-  if(isProd_() && (!pubP || !pubG))
-    throw new Error('SERVICE_UNAVAILABLE: CloudSign FORM v4の公開版PRIVACY/GUIDELINEが未設定です');
+  const blocked = legalApplyBlock_(pubP, pubG);
+  if(blocked) throw new Error('SERVICE_UNAVAILABLE: ' + blocked);
   if(pubP && String(params.privacyDocumentId||'') !== String(pubP.legal_document_id))
     throw new Error('VALIDATION_ERROR: 個人情報通知が更新されました。再度ご確認ください。');
   if(pubG && String(params.guidelineDocumentId||'') !== String(pubG.legal_document_id))

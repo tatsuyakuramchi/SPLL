@@ -182,7 +182,7 @@ function render(c){
       : '<div class="note" style="margin:0">作品のご提出と審査の完了後に発行されます。上の「作品提出ページを開く」からご提出ください。</div>';
   }
   $("gCertId").textContent=c.cert_id||"—";
-  var cm={ACTIVE:"✔ 有効",SUSPENDED:"一時停止",PAYMENT_HOLD:"一時停止",REVOKED:"失効",EXPIRED:"期限切れ",NONE:"未発行（審査完了後に発行）"};
+  var cm={ACTIVE:"✔ 有効",SUSPENDED:"一時停止",REVOKED:"失効",EXPIRED:"期限切れ",TERMINATED:"終了",NONE:"未発行（審査完了後に発行）"};
   $("gCertStatus").textContent=cm[c.cert_status]||c.cert_status||"—";
   $("gVerify").href=c.verify_url||"#";
   $("gContact").innerHTML=c.office_contact

@@ -171,7 +171,7 @@
         </select>
         <select id="lf-cert" onchange="loadLicense()">
           <option value="">認証：すべて</option><option value="NOT_ISSUED">未発行</option><option value="ACTIVE">有効</option>
-          <option value="PAYMENT_HOLD">未入金で停止</option><option value="SUSPENDED">停止</option><option value="REVOKED">失効</option>
+          <option value="SUSPENDED">停止（利用許諾料未確認など）</option><option value="REVOKED">失効</option><option value="TERMINATED">終了</option>
         </select>
         <select id="lf-usage" onchange="loadLicense()"><option value="">利用目的：すべて</option></select>
         <button class="btn" onclick="$('lf-q').value='';$('lf-case').value='';$('lf-cert').value='';$('lf-usage').value='';loadLicense()">クリア</button>
@@ -688,7 +688,7 @@ var MOCK = {
     schema_fields:["overall_result","risk_score","human_review_required","findings"] }; },
   admin_saveAiConfig:function(c){ if(c&&c.prompt) _mAiPrompt=c.prompt; return { effective_version:"v1:9f8e7d6c", warnings:(c&&c.prompt&&c.prompt.indexOf("{{rules}}")<0)?["{{rules}} が含まれていないため、原作別ルールは本文の末尾へ自動付与されます"]:[] }; },
   admin_previewAiPrompt:function(){ return { text:_mAiPrompt.replace("{{rules}}", JSON.stringify([{work_id:"WRK-ARK00012",work_name:"新クトゥルフ神話TRPG",ok:["世界観・神話設定"],no:["公式イラスト流用"],rules:[]}],null,1)), length:420, works:["新クトゥルフ神話TRPG"], effective_version:"v1:1a2b3c4d" }; },
-  admin_setCertEnabled:function(id,on){ _mContracts&&0; return { status:on?"ACTIVE":"PAYMENT_HOLD", changed:true }; },
+  admin_setCertEnabled:function(id,on){ _mContracts&&0; return { status:on?"ACTIVE":"SUSPENDED", reason_code:on?"FEE_PAYMENT_CONFIRMED":"FEE_PAYMENT_UNCONFIRMED", changed:true }; },
   admin_getMailStatus:function(){ return {enabled:_mGuide.guide_email_auto_send!=="false",sent:12,pending:1,failed:0,remaining_quota:1487,from_name:_mGuide.mail_from_name,reply_to:_mGuide.mail_reply_to}; },
   admin_sendGuideEmailTest:function(to){ return {sent:true,to:to}; },
   admin_getGuideConfig:function(){ return Object.assign({}, _mGuide, {workflow_url_effective:_mGuide.workflow_url||"https://script.google.com/macros/s/WORKFLOW/exec"}); },
@@ -1115,7 +1115,8 @@ var CASE_LABEL={APPLICATION_RECEIVED:{cls:"wait",label:"申込受付"},CONTRACT_
   SIGNING:{cls:"sign",label:"締結待ち"},HOLD:{cls:"fail",label:"条件確認中"},AWAITING_SUBMISSION:{cls:"pass",label:"作品提出待ち"},REVIEWING:{cls:"review",label:"審査中"},
   CORRECTION_REQUIRED:{cls:"fail",label:"是正対応中"},CERTIFIED:{cls:"pass",label:"認証済"},SUSPENDED:{cls:"review",label:"認証停止"},TERMINATED:{cls:"wait",label:"終了"},CANCELLED:{cls:"wait",label:"取消"},
   APPLIED:{cls:"wait",label:"申込受付"},CONTRACTING:{cls:"review",label:"契約手続中"},SIGNED:{cls:"pass",label:"締結済"},CLOSED:{cls:"wait",label:"終了"}};
-var CERT_LABEL={NOT_ISSUED:{cls:"wait",label:"未発行"},ACTIVE:{cls:"pass",label:"有効"},PAYMENT_HOLD:{cls:"review",label:"未入金で停止"},SUSPENDED:{cls:"review",label:"停止"},
+var CERT_LABEL={NOT_ISSUED:{cls:"wait",label:"未発行"},ACTIVE:{cls:"pass",label:"有効"},SUSPENDED:{cls:"review",label:"停止"},
+  PAYMENT_HOLD:{cls:"review",label:"停止（旧値・移行未実施）"},
   REVOKED:{cls:"fail",label:"失効"},TERMINATED:{cls:"wait",label:"終了"},EXPIRED:{cls:"wait",label:"期限切れ"},NONE:{cls:"wait",label:"未発行"}};
 var REVIEW_LABEL={NOT_STARTED:"—",NOT_REQUIRED:"—",AWAITING_SUBMISSION:"提出待ち",IN_REVIEW:"審査中",CLEARED:"承認",CORRECTION_REQUIRED:"是正要求",ESCALATED:"上申",PENDING:"審査中"};
 function casePill(st){ return pill(CASE_LABEL[String(st)]||{cls:"wait",label:String(st||"—")}); }
@@ -1237,7 +1238,7 @@ function loadCertRequests(){
     var panel=$("certreq-panel"), tb=$("certreq-tbody"); tb.innerHTML="";
     if(!rows.length){ panel.style.display="none"; return; }
     panel.style.display="";
-    var stMap={REVOKED:"失効",ACTIVE:"再有効化",TERMINATED:"契約終了",PAYMENT_HOLD:"支払保留",SUSPENDED:"一時停止",EXPIRED:"期限切れ"};
+    var stMap={REVOKED:"失効",ACTIVE:"再有効化",TERMINATED:"契約終了",SUSPENDED:"一時停止",EXPIRED:"期限切れ"};
     rows.forEach(function(r){
       var tr=document.createElement("tr");
       tr.appendChild(td('<span class="id">'+esc(String(r.request_id).slice(0,8))+'…</span>'));
@@ -1377,7 +1378,7 @@ function renderLicenseDetail(d){
   }
   if((d.changeRequests||[]).length) h+='<table style="margin-top:10px"><thead><tr><th>申請</th><th>変更先</th><th>理由</th><th>申請者</th><th>状態</th></tr></thead><tbody>'+
     d.changeRequests.map(function(r){ return '<tr><td class="id">'+esc(String(r.request_id).slice(0,8))+'…</td><td>'+esc(r.requested_status)+'</td><td>'+esc(r.reason_text)+'</td><td>'+esc(r.requested_by)+'</td><td>'+esc(r.status)+'</td></tr>'; }).join("")+'</tbody></table>';
-  h+='<div class="actions" style="margin-top:10px">'+certActionButtons(lid, cert?cert.status:"NONE", function(){ openLicense(lid); })+'</div></div>';
+  h+='<div class="actions" style="margin-top:10px">'+certActionButtons(lid, cert?cert.status:"NONE", function(){ openLicense(lid); }, cert?cert.reason_code:"")+'</div></div>';
   // 要対応の通知
   if((d.pendingNotifications||[]).length){
     h+='<div class="dsec"><h4>要対応の通知</h4><table><thead><tr><th>種別</th><th>状態</th><th>起票</th><th>内容</th></tr></thead><tbody>'+
@@ -1397,26 +1398,29 @@ function renderLicenseDetail(d){
   }
   $("ld-body").innerHTML=h;
 }
-/** 認証の操作ボタン（SPLL番号で操作）。詳細ドロワーと認証一覧で共用 */
-function certActionButtons(lid, cs, after){
+/**
+ * 認証の操作ボタン（SPLL番号で操作）。詳細ドロワーと認証一覧で共用。
+ * 状態（ACTIVE/SUSPENDED/…）と理由（reason_code）は別物：担当者1名で戻せるのは「利用許諾料未確認」で止めた停止だけ。
+ */
+function certActionButtons(lid, cs, after, reasonCode){
   var id="ca_"+lid.replace(/[^A-Za-z0-9]/g,"_");
   window[id]=after||function(){};
   var b='';
-  if(cs==="ACTIVE"||cs==="PAYMENT_HOLD"){
-    b+='<button class="btn '+(cs==="ACTIVE"?"d":"p")+'" onclick="toggleCert(\''+esc(lid)+'\',\''+cs+'\','+id+')">'+(cs==="ACTIVE"?"認証をオフ（未入金）":"認証をオン（入金確認）")+'</button>';
-  }
+  var feeHold=(cs==="SUSPENDED"||cs==="PAYMENT_HOLD")&&(reasonCode==="FEE_PAYMENT_UNCONFIRMED"||reasonCode==="PAYMENT_HOLD"||cs==="PAYMENT_HOLD");
+  if(cs==="ACTIVE") b+='<button class="btn d" onclick="toggleCert(\''+esc(lid)+'\',\'ACTIVE\','+id+')">認証を停止（利用許諾料未確認）</button>';
+  if(feeHold) b+='<button class="btn p" onclick="toggleCert(\''+esc(lid)+'\',\'SUSPENDED\','+id+')">認証を復帰（入金確認）</button>';
   if(cs==="ACTIVE") b+='<button class="btn d" onclick="requestCert(\''+esc(lid)+'\',\'REVOKED\','+id+')">失効を申請</button>';
-  else if(cs==="REVOKED") b+='<button class="btn" onclick="requestCert(\''+esc(lid)+'\',\'ACTIVE\','+id+')">再有効化を申請</button>';
+  else if(cs==="REVOKED"||(cs==="SUSPENDED"&&!feeHold)) b+='<button class="btn" onclick="requestCert(\''+esc(lid)+'\',\'ACTIVE\','+id+')">再有効化を申請</button>';
   return b;
 }
 function toggleCert(lid, cs, after){
   if(cs==="ACTIVE"){
-    var r=prompt("認証を無効にします。理由（未入金の状況など・必須）：","利用許諾料が未入金のため");
+    var r=prompt("認証を一時停止します（状態：SUSPENDED／理由：利用許諾料未確認）。理由の補足（必須）：","利用許諾料の入金が確認できないため");
     if(r===null) return; if(!r.trim()){ toast("理由は必須です",true); return; }
-    call("admin_setCertEnabled",[lid,false,r],function(){ toast("認証をオフにしました（検証は「無効」と表示されます）"); after&&after(); loadCert(); loadLicense(); });
+    call("admin_setCertEnabled",[lid,false,r],function(){ toast("認証を停止しました（検証は「無効」と表示されます）"); after&&after(); loadCert(); loadLicense(); });
   }else{
-    if(!confirm("入金を確認できたものとして認証をオンに戻します。よろしいですか？")) return;
-    call("admin_setCertEnabled",[lid,true,"入金確認により再有効化"],function(){ toast("認証をオンに戻しました"); after&&after(); loadCert(); loadLicense(); });
+    if(!confirm("入金を確認できたものとして認証を復帰させます。よろしいですか？")) return;
+    call("admin_setCertEnabled",[lid,true,"入金確認により復帰"],function(){ toast("認証を復帰させました"); after&&after(); loadCert(); loadLicense(); });
   }
 }
 function requestCert(lid, status, after){
@@ -1441,7 +1445,7 @@ function loadCert(){
       tr.appendChild(td(esc(c.status==="ACTIVE"?"—":(c.reason_text||c.reason_code||"—"))));
       tr.appendChild(td(pill(c.badge_status==="ISSUED"?{cls:"pass",label:"発行済"}:{cls:"wait",label:"生成中"})));
       tr.appendChild(td(c.pending_request?pill({cls:"review",label:"承認待ち："+esc(c.pending_request.requested_status)}):'<span class="id">—</span>'));
-      var act=document.createElement("td"); act.className="actions"; act.innerHTML=certActionButtons(c.license_id||c.legacy_contract_id, c.status, null);
+      var act=document.createElement("td"); act.className="actions"; act.innerHTML=certActionButtons(c.license_id||c.legacy_contract_id, c.status, null, c.reason_code);
       tr.appendChild(act); tb.appendChild(tr);
     });
   });
@@ -1575,7 +1579,7 @@ MOCK.admin_getLicenseCase=function(id){ return { license:{license_id:id,party_di
   legacy:{contract_id:"CTR-202608-0001",handoffs:[{handoff_version:1,status:"ACCEPTED"}]} }; };
 MOCK.admin_listCertifications=function(){ return [
   {cert_id:"CERT-202608-0003",license_id:"SPLL-202608-0001",party_display_name:"山田太郎",works:"新クトゥルフ神話TRPG ルールブック",status:"ACTIVE",reason_text:"審査完了により発行",issued_at:"2026-08-20",badge_status:"ISSUED",pending_request:{request_id:"req-mock-0001",requested_status:"REVOKED",requested_by:"ops@example.com"}},
-  {cert_id:"CERT-202607-0001",license_id:"SPLL-202607-0001",party_display_name:"高橋",works:"インセイン",status:"PAYMENT_HOLD",reason_text:"利用許諾料が未入金のため",issued_at:"2026-07-30",badge_status:"ISSUED",pending_request:null}
+  {cert_id:"CERT-202607-0001",license_id:"SPLL-202607-0001",party_display_name:"高橋",works:"インセイン",status:"SUSPENDED",reason_code:"FEE_PAYMENT_UNCONFIRMED",reason_text:"利用許諾料の入金が確認できないため",issued_at:"2026-07-30",badge_status:"ISSUED",pending_request:null}
 ]; };
 MOCK.admin_setCertEnabled=function(){ return {status:"ACTIVE",changed:true}; };
 MOCK.admin_getCertStatus=function(){ return {status:"ACTIVE"}; };

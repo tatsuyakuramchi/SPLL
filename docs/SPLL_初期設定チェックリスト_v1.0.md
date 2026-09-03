@@ -223,7 +223,7 @@ admin のウェブアプリURL（`/exec`）を開き、「設定」タブで入�
 - [ ] 締結Webhook受信後、Contracts に `contact_email` が入り `contact_email_source` が `CLOUDSIGN` になる
 - [ ] 5分以内に案内メールが届き、案内ページで **SPLL番号・提出リンク・バッジ** が見える（振込先は出ない。契約書に記載）
 - [ ] 提出リンクからDriveフォルダが開き、ファイル投入後「提出を確定」で共有が解除される
-- [ ] 管理画面の**認証スイッチ**でOFF（PAYMENT_HOLD）にすると検証ページが「有効」でなくなる
+- [ ] 管理画面の**認証スイッチ**で停止（SUSPENDED／理由 FEE_PAYMENT_UNCONFIRMED）にすると検証ページが「有効」でなくなり、バッジも取得できなくなる
 
 ---
 

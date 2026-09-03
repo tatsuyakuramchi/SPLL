@@ -59,7 +59,7 @@ function certificationBlockers_(licenseId, submissionId){
 /**
  * 人手審査 CLEARED を受けて認証を発行する。
  * 既に ACTIVE の認証がある案件（再提出の再審査など）は再発行せず、そのまま返す。
- * 停止中（PAYMENT_HOLD 等）の認証は審査通過だけでは復帰させない（未入金の判断は別）。
+ * 停止中（SUSPENDED：利用許諾料未確認など）の認証は審査通過だけでは復帰させない（停止理由の解消は別の判断）。
  *
  * 認証の行と台帳（License_Cases）は一緒に変わるべきものなので、
  *   ロック → 前提の再確認 → 台帳遷移の事前検証 → 認証の行を作成 → 台帳を遷移 → Events

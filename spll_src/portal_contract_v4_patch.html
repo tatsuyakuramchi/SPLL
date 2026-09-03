@@ -51,6 +51,14 @@
     const warn = ws3.querySelector('.warnnote'); if(warn) warn.textContent='契約条件・禁止事項・反社会的勢力排除その他の法的条件は、CloudSignで送付されるSPLL利用許諾契約書をご確認のうえ同意してください。';
   }
 
+  // 申込停止の理由（空なら受付可）。openApply はこれを見て止める
+  var APPLY_BLOCKED = '';
+  const openApplyOrig = openApply;
+  openApply = function(){
+    if(APPLY_BLOCKED){ alert(APPLY_BLOCKED); return; }
+    return openApplyOrig.apply(this, arguments);
+  };
+
   // 法人問い合わせ窓口の設定を取得（index.htmlのローダは corporate を保持しないため）
   if(typeof hasGas !== 'undefined' && hasGas){
     google.script.run.withSuccessHandler(function(c){
@@ -62,6 +70,12 @@
   if(typeof hasGas !== 'undefined' && hasGas){
     google.script.run.withSuccessHandler(function(l){
       if(!l) return;
+      // 本番で公開版の法務文書が無いときは、既定文で同意を取らず申込を止める（フェイルクローズ）
+      if(l.apply_blocked){
+        APPLY_BLOCKED = l.blocked_reason || '公開版の法務文書が未設定のため、現在申込を受け付けられません。';
+        if(typeof failClosed === 'function') failClosed(APPLY_BLOCKED);
+        return;
+      }
       if(l.privacy) LEGAL.privacy = l.privacy;
       if(l.guideline){
         LEGAL.guideline = l.guideline;

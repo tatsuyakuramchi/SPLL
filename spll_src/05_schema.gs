@@ -388,7 +388,10 @@ function setup_all(adminEmail){
   catch(e){ report.steps.push('setup_migrateLicenseForeignKeysV2 失敗: ' + String(e && e.message || e)); }
   // 5-3) 廃止ロール ACCOUNTING → AUDITOR（RP-002 §13.3）
   try{ const ar = setup_migrateAdminRolesV2(); report.steps.push('setup_migrateAdminRolesV2: ' + JSON.stringify(ar)); }
-  catch(e){ report.steps.push('setup_migrateLicenseCases 失敗: ' + String(e && e.message || e)); }
+  catch(e){ report.steps.push('setup_migrateAdminRolesV2 失敗: ' + String(e && e.message || e)); }
+  // 5-4) 認証状態の旧値 PAYMENT_HOLD → SUSPENDED＋理由（P1-6）
+  try{ const cs = setup_migrateCertStatesV3(); report.steps.push('setup_migrateCertStatesV3: ' + JSON.stringify(cs)); }
+  catch(e){ report.steps.push('setup_migrateCertStatesV3 失敗: ' + String(e && e.message || e)); }
 
   // 6) 転記用プロパティ一覧（ScriptPropertiesはプロジェクトごとに独立）
   const P = function(k){ return sp.getProperty(k) || ''; };
@@ -544,6 +547,36 @@ function setup_migrateLicenseForeignKeysV2(){
     error_detail: unresolved.length ? ('未解決: ' + unresolved.join(', ')).slice(0,500) : '' });
   logEvent_('batch','migrateLicenseForeignKeysV2',actor_(),null,{ updated:updated, skipped:skipped, normalized:normalized, unresolved:unresolved.length });
   return { status:status, updated:updated, skipped:skipped, normalized:normalized, unresolved:unresolved };
+}
+
+/**
+ * 認証状態の移行（P1-6・冪等）。PAYMENT_HOLD という「理由を状態に混ぜた値」を廃止し、
+ * 法的状態 SUSPENDED ＋ 理由 reason_code=FEE_PAYMENT_UNCONFIRMED に分ける。
+ * 対象：Certificates.status / License_Cases.certification_status / Certificate_Change_Requests.requested_status
+ */
+function setup_migrateCertStatesV3(){
+  if(readRows_(ssOps_(),'Admin_Users').length > 0) requireRole_(['SYSTEM_ADMIN']);
+  const ops = ssOps_();
+  let certs = 0, cases = 0, requests = 0;
+  readRows_(ops,'Certificates').forEach(function(c){
+    if(String(c.status) !== 'PAYMENT_HOLD') return;
+    updateRow_(ops,'Certificates','cert_id',c.cert_id,{ status:'SUSPENDED', reason_code:CERT_REASON_FEE_HOLD,
+      reason_text: c.reason_text || '利用許諾料の入金が確認できないため（旧 PAYMENT_HOLD）' });
+    logEvent_('certificate', c.cert_id, actor_(), { status:'PAYMENT_HOLD' }, { status:'SUSPENDED', reason_code:CERT_REASON_FEE_HOLD, migration:'migrateCertStatesV3' });
+    certs++;
+  });
+  readRows_(ops,'License_Cases').forEach(function(k){
+    if(String(k.certification_status) !== 'PAYMENT_HOLD') return;
+    updateLicenseCaseRaw_(k.license_id, { certification_status:'SUSPENDED' });   // 値の読み替えだけ。遷移ではない
+    cases++;
+  });
+  readRows_(ops,'Certificate_Change_Requests').forEach(function(r){
+    if(String(r.requested_status) !== 'PAYMENT_HOLD') return;
+    updateRow_(ops,'Certificate_Change_Requests','request_id',r.request_id,{ requested_status:'SUSPENDED', reason_code: r.reason_code || CERT_REASON_FEE_HOLD });
+    requests++;
+  });
+  logEvent_('batch','migrateCertStatesV3',actor_(),null,{ certificates:certs, license_cases:cases, change_requests:requests });
+  return { certificates:certs, license_cases:cases, change_requests:requests };
 }
 
 /**

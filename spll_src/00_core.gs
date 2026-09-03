@@ -151,8 +151,10 @@ function api_getLegalTexts(){
   const p = publishedLegalDoc_('PRIVACY');
   const t = publishedLegalDoc_('TERMS');
   const g = publishedLegalDoc_('GUIDELINE');
+  const blocked = legalApplyBlock_(p, g);
   return {
-    privacy:         p ? p.content_html : getConfig_('LEGAL_PRIVACY_TEXT', DEFAULT_PRIVACY),
+    apply_blocked: !!blocked, blocked_reason: blocked,
+    privacy:         p ? p.content_html : (blocked ? '' : getConfig_('LEGAL_PRIVACY_TEXT', DEFAULT_PRIVACY)),
     termsTemplate:   t ? t.content_html : getConfig_('LEGAL_TERMS_TEMPLATE', DEFAULT_TERMS_TEMPLATE),
     guideline:       g ? g.content_html : getConfig_('LEGAL_GUIDELINE_TEXT', DEFAULT_GUIDELINE),
     privacy_version: p ? p.version : '', privacy_doc_id: p ? p.legal_document_id : '',
@@ -160,6 +162,19 @@ function api_getLegalTexts(){
     guideline_version: g ? g.version : '', guideline_doc_id: g ? g.legal_document_id : ''
   };
 }
+/**
+ * 本番で公開版の法務文書（PRIVACY・GUIDELINE）が無いときは、既定文を見せて同意を取るのではなく申込を止める。
+ * 同意証跡（Application_Consents）に文書IDの無い同意を残さないため。開発・検証では既定文へフォールバックする。
+ * 戻り値：停止理由（空文字なら受付可）
+ */
+function legalApplyBlock_(pubPrivacy, pubGuideline){
+  if(!isProd_()) return '';
+  const missing = [];
+  if(!pubPrivacy) missing.push('個人情報の取得同意（PRIVACY）');
+  if(!pubGuideline) missing.push('二次創作ガイドライン（GUIDELINE）');
+  return missing.length ? ('公開版の法務文書が未設定のため、現在申込を受け付けられません（' + missing.join('・') + '）。管理コンソール「設定→同意文・規約」で公開してください。') : '';
+}
+
 /**
  * クリエーター向けページ（提出・手続き案内・バッジ・検証）を配信するGAS②のURL。
  * admin（GAS③）から発行するリンクは自プロジェクトのURLでは開けないため、Configで明示する。
@@ -362,11 +377,14 @@ function setConfig_(key, value){
 }
 
 // ---- 9.1 同意文・規約 ----
+// 既定文は開発・検証用のフォールバック。正本は docs/SPLL_個人情報取得同意_v1.0.md（公開用HTMLは docs/legal/）。
+// 本番（ENVIRONMENT=production）では PUBLISHED の PRIVACY が無ければ既定文へ落とさず申込を停止する（api_getLegalTexts*）。
+// SPLL は契約・認証の管理だけを行い、振込先や清算・配分は扱わない（RP-002）。取得情報・利用目的もそれに揃える。
 const DEFAULT_PRIVACY =
-'<h4>1. 取得する情報</h4><ol><li>氏名、連絡先（メールアドレス）</li><li>申込作品・利用態様、提出作品データ</li><li>契約に至る場合は、住所・振込先その他の契約履行に必要な情報</li></ol>'+
+'<h4>1. 取得する情報</h4><ol><li>氏名</li><li>メールアドレス</li><li>住所（契約に至る場合）</li><li>申込対象作品・利用態様</li><li>提出作品データ</li><li>その他、契約の締結および管理に必要な情報</li></ol>'+
 '<h4>1の2. AIによる審査処理</h4><ol><li>提出作品はVertex AI Gemini による一次審査に付されます。提出作品に個人情報が含まれる場合、当該情報もAI処理の対象となります（審査以外の目的には使用しません）。</li></ol>'+
-'<h4>2. 利用目的</h4><ol><li>SPLL利用許諾の審査・契約の締結および管理</li><li>提出作品の適合性審査（AIによる一次審査を含む）</li><li>利用許諾料・配分の計算および清算</li><li>お問い合わせ対応・連絡</li><li>法令遵守および権利保護</li></ol>'+
-'<h4>3. 委託・第三者提供</h4><ol><li>契約締結のため電子契約サービス（CloudSign）に取扱いを委託します。</li><li>データの保管・処理のためGoogle Workspace／Google Cloud（Vertex AI Geminiによる作品審査を含む）に取扱いを委託します。</li><li>法令に基づく場合を除き、ご本人の同意なく第三者へ提供しません。</li></ol>'+
+'<h4>2. 利用目的</h4><ol><li>SPLL利用許諾の申込受付</li><li>契約の締結および管理</li><li>提出作品の適合性審査（AIによる一次審査を含む）</li><li>利用許諾料に関する契約履行および社内事務</li><li>お問い合わせ対応・連絡</li><li>法令遵守および権利保護</li></ol>'+
+'<h4>3. 委託・第三者提供</h4><ol><li>契約締結のため電子契約サービス（CloudSign）および申込フォーム（formrun）に取扱いを委託します。</li><li>データの保管・処理のためGoogle Workspace／Google Cloud（Vertex AI Geminiによる作品審査を含む）に取扱いを委託します。</li><li>法令に基づく場合を除き、ご本人の同意なく第三者へ提供しません。</li></ol>'+
 '<h4>4. 保有期間</h4><ol><li>契約に至らなかった申込情報・提出作品データは、取得から1年で削除します。</li><li>契約に至った場合は、契約期間および関係法令の定める期間、保有します。</li></ol>'+
 '<h4>5. 開示等の請求</h4><ol><li>保有個人データの開示・訂正・利用停止等のご請求は、下記窓口で受け付けます。［窓口記載・法務確定前］</li></ol>';
 

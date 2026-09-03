@@ -179,8 +179,8 @@ async function rpc(payload, opts){ return server.handleRpc(payload, opts || {});
   const okPage = verifyPage({ state:'ACTIVE', title:'正規ライセンス 確認済み', message:'このライセンスは有効です。',
     work_names:['新クトゥルフ神話TRPG'], license_id:'SPLL-202608-0042', issued_at:'2026-08-11', status:'ACTIVE' });
   ok(/確認済み/.test(okPage) && /SPLL-202608-0042/.test(okPage), '有効な認証はSPLL番号とともに確認済みを示す');
-  const ngPage = verifyPage({ state:'INACTIVE', title:'無効', message:'このライセンスは現在有効ではありません（PAYMENT_HOLD）。',
-    work_names:[], license_id:'SPLL-1', issued_at:'2026-08-10', status:'PAYMENT_HOLD' });
+  const ngPage = verifyPage({ state:'INACTIVE', title:'無効', message:'このライセンスは現在有効ではありません（SUSPENDED）。',
+    work_names:[], license_id:'SPLL-1', issued_at:'2026-08-10', status:'SUSPENDED' });
   ok(/無効/.test(ngPage), '停止中の認証は無効と示す');
   ok(verifyPage({ state:'INPUT' }).indexOf('name="id"') >= 0, 'IDが無いときは入力フォームを出す');
   ok(/確認できません/.test(verifyPage({ state:'MISMATCH', title:'確認できません', message:'一致しません。' })),

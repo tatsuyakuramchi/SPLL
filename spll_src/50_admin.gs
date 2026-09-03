@@ -778,9 +778,9 @@ function admin_rotateCertCode(contractId){
 
 /**
  * 認証の状態変更（理由・承認記録付き）。status は CERT_STATES のいずれか。
- * 例：SUSPENDED / REVOKED / PAYMENT_HOLD / ACTIVE(再有効) / TERMINATED / EXPIRED
+ * 例：SUSPENDED / REVOKED / ACTIVE(再有効) / TERMINATED / EXPIRED。停止理由は reasonCode で表す
  */
-const CERT_CRITICAL_STATES = ['REVOKED','TERMINATED','PAYMENT_HOLD','ACTIVE'];   // 職務分離の対象（V2-018）
+const CERT_CRITICAL_STATES = ['REVOKED','TERMINATED','ACTIVE'];   // 職務分離の対象（V2-018）
 
 function admin_setCertStatus(contractId, status, reasonCode, reasonText, legalCaseId){ requireRole_(['LEGAL_ADMIN']);
   if(CERT_CRITICAL_STATES.indexOf(status) >= 0)
@@ -823,32 +823,38 @@ function applyCertStatus_(contractId, status, reasonCode, reasonText, legalCaseI
 }
 
 /**
- * 認証の有効／無効スイッチ（未入金対応）。
- * 既定は有効（締結時にACTIVE）。未入金が判明したらオフにして PAYMENT_HOLD にし、
- * 入金確認後にオンへ戻す。ACTIVE ⇄ PAYMENT_HOLD の往復のみを担当者1名で操作できる。
- * 失効（REVOKED）・契約終了（TERMINATED）や、それらからの復帰は従来どおり申請→別担当者の承認が必要。
+ * 認証の一時停止／復帰スイッチ（利用許諾料の入金が確認できないとき）。
+ * 認証の法的状態は SUSPENDED、理由は reason_code=FEE_PAYMENT_UNCONFIRMED で表す（状態と理由を分ける・P1-6）。
+ * このスイッチで操作できるのは「ACTIVE → SUSPENDED(FEE_PAYMENT_UNCONFIRMED)」と、その理由で止めた認証の復帰だけ。
+ * 他の理由で止めた認証（法務判断など）の復帰、失効（REVOKED）・契約終了（TERMINATED）は申請→別担当者の承認が必要。
+ * 請求・入金の管理そのものは SPLL の外（経理）で行う。ここは認証の表示を止める／戻すだけ。
  */
 function admin_setCertEnabled(contractId, enabled, reason){
   const actor = requireRole_(['OPERATIONS','LEGAL_ADMIN']);
   const cert = certForRef_(contractId);
   if(!cert) throw new Error('DATA_NOT_FOUND: 認証が見つかりません: ' + contractId);
-  if(['ACTIVE','PAYMENT_HOLD'].indexOf(String(cert.status)) < 0)
-    throw new Error('DATA_CONFLICT: このスイッチは有効／入金保留の切替のみです（現在: ' + cert.status +
-      '）。失効・再有効化は申請→別担当者の承認で行ってください。');
+  const status = normalizeCertStatus_(cert.status);
+  const feeHold = status === 'SUSPENDED' && (cert.reason_code === CERT_REASON_FEE_HOLD || cert.reason_code === 'PAYMENT_HOLD');
   const on = enabled === true || String(enabled) === 'true';
-  if(!on && !String(reason||'').trim())
-    throw new Error('VALIDATION_ERROR: 認証を無効にする理由（未入金の状況など）は必須です');
-  if(on && String(cert.status) === 'ACTIVE') return { status:'ACTIVE', changed:false };
-  if(!on && String(cert.status) === 'PAYMENT_HOLD') return { status:'PAYMENT_HOLD', changed:false };
-  const status = on ? 'ACTIVE' : 'PAYMENT_HOLD';
-  applyCertStatus_(contractId, status, on ? 'PAYMENT_CLEARED' : 'PAYMENT_HOLD',
-    sanitizeCell_(String(reason || (on ? '入金確認により再有効化' : ''))).slice(0,300), '', actor.email);
-  // 復帰時に有効なバッジが無ければ（停止中にコード再発行で差し替えた等）作り直す。照合コードは実行時に再発行される
   if(on){
+    if(status === 'ACTIVE') return { status:'ACTIVE', reason_code:cert.reason_code||'', changed:false };
+    if(!feeHold)
+      throw new Error('DATA_CONFLICT: このスイッチで戻せるのは「利用許諾料未確認」で止めた認証だけです（現在: ' + cert.status +
+        (cert.reason_code ? ' / ' + cert.reason_code : '') + '）。失効・その他の停止からの復帰は申請→別担当者の承認で行ってください。');
+    applyCertStatus_(contractId, 'ACTIVE', CERT_REASON_FEE_OK,
+      sanitizeCell_(String(reason || '入金確認により復帰')).slice(0,300), '', actor.email);
+    // 復帰時に有効なバッジが無ければ（停止中にコード再発行で差し替えた等）作り直す。照合コードは実行時に再発行される
     const licenseId = cert.license_id || licenseIdOfContract_(cert.contract_id);
     if(licenseId && !issuedBadgeForLicense_(licenseId, cert.contract_id)) enqueueBadgeJob_(licenseId, cert.cert_id);
+    return { status:'ACTIVE', reason_code:CERT_REASON_FEE_OK, changed:true };
   }
-  return { status:status, changed:true };
+  if(!String(reason||'').trim())
+    throw new Error('VALIDATION_ERROR: 認証を停止する理由（入金確認の状況など）は必須です');
+  if(feeHold) return { status:'SUSPENDED', reason_code:CERT_REASON_FEE_HOLD, changed:false };
+  if(status !== 'ACTIVE')
+    throw new Error('DATA_CONFLICT: 有効（ACTIVE）な認証だけを停止できます（現在: ' + cert.status + '）。');
+  applyCertStatus_(contractId, 'SUSPENDED', CERT_REASON_FEE_HOLD, sanitizeCell_(String(reason)).slice(0,300), '', actor.email);
+  return { status:'SUSPENDED', reason_code:CERT_REASON_FEE_HOLD, changed:true };
 }
 
 // ---- 認証状態変更の申請・承認（V2-018）----

@@ -1190,15 +1190,15 @@ ok(certSw().status==='ACTIVE','審査CLEAREDで発行された認証は既定オ
 let noReason=false; try{ G.admin_setCertEnabled(cSw.contract_id,false,''); }catch(e){ noReason=/理由/.test(String(e.message)); }
 ok(noReason,'オフにする理由は必須');
 G.admin_setCertEnabled(cSw.contract_id,false,'利用許諾料が未入金のため');
-ok(certSw().status==='PAYMENT_HOLD'&&certSw().reason_code==='PAYMENT_HOLD','オフでPAYMENT_HOLD（理由つき）');
-ok(rows(OPS,'License_Cases').find(k=>k.license_id===swApp.license_id).certification_status==='PAYMENT_HOLD',
+ok(certSw().status==='SUSPENDED'&&certSw().reason_code==='FEE_PAYMENT_UNCONFIRMED','停止は SUSPENDED＋理由 FEE_PAYMENT_UNCONFIRMED（状態と理由を分ける）');
+ok(rows(OPS,'License_Cases').find(k=>k.license_id===swApp.license_id).certification_status==='SUSPENDED',
   'ライセンス台帳の認証状態も追随（一覧表示が実体とずれない）');
 // 検証ポータルは「無効」を返す＝バッジQRから未入金が判別できる
 const rotSw=G.admin_rotateCertCode(cSw.contract_id);
 ok(G.serveVerify_({parameter:{page:'verify',id:rotSw.cert_id,c:rotSw.check_code}})._h.indexOf('無効')>=0,
   'オフの間はバッジQRの検証が「無効」になる');
 G.admin_setCertEnabled(cSw.contract_id,true,'入金確認');
-ok(certSw().status==='ACTIVE'&&certSw().reason_code==='PAYMENT_CLEARED','入金確認でオンへ戻せる（承認不要）');
+ok(certSw().status==='ACTIVE'&&certSw().reason_code==='FEE_PAYMENT_CONFIRMED','入金確認でオンへ戻せる（承認不要）');
 // 停止中のコード再発行で旧バッジは差し替え済なので、復帰時に有効なバッジを作り直す（照合コードは実行時に再発行）
 ok(rows(OPS,'Badges').some(b=>b.contract_id===cSw.contract_id&&b.status==='ISSUED'),'復帰時に有効なバッジが無ければ作り直す');
 const rotSw2=G.admin_rotateCertCode(cSw.contract_id);
@@ -1210,7 +1210,7 @@ const reqSw=G.admin_requestCertChange(cSw.contract_id,'REVOKED','MANUAL_REVOKE',
 G.Session={ getActiveUser:()=>({ getEmail:()=>'legal2@example.com' }) };
 G.admin_approveCertChange(reqSw.request_id,true,'');
 G.Session=SessRef;
-let notSwitchable=false; try{ G.admin_setCertEnabled(cSw.contract_id,true,'x'); }catch(e){ notSwitchable=/有効／入金保留の切替のみ/.test(String(e.message)); }
+let notSwitchable=false; try{ G.admin_setCertEnabled(cSw.contract_id,true,'x'); }catch(e){ notSwitchable=/利用許諾料未確認.*だけ/.test(String(e.message)); }
 ok(notSwitchable,'失効中の契約はスイッチで復活できない（職務分離を迂回しない）');
 
 // 107. 案内ページの有効期間：作品完成が先でも提出リンクを取り直せる
@@ -1623,8 +1623,8 @@ G.transitionLicenseCase_(smApp.license_id,'CERTIFICATE_ISSUED',{actor:'test'});
 ok(smCase().case_status==='CERTIFIED'&&smCase().certification_status==='ACTIVE','審査通過後に認証発行で CERTIFIED');
 
 // 203. 認証の停止・復帰・失効。認証済の案件に新しい版が出て REVIEWING でも認証は操作できる
-G.transitionLicenseCase_(smApp.license_id,'CERTIFICATE_SUSPENDED',{actor:'test',status:'PAYMENT_HOLD'});
-ok(smCase().case_status==='SUSPENDED'&&smCase().certification_status==='PAYMENT_HOLD','未入金停止で SUSPENDED / PAYMENT_HOLD');
+G.transitionLicenseCase_(smApp.license_id,'CERTIFICATE_SUSPENDED',{actor:'test',status:'SUSPENDED'});
+ok(smCase().case_status==='SUSPENDED'&&smCase().certification_status==='SUSPENDED','停止で SUSPENDED / SUSPENDED（理由は認証の reason_code）');
 G.transitionLicenseCase_(smApp.license_id,'CERTIFICATE_RESTORED',{actor:'test'});
 ok(smCase().case_status==='CERTIFIED'&&smCase().certification_status==='ACTIVE','復帰で CERTIFIED / ACTIVE');
 G.transitionLicenseCase_(smApp.license_id,'SUBMISSION_CREATED',{actor:'test'});
@@ -1818,7 +1818,7 @@ const certList=G.admin_listCertifications();
 const certRow=certList.find(c=>c.license_id===c3App.license_id);
 ok(certRow&&certRow.status==='ACTIVE'&&certRow.badge_status==='ISSUED'&&/新クトゥルフ/.test(certRow.works),'認証一覧に SPLL番号・原作・認証状態・バッジ');
 G.admin_setCertEnabled(c3App.license_id,false,'未入金のため');
-ok(G.admin_getCertStatus(c3App.license_id).status==='PAYMENT_HOLD','SPLL番号で認証をオフにできる');
+ok(G.admin_getCertStatus(c3App.license_id).status==='SUSPENDED'&&G.admin_getCertStatus(c3App.license_id).reason_code==='FEE_PAYMENT_UNCONFIRMED','SPLL番号で認証を停止できる');
 ok(rows(OPS,'License_Cases').find(k=>k.license_id===c3App.license_id).case_status==='SUSPENDED','台帳の現在地も SUSPENDED');
 G.admin_setCertEnabled(c3App.license_id,true,'入金確認');
 ok(G.admin_getCertStatus(c3App.license_id).status==='ACTIVE'&&rows(OPS,'License_Cases').find(k=>k.license_id===c3App.license_id).case_status==='CERTIFIED','SPLL番号でオンに戻せる');
@@ -2075,6 +2075,66 @@ let oneDrive=false; try{ G.web_openDriveSubmission(oneLink.token,{ title:'別の
 ok(oneDrive,'大容量提出でも2件目の新規は拒否');
 const uploadHtml=fs.readFileSync(path.join(__dirname,'..','spll_src','upload.html'),'utf8');
 ok(/1つのライセンス（SPLL番号）で提出できる作品は1つ/.test(uploadHtml)&&/newOpt\.remove\(\)/.test(uploadHtml),'提出ページは既存提出があるとき「新しい作品」を選ばせない');
+
+// ============ P1-4 / P1-5 / P1-6：README・個人情報同意・認証状態と理由の分離 ============
+// 340. 認証の状態は法的状態だけ。停止理由は reason_code。担当者1名で戻せるのは利用許諾料未確認の停止だけ
+let phErr=false; try{ G.admin_requestCertChange(pfApp.license_id,'PAYMENT_HOLD','X','x',''); }catch(e){ phErr=/不正な状態/.test(String(e.message)); }
+ok(phErr,'PAYMENT_HOLD は認証状態として受け付けない');
+G.admin_setCertStatus(pfApp.license_id,'SUSPENDED','LEGAL_REVIEW','権利者から確認依頼','LC-9');
+ok(pfCerts()[0].status==='SUSPENDED'&&pfCerts()[0].reason_code==='LEGAL_REVIEW'&&pfCase().certification_status==='SUSPENDED','法務判断の停止も SUSPENDED（理由が違うだけ）');
+let swOther=false; try{ G.admin_setCertEnabled(pfApp.license_id,true,'入金確認'); }catch(e){ swOther=/利用許諾料未確認/.test(String(e.message)); }
+ok(swOther&&pfCerts()[0].status==='SUSPENDED','利用許諾料以外の理由で止めた認証はスイッチで戻せない（申請→承認）');
+let swOff=false; try{ G.admin_setCertEnabled(pfApp.license_id,false,'未入金'); }catch(e){ swOff=/有効（ACTIVE）な認証だけ/.test(String(e.message)); }
+ok(swOff,'停止中の認証を重ねて停止しない');
+const pfRe=G.admin_requestCertChange(pfApp.license_id,'ACTIVE','REACTIVATE','確認済み','');
+G.Session=SessLegal2; G.admin_approveCertChange(pfRe.request_id,true,''); G.Session=SessP0;
+ok(pfCerts()[0].status==='ACTIVE'&&pfCase().certification_status==='ACTIVE'&&pfCase().case_status==='REVIEWING','承認を経て復帰（新しい版の再審査中なので現在地は REVIEWING のまま）');
+// 旧値 PAYMENT_HOLD の移行：状態は SUSPENDED、理由は FEE_PAYMENT_UNCONFIRMED（理由文は保持）
+G.appendRow_(OPS,'Certificates',{cert_id:'CERT-LEGACY-PH',contract_id:'CTR-LEGACY-PH',license_id:'SPLL-LEGACY-PH',status:'PAYMENT_HOLD',reason_code:'PAYMENT_HOLD',reason_text:'未入金',issued_at:'2026-01-01',check_code_hash:'x'});
+G.appendRow_(OPS,'License_Cases',{license_id:'SPLL-LEGACY-PH',case_status:'SUSPENDED',contract_status:'SIGNED',review_status:'CLEARED',certification_status:'PAYMENT_HOLD'});
+G.appendRow_(OPS,'Certificate_Change_Requests',{request_id:'REQ-LEGACY-PH',cert_id:'CERT-LEGACY-PH',license_id:'SPLL-LEGACY-PH',requested_status:'PAYMENT_HOLD',status:'REQUESTED'});
+const mig3=G.setup_migrateCertStatesV3();
+ok(mig3.certificates===1&&mig3.license_cases===1&&mig3.change_requests===1,'移行：PAYMENT_HOLD の行を数える: '+JSON.stringify(mig3));
+const legacyCert=()=>rows(OPS,'Certificates').find(c=>c.cert_id==='CERT-LEGACY-PH');
+ok(legacyCert().status==='SUSPENDED'&&legacyCert().reason_code==='FEE_PAYMENT_UNCONFIRMED'&&legacyCert().reason_text==='未入金','認証：SUSPENDED＋FEE_PAYMENT_UNCONFIRMED、理由文は保持');
+ok(rows(OPS,'License_Cases').find(k=>k.license_id==='SPLL-LEGACY-PH').certification_status==='SUSPENDED'&&rows(OPS,'Certificate_Change_Requests').find(r=>r.request_id==='REQ-LEGACY-PH').requested_status==='SUSPENDED','台帳・申請も揃える');
+ok(G.setup_migrateCertStatesV3().certificates===0,'移行は冪等');
+ok(G.admin_setCertEnabled('SPLL-LEGACY-PH',true,'入金確認').status==='ACTIVE'&&legacyCert().status==='ACTIVE','移行後の行はスイッチで復帰できる');
+ok(!/PAYMENT_HOLD/.test(fs.readFileSync(path.join(__dirname,'..','spll_src','guide.html'),'utf8'))&&!/PAYMENT_HOLD/.test(uploadHtml)&&/FEE_PAYMENT_UNCONFIRMED/.test(adminHtml0()),'クリエーター向け画面から PAYMENT_HOLD を外し、管理画面は理由コードで判定する');
+function adminHtml0(){ return fs.readFileSync(path.join(__dirname,'..','spll_src','admin.html'),'utf8'); }
+
+// 341. 個人情報同意文：振込先・配分・清算を取得情報／利用目的に含めない。正本・既定文・公開HTML・ポータル既定文が一致
+const privMd=fs.readFileSync(path.join(__dirname,'..','docs','SPLL_個人情報取得同意_v1.0.md'),'utf8');
+const privBody=fs.readFileSync(path.join(__dirname,'..','docs','legal','spll_privacy.body.html'),'utf8');
+const src00=fs.readFileSync(path.join(__dirname,'..','spll_src','00_core.gs'),'utf8');
+const indexHtml=fs.readFileSync(path.join(__dirname,'..','spll_src','index.html'),'utf8');
+const defPriv=(src00.match(/const DEFAULT_PRIVACY =([\s\S]*?);\n/)||[])[1]||'';
+const idxPriv=(indexHtml.match(/const DEFAULT_PRIVACY=`([\s\S]*?)`;/)||[])[1]||'';
+const mdBody=privMd.split('## 1. 取得する情報')[1]||'';   // 版数メモ（変更履歴）は対象外
+ok(!/振込先|配分|清算/.test(mdBody)&&!/振込先|配分|清算/.test(privBody)&&!/振込先|配分|清算/.test(defPriv)&&!/振込先|配分|清算/.test(idxPriv),'同意文の本文に振込先・配分・清算が無い（正本・公開HTML・既定文・ポータル既定文）');
+ok(/formrun/.test(privBody)&&/formrun/.test(defPriv)&&/formrun/.test(idxPriv),'formrun への委託を全てに記載');
+ok(/申込受付/.test(privBody)&&/申込受付/.test(defPriv)&&/契約履行および社内事務/.test(defPriv),'利用目的は申込受付・契約管理・審査・契約履行・問い合わせ・法令遵守');
+
+// 342. 本番で公開版の法務文書が無ければ申込停止（既定文へ落とさない）。開発・検証ではフォールバック
+const pubRowsP=rows(OPS,'Legal_Documents').filter(d=>d.document_type==='PRIVACY'&&d.status==='PUBLISHED');
+pubRowsP.forEach(d=>G.updateRow_(OPS,'Legal_Documents','legal_document_id',d.legal_document_id,{status:'SUPERSEDED_TEST'}));
+scriptProps.ENVIRONMENT='production';
+const ltProd=G.api_getLegalTextsV4(), ltProdLegacy=G.api_getLegalTexts();
+let createBlocked=''; try{ mkApp(['WRK-ARK00012'],'書籍'); }catch(e){ createBlocked=String(e.message); }
+scriptProps.ENVIRONMENT='development';
+ok(ltProd.apply_blocked===true&&ltProd.privacy===''&&/PRIVACY/.test(ltProd.blocked_reason),'本番で公開版PRIVACYが無いと apply_blocked、既定文は返さない');
+ok(ltProdLegacy.apply_blocked===true&&ltProdLegacy.privacy==='','旧APIも同じ判定');
+ok(/SERVICE_UNAVAILABLE/.test(createBlocked)&&/PRIVACY/.test(createBlocked),'申込作成も SERVICE_UNAVAILABLE で止まる: '+createBlocked.slice(0,60));
+const ltDev=G.api_getLegalTextsV4();
+ok(ltDev.apply_blocked===false&&ltDev.privacy.length>0,'開発・検証では既定文へフォールバック');
+pubRowsP.forEach(d=>G.updateRow_(OPS,'Legal_Documents','legal_document_id',d.legal_document_id,{status:'PUBLISHED'}));
+const portalPatch=fs.readFileSync(path.join(__dirname,'..','spll_src','portal_contract_v4_patch.html'),'utf8');
+ok(/apply_blocked/.test(portalPatch)&&/APPLY_BLOCKED/.test(portalPatch)&&/failClosed/.test(portalPatch),'ポータルは apply_blocked で「現在申込を受け付けられません」を出し申込を止める');
+
+// 343. README は現在の構成だけを説明する（旧 Code.gs・report・清算・入金管理の説明を残さない）
+const readme=fs.readFileSync(path.join(__dirname,'..','README.md'),'utf8');
+ok(!/Code\.gs|report\.html|半期清算|入金管理|batch_generateStatements/.test(readme),'README に旧アーキテクチャの説明が無い');
+ok(/apps\/public-web/.test(readme)&&/License_Cases/.test(readme)&&/12_license_state/.test(readme)&&/scripts\/deploy\.js/.test(readme),'README は 3つのGAS＋Cloud Run・License_Cases 中心・現行のデプロイ手順を説明する');
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

@@ -525,7 +525,7 @@ function failClosed(detail){
   const g=document.getElementById("grid");
   g.innerHTML='<div style="grid-column:1/-1;background:var(--warn-bg);border:1px solid #E0B4B0;border-radius:12px;padding:22px;text-align:center;">'+
     '<div style="font-family:\'Zen Kaku Gothic New\';font-weight:700;color:var(--warn);font-size:16px;">現在申込を受け付けられません</div>'+
-    '<div style="font-size:12.5px;color:var(--soft);margin-top:6px;">システムの都合により原作情報を取得できませんでした。時間をおいて再度お試しください。</div></div>';
+    '<div style="font-size:12.5px;color:var(--soft);margin-top:6px;">'+esc(detail||"システムの都合により原作情報を取得できませんでした。時間をおいて再度お試しください。")+'</div></div>';
 }
 
 function inCart(id){ return cart.indexOf(id)>=0; }
@@ -586,9 +586,10 @@ function showDetail(id){
 
 // ---- consent texts (editable via admin) ----
 const DEFAULT_PRIVACY=`
-<h4>1. 取得する情報</h4><ol><li>氏名、連絡先（メールアドレス）</li><li>申込原作・利用態様、提出作品データ</li><li>契約に至る場合は、住所・振込先その他の契約履行に必要な情報</li></ol>
-<h4>2. 利用目的</h4><ol><li>SPLL利用許諾の審査・契約の締結および管理</li><li>提出作品の適合性審査（AIによる一次審査を含む）</li><li>利用許諾料・配分の計算および清算</li><li>お問い合わせ対応・連絡</li><li>法令遵守および権利保護</li></ol>
-<h4>3. 委託・第三者提供</h4><ol><li>契約締結のため電子契約サービス（CloudSign）に取扱いを委託します。</li><li>データの保管・処理のためGoogle Workspace／Google Cloud（Vertex AI Geminiによる作品審査を含む）に取扱いを委託します。</li><li>法令に基づく場合を除き、ご本人の同意なく第三者へ提供しません。</li></ol>
+<h4>1. 取得する情報</h4><ol><li>氏名</li><li>メールアドレス</li><li>住所（契約に至る場合）</li><li>申込対象作品・利用態様</li><li>提出作品データ</li><li>その他、契約の締結および管理に必要な情報</li></ol>
+<h4>1の2. AIによる審査処理</h4><ol><li>提出作品はVertex AI Gemini による一次審査に付されます。提出作品に個人情報が含まれる場合、当該情報もAI処理の対象となります（審査以外の目的には使用しません）。</li></ol>
+<h4>2. 利用目的</h4><ol><li>SPLL利用許諾の申込受付</li><li>契約の締結および管理</li><li>提出作品の適合性審査（AIによる一次審査を含む）</li><li>利用許諾料に関する契約履行および社内事務</li><li>お問い合わせ対応・連絡</li><li>法令遵守および権利保護</li></ol>
+<h4>3. 委託・第三者提供</h4><ol><li>契約締結のため電子契約サービス（CloudSign）および申込フォーム（formrun）に取扱いを委託します。</li><li>データの保管・処理のためGoogle Workspace／Google Cloud（Vertex AI Geminiによる作品審査を含む）に取扱いを委託します。</li><li>法令に基づく場合を除き、ご本人の同意なく第三者へ提供しません。</li></ol>
 <h4>4. 保有期間</h4><ol><li>契約に至らなかった申込情報は、取得から1年で削除します。</li><li>契約に至った場合は、契約期間および関係法令の定める期間、保有します。</li></ol>
 <h4>5. 開示等の請求</h4><ol><li>保有個人データの開示・訂正・利用停止等のご請求は、下記窓口で受け付けます。［窓口記載・法務確定前］</li></ol>`;
 
@@ -611,6 +612,7 @@ let APPLY = { formUrl:"", refParam:"application_ref", hiddenMap:{}, maxWorks:5 }
 function loadLegal(){
   if(hasGas){
     google.script.run.withSuccessHandler(l=>{
+      if(l && l.apply_blocked){ failClosed(l.blocked_reason||""); return; }   // 本番で公開版の法務文書が無ければ申込停止
       if(l && l.privacy) LEGAL.privacy=l.privacy;
       if(l && l.termsTemplate) LEGAL.termsTemplate=l.termsTemplate;
       if(l){ LEGAL_META.privacy_doc_id=l.privacy_doc_id||""; LEGAL_META.terms_doc_id=l.terms_doc_id||"";

@@ -463,7 +463,11 @@ function distributeBadge_(c, badgeId){
 //     審査 CLEARED で「有効」→ 台帳連動で後から失効可能。検証は固定ポータル＋ID照会。
 //     配布は当社メールを使わず、クリエーターは「受付番号」でポータルからバッジ取得。
 // ============================================================
-const CERT_STATES = ['ACTIVE','SUSPENDED','REVOKED','EXPIRED','TERMINATED','PAYMENT_HOLD'];
+// 認証の法的状態だけを持つ。「なぜ止めたか」は reason_code（FEE_PAYMENT_UNCONFIRMED 等）で表す（P1-6）。
+// 旧値 PAYMENT_HOLD は setup_migrateCertStatesV3 で SUSPENDED + FEE_PAYMENT_UNCONFIRMED へ移す。
+const CERT_STATES = ['ACTIVE','SUSPENDED','REVOKED','EXPIRED','TERMINATED'];
+const CERT_REASON_FEE_HOLD = 'FEE_PAYMENT_UNCONFIRMED';   // 利用許諾料の入金が確認できない
+const CERT_REASON_FEE_OK   = 'FEE_PAYMENT_CONFIRMED';     // 入金確認により復帰
 
 /**
  * 認証を発行（ACTIVE）。呼ぶのは審査 CLEARED 後の completeCertification_。照合コードは12桁の暗号学的乱数とし、台帳にはハッシュのみ保存

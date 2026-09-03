@@ -1,273 +1,197 @@
 # SPLL システム
 
-**SPLL-SYS-BD-001 v1.0** ／ 株式会社アークライト 法務部
+TRPG の二次創作（有料頒布）に関するライセンス制度「SPLL（Small Publisher Limited License）」の
+**申込 → 電子契約（CloudSign FORM）→ 作品提出 → AI一次審査＋人手審査 → 認証（Certificate）→ 認証バッジ**を、
+Google Apps Script（GAS）3 プロジェクト＋ Cloud Run（公開サイト）で運用するためのソース一式です。
 
-TRPGの二次創作（有料頒布）に関するライセンス制度「SPLL（Small Publisher Limited
-License）」を、Google Workspace + Google Apps Script（GAS）で実装するためのソース一式です。
-申込・電子契約（CloudSign）・AI作品審査（Vertex AI Gemini）・利用報告・パートナー清算
-までを、人手工程を最小化して運用することを狙っています。
+SPLL が扱うのは**契約と認証の管理**だけです。請求・入金・清算・権利者への配分は本システムの対象外で、
+締結内容を `Finance_Handoffs` に置く（外部連携のキュー）以上のことはしません。
+利用許諾料の振込先も契約書本文にだけ記載し、システムには持ちません。
 
-> 設計の経緯・判断根拠は基本設計書 `SPLL_基本設計書_v1.0.docx` を参照。
-> 本リポジトリのソースは実装ハンドオフ用の参照実装（スケルトン）です。
+> 用語：申請者＝**クリエーター**、社内担当者＝**ユーザー**。
+> 設計の経緯は `docs/`（RP-002 の実装方針は `docs/SPLL_具体的修正案_v2.0.md`）を参照。
 
 ## 構成
 
 ```
 SPLL/
-├── README.md
-├── package.json              # clasp と npm スクリプト
-├── .gitignore
-├── .clasp.json.template      # コピーして .clasp.json を作成し scriptId を記入（rootDir=spll_src）
-├── .claspignore              # push 対象を spll_src 内の GAS ソースに限定
-├── docs/                      # 業務フロー確認資料（事業部すり合わせ用）
-│   ├── SPLL_業務フロー確認資料_v0.1.md   # 正本（GitHubでスイムレーン図が描画）
-│   ├── SPLL_業務フロー確認資料.html      # 配布用・完全オフラインの自己完結HTML
-│   └── build_html.js                     # md→html 生成（要 npm i -D marked mermaid）
-└── spll_src/                  # clasp の push 対象（rootDir）
-    ├── appsscript.json        # マニフェスト（OAuthスコープ・webapp設定）
-    ├── Code.gs                # サーバーサイド（3プロジェクト分を集約した参照実装）
-    ├── index.html             # 公開入口（GAS①・申込窓口）
-    ├── admin.html             # 管理コンソール（GAS③・社内GWS限定）
-    └── report.html            # 利用報告（GAS②・?page=report&token=）
+├── apps/
+│   ├── portal/        # GAS①：申込窓口の API（原作公開・申込作成・FORM 引渡）。dist/ はビルド生成物
+│   ├── workflow/      # GAS②：CloudSign / formrun Webhook、審査、認証、クリエーター向けページ、バッチ
+│   ├── admin/         # GAS③：管理コンソール（社内 Google Workspace ドメイン限定）
+│   └── public-web/    # Cloud Run：公開サイト（申込・案内・提出・検証）。GAS①②へ共有鍵付き RPC
+├── spll_src/          # GAS ソースの正本（*.gs / *.html）。scripts/build.js が各 apps/*/dist へ振り分ける
+├── scripts/           # build.js（振り分け＋禁止参照チェック）、clasp.js、deploy.js、test-all.js
+├── tests/             # インメモリ GAS スタブ上の機能テスト（harness / sec01 / form_v4 / partnership / public_web）
+└── docs/              # 契約書・法務3文書・設定手順・手動テスト手順・設計メモ（legal/ は公開用HTML）
 ```
 
-`Code.gs` は本来 3 つの GAS プロジェクトに分割してデプロイする想定の関数を 1 枚に集約した
-参照実装です。実装時はプロジェクトごとにファイルを分割してください。
+`spll_src/*.gs` を直接デプロイしません。**`node scripts/build.js`** が `MANIFEST`（`scripts/build.js`）に従って
+プロジェクトごとに必要なファイルだけを `apps/<app>/dist/` へ配り、閉包（未解決参照）と禁止参照
+（例：portal に `admin_*` を入れない）を検査します。
 
-| プロジェクト | 役割 | 公開範囲 | doGet |
-|---|---|---|---|
-| GAS① 公開入口 | 作品公開API＋申込画面配信 | インターネット公開 | index.html |
-| GAS② 契約・審査 | CloudSign Webhook(doPost)・Gemini・Drive・清算・利用報告 | 限定＋Webhook | report.html(token) |
-| GAS③ 管理コンソール | 審査／入金／契約管理 | 社内GWS限定 | admin.html |
+## アーキテクチャ
 
-## アーキテクチャ概要
+```
+クリエーター ──▶ Cloud Run（apps/public-web）
+                    │  /api/rpc（共有鍵 PUBLIC_WEB_KEY）
+                    ├──▶ GAS① portal    … 原作一覧・法務文書・申込作成・CloudSign FORM への引渡
+                    └──▶ GAS② workflow  … 提出・案内・バッジ・検証（トークン認証）
+CloudSign / formrun ──▶ GAS② doPost（Webhook。署名・共有鍵で検証）
+ユーザー（社内）  ──▶ GAS③ admin（Workspace ドメイン限定）
+                         └── 時間主導トリガー（GAS②）：5分・日次バッチ
+業務台帳：Google スプレッドシート（SS_MASTER＝原作マスタ／SS_OPS＝業務台帳）、提出物：Drive（SPLL-番号/）
+```
 
-作品マスタ(Sheets) → GAS① 作品公開API → 申込窓口（Cloud Run が配信、GAS①へRPC）
+- 公開サイトの画面（`index.html` / `guide.html` / `upload.html`）は `spll_src` が正本で、Cloud Run のイメージにも同梱します。
+  画面を直したら **GAS の再デプロイと Cloud Run の再ビルドの両方**が必要です。
+- GAS① と GAS② は `HANDOFF_SECRET` を共有し、申込 → FORM → 締結 Webhook の改変検知に使います。
 
-**1案件＝1つのSPLL番号（`License_Cases`）が唯一の業務上の主台帳・主キー**です（RP-002）。
-案件の現在地 `case_status` は状態遷移表（`12_license_state.gs`）を通してだけ変わります。
+## 業務フローと状態機械
+
+**1 案件＝1 つの SPLL 番号（`License_Cases`）が唯一の業務上の主台帳**です（RP-002）。
+案件の現在地 `case_status` と `contract_status` / `review_status` / `certification_status` は
+状態遷移表 `spll_src/12_license_state.gs`（`transitionLicenseCase_`）を通してだけ変わります。
 
 ```
 申込（SPLL番号発行）→ CloudSign FORM → 締結（Webhook）→ 作品提出待ち
-  → 作品提出 → AI一次審査 → 人手審査 CLEARED → 認証（Certificate）発行 → バッジ発行
+  → 作品提出 → AI一次審査 → 人手審査 CLEARED → 認証（Certificate）発行 → バッジ（Badge）
 ```
 
-- 認証は**作品の審査が完了してから**発行します（締結だけでは発行しない）。Certificate が正本、
-  Badge はその表示物です。
-- `Applications` / `Contracts` は移行期間の技術・証跡テーブル。提出・認証・バッジ・トークン・通知は
-  `license_id` を正本に持ち、`contract_id` は互換列です。
-- 請求・入金・清算は本システムの対象外。締結内容は `Finance_Handoffs`（外部連携のキュー）へ置くだけで、
-  経理側の受領状況は案件の現在地に影響しません。
+| case_status | 意味 |
+|---|---|
+| APPLICATION_RECEIVED / CONTRACT_PENDING / MANUAL_REVIEW / SIGNING / HOLD | 申込〜締結。HOLD は締結したが条件不一致（法務確認待ち） |
+| AWAITING_SUBMISSION / REVIEWING / CORRECTION_REQUIRED | 締結後〜審査 |
+| CERTIFIED / SUSPENDED / TERMINATED / CANCELLED | 認証済／認証停止／終了／取消 |
 
-スプレッドシート（業務台帳）が業務の**単一の正本**。状態変更は `Events` へ追記し、
-提出原本・AI結果は上書きしません。
+守っている不変条件：
 
-## セットアップ・デプロイ（clasp）
+- **認証は人手審査 CLEARED の後にだけ発行**（締結だけでは発行しない）。Certificate が正本、Badge はその表示物。
+- **バッジは「認証 ACTIVE」からだけ作られる**。手動発行の入口は無く、失敗した生成ジョブの再試行だけがある
+  （`issueBadge_` 自身が案件・認証・審査状態を検証する）。バッジ PNG には契約IDではなく SPLL 番号を印字する。
+- **1 ライセンス＝1 作品**。修正版は同じ提出の新しい版（Submission_Versions）。別の作品は別の申込。
+- **契約が終了（TERMINATED）した認証は再有効化できない**。再開は新しい契約の締結で行う。
+- 認証の行と台帳は「ロック → 事前検証（`validateLicenseTransition_`）→ 書き込み」で一緒に変える。
+  台帳が拒否する変更は認証の行にも書かない。
+- 認証が ACTIVE でない間はバッジを配布しない（一時停止は行を残す、失効・終了は SUPERSEDED）。
 
-ルートに `package.json`（clasp と npm スクリプト）と `.clasp.json`/`.claspignore`（`rootDir=spll_src`）を
-用意しています。`.clasp.json` をルートに置く構成なので、**すべてのコマンドはリポジトリ直下から
-そのまま実行**できます（`cd` 不要）。`clasp` 本体はローカルにインストールし、**`clasp login` は
-ブラウザ認証が必要なためローカルで実行**してください（リモート/CI環境では不可）。push 対象は
-`.claspignore` で GAS ソース5ファイルのみに限定しています。
+### 認証の状態と理由
+
+| Certificate.status | 意味 | 変え方 |
+|---|---|---|
+| ACTIVE | 有効 | 発行時／復帰 |
+| SUSPENDED | 一時停止。**理由は `reason_code`**（例：`FEE_PAYMENT_UNCONFIRMED`＝利用許諾料の入金未確認） | 未確認停止と復帰は担当者 1 名のスイッチ。他の理由からの復帰は申請→別担当者の承認 |
+| REVOKED / TERMINATED / EXPIRED | 失効／契約終了／期限切れ | 申請→別担当者の承認（職務分離） |
+
+`PAYMENT_HOLD` は廃止（`setup_migrateCertStatesV3` で `SUSPENDED`＋理由へ移行）。
+「なぜ止めたか」と「認証の法的状態」を分けて持ちます。
+
+## データ（スプレッドシート）
+
+- `SS_MASTER`：`Works_Master`（原作）／`Review_Rules`／`Fee_Schedule`（料金表）
+- `SS_OPS`（主なもの）：`License_Cases`（正本）／`License_Works`／`Applications`・`Contracts`（移行期間の互換・証跡）／
+  `Contract_Works`・`Contract_Documents`／`Submissions`・`Submission_Versions`・`Submission_Files`／
+  `AI_Review_Jobs`・`AI_Findings`・`Human_Reviews`・`Compliance_Alerts`／`Certificates`・`Certificate_Change_Requests`／
+  `Badges`・`Badge_Jobs`／`Access_Tokens`／`Notification_Queue`／`Legal_Documents`・`Application_Consents`／
+  `Finance_Handoffs`／`Events`・`System_Errors`・`Batch_Runs`・`Migration_Runs`／`Config`／`Admin_Users`
+- 提出・認証・バッジ・トークン・通知は `license_id` を正本に持ち、`contract_id` は互換列です。
+- 状態変更は `Events` に before / after を残し、提出原本・AI 結果は上書きしません。
+- スキーマは `spll_src/05_schema.gs`（`SCHEMA_VERSION`）。不足列の追加は `setup_migrate` が冪等に行います。
+
+## ビルド・テスト・デプロイ
 
 ```bash
-npm install              # devDependency の @google/clasp を取得
-npm run login            # ブラウザでGoogle認証（ローカルのみ）
-
-# 新規にWebアプリのGASプロジェクトを作る場合（推奨・ワンショット）
-npm run setup            # clasp create(webapp) → appsscript.json復元 → clasp push -f
-
-#   ↑の内訳を手動でやる場合:
-#   npm run create                              # webアプリ型でGASプロジェクト作成（.clasp.json生成）
-#   git checkout -- spll_src/appsscript.json    # create が上書きする既定マニフェストを本書の内容へ戻す
-#   npm run push                                # ローカル → GAS
-
-# 既存のGASプロジェクトに接続する場合
-cp .clasp.json.template .clasp.json   # scriptId を記入
-npm run push
-
-# 公開
-npm run deploy           # Webアプリとしてデプロイ（バージョン管理）
-npm run open:web         # 公開URLをブラウザで開く
+node scripts/build.js            # spll_src → apps/*/dist（閉包・禁止参照チェック込み）
+node scripts/test-all.js         # 全テスト（GAS スタブ上）
 ```
 
-主な npm スクリプト：`login` / `setup` / `create` / `clone` / `push` / `push:watch` /
-`deploy` / `deployments` / `open` / `open:web` / `logs` / `status`。
+GAS（clasp）。`clasp login` はブラウザ認証のためローカルで実行します。Windows で npm のシムが壊れている環境向けに
+`node scripts/...` を直接使う形にしています。
 
-`.clasp.json`（実 scriptId を含む）は `.gitignore` 済み。コミットしないでください。
+```bash
+node scripts/clasp.js login                        # 初回のみ
+node scripts/deploy.js portal   "変更の説明"        # build 済みの dist を push → 既存ウェブアプリデプロイを新版へ
+node scripts/deploy.js workflow "変更の説明"
+node scripts/deploy.js admin    "変更の説明"
+```
 
-### Webアプリ公開設定（appsscript.json）
+前提（アプリごとに初回 1 回）：`apps/<app>/.clasp.json`（scriptId）と `apps/<app>/.deploy.json`（`{"deploymentId":"AKfycb..."}`）。
+どちらも `.gitignore` 済みでコミットしません。
 
-`spll_src/appsscript.json` の `webapp` は `executeAs: USER_DEPLOYING` / `access: ANYONE_ANONYMOUS`
-です。公開範囲は用途に応じてデプロイ時に調整してください（GAS①公開入口=一般公開、
-GAS②契約・審査=限定＋Webhook、GAS③管理コンソール=社内GWS限定）。初回デプロイ時に OAuth スコープ
-（Spreadsheet/Drive/外部リクエスト/メール送信/cloud-platform）の承認が求められます。
+Cloud Run（Cloud Shell 等）：
 
-> 本リポジトリは3プロジェクト分を1つの `Code.gs` に集約した参照実装です。まずは単一プロジェクトとして
-> デプロイして動作確認し、運用に合わせて GAS①②③へ分割してください（`doGet` の `page` 出し分けにより
-> 単一デプロイでも index/admin/report/upload を切り替え可能）。
+```bash
+gcloud builds submit --config apps/public-web/cloudbuild.yaml \
+  --substitutions _IMAGE=asia-northeast1-docker.pkg.dev/<PROJECT>/spll/public-web
+gcloud run deploy spll-public-web --region asia-northeast1 \
+  --image asia-northeast1-docker.pkg.dev/<PROJECT>/spll/public-web:latest
+curl -s https://<service>.run.app/_health          # {"ok":true,...}
+```
 
-### ScriptProperties（秘密情報・設定）
+環境変数 `GAS_PORTAL_URL` / `GAS_WORKFLOW_URL`、Secret Manager の `PUBLIC_WEB_KEY`（GAS 側の同名 ScriptProperty と一致）。
+詳細は `docs/SPLL_クリエーター向けサイトのCloudRun配信_v1.1.md`。
 
-秘密情報・環境依存値はコードに固定せず、各 GAS プロジェクトの **ScriptProperties** に設定します。
-下記は**管理コンソールの「設定」タブから登録・更新できます**（初回のみ手動投入でも可）。
+## 設定
 
-| キー | 用途 |
+**ScriptProperties（秘密情報・環境依存値。プロジェクトごとに独立）**
+
+| キー | portal | workflow | admin |
+|---|---|---|---|
+| `ENVIRONMENT`（development / staging / production・必須） | ✔ | ✔ | ✔ |
+| `SS_MASTER` / `SS_OPS` / `DRIVE_ROOT` | ✔ | ✔ | ✔ |
+| `HANDOFF_SECRET`（①②で同じ値） | ✔ | ✔ | — |
+| `PUBLIC_WEB_KEY`（Cloud Run との共有鍵） | ✔ | ✔ | — |
+| `FORM_HIDDEN_MAP_FIXED` / `_RATE` / `_MANUAL`（formrun の hidden 項目キー） | ✔ | ✔ | — |
+| `FORMRUN_FIELD_MAP_FIXED` / `_RATE` / `_MANUAL`、`FORMRUN_WEBHOOK_SECRET`、`CLOUDSIGN_WEBHOOK_KEY` | — | ✔ | — |
+| `GCP_PROJECT` / `GCP_REGION` / `GEMINI_MODEL`（Vertex AI） | — | ✔ | ✔ |
+| `CLOUDSIGN_CLIENT_ID` / `CLOUDSIGN_SECRET` / `CLOUDSIGN_SANDBOX` | — | ✔ | ✔ |
+| `BADGE_TEMPLATE_ID` / `BADGE_AUTO` / `QR_API_URL` | — | ✔ | ✔ |
+| `ADMIN_CONSOLE_URL` | ✔ | — | — |
+
+**Config シート（業務値。管理コンソール「設定」から編集・3 プロジェクト共通・即時反映）**：
+`WORKFLOW_URL`（GAS②の /exec）、`PUBLIC_BASE_URL`（QR に焼き込む独自ドメイン）、`OFFICE_CONTACT`、`OFFICE_EMAIL_DOMAIN`、
+`FORM_URL_STANDARD_FIXED` / `_STANDARD_RATE` / `_MANUAL_REVIEW`、`CORPORATE_INQUIRY_*`、`GUIDE_EMAIL_*`、`MAIL_*`、
+`REVIEW_SLA_DAYS`、`SUBMIT_FOLDER_*`、`APPLICATION_RETENTION_DAYS` など。手順は `docs/SPLL_初期設定チェックリスト_v1.0.md`。
+
+初期化・移行は admin の GAS エディタから：`setup_all`（ブートストラップ＋移行一式）、個別には
+`setup_migrate`（スキーマ）、`setup_migrateLicenseCases`、`setup_migrateLicenseForeignKeysV2`、
+`setup_migrateAdminRolesV2`、`setup_migrateCertStatesV3`。workflow では `setup_workflowAll`（トリガー作成）。
+
+## 管理コンソール（GAS③）
+
+| タブ | 内容 |
 |---|---|
-| `SS_MASTER` / `SS_OPS` / `DRIVE_ROOT` | 作品マスタ・業務台帳・Drive 親フォルダの ID（未設定時は `CFG` の既定値） |
-| `GCP_PROJECT` / `GCP_REGION` / `GEMINI_MODEL` | Vertex AI Gemini の接続先・モデル |
-| `CLOUDSIGN_CLIENT_ID` / `CLOUDSIGN_SECRET` | CloudSign API 認証（secret は画面に再表示しない） |
-| `CLOUDSIGN_TEMPLATE_ID` / `CLOUDSIGN_CALLBACK_URL` / `CLOUDSIGN_SANDBOX` | CloudSign 送信テンプレ・Webhook URL・サンドボックス切替 |
-| `FORMRUN_FORM_URL` / `FORMRUN_WEBHOOK_SECRET` / `FORMRUN_FIELD_MAP` | FormRun の連携設定（secret は画面に再表示しない） |
+| ダッシュボード | `case_status` の集計と要対応（個別確認・承認待ち・人手対応の通知・整合性エラー）。SPLL 番号で詳細へ |
+| ライセンス | 検索・絞り込み、1 案件の詳細（契約・原作・提出・審査・認証・バッジ生成ジョブ・履歴）。案内リンク／提出リンクの発行 |
+| 作品審査 | 人手判断（CLEARED で認証発行／CORRECTION_REQUIRED／ESCALATED） |
+| 認証管理 | Certificate 一覧（Badge は表示物）。一時停止／復帰のスイッチ、失効・再有効化の申請と承認 |
+| 設定 | 同意文・規約（版管理・公開）、原作マスタ、料金表、申込窓口の URL、手続き案内・案内メール、AI、CloudSign、formrun、管理者 |
 
-`Code.gs` の値解決は `cfg_(key)`（ScriptProperties 優先 → `CFG` 既定値）で行います。`CFG` の
-プレースホルダ（`PUT_..._ID`）は ScriptProperties で上書きするか、コード側を実 ID に置換します。
-
-### 管理コンソールからの設定（「設定」タブ）
-
-`admin.html` の「設定」タブから、運用担当が次を画面操作で更新できます（保存は即時反映）。
-
-| 区分 | 保存先 | 主な GAS 関数 |
-|---|---|---|
-| 個人情報取得同意文・規約テンプレート | `Config` シート（`LEGAL_PRIVACY_TEXT` / `LEGAL_TERMS_TEMPLATE`） | `admin_getLegalTexts` / `admin_saveLegalTexts` |
-| 作品マスタ（データソース＋作品の追加・編集・公開切替） | ScriptProperties ＋ `Works_Master` シート | `admin_getDataSourceConfig` / `admin_saveDataSourceConfig` / `admin_listWorksMaster` / `admin_saveWork` / `admin_setWorkPublish` |
-| CloudSign API 設定 | ScriptProperties | `admin_getIntegrationConfig` / `admin_saveCloudSignConfig` |
-| FormRun 設定 | ScriptProperties | `admin_getIntegrationConfig` / `admin_saveFormRunConfig` |
-
-### 業務タブの実データ配線（GAS関数）
-
-| タブ | 取得 | 操作 |
-|---|---|---|
-| ダッシュボード | `admin_dashboard`（`case_status` の集計＋要対応の統合一覧。SPLL番号で詳細へ） | — |
-| ライセンス | `admin_listLicenseCases(filters)`（検索・絞り込み）／`admin_getLicenseCase`（契約・原作・提出・審査・認証・履歴を1案件で） | `admin_issueGuideLink` / `admin_sendUploadLink`（SPLL番号で発行）／契約の例外対応（未紐付け・条件不一致・送信失敗・不達） |
-| 作品審査 | `admin_reviewQueue` | `admin_setHumanReview`（CLEARED で認証を発行／CORRECTION_REQUIRED／ESCALATED） |
-| 認証管理 | `admin_listCertifications`（Certificate が正本・Badge は表示物） | `admin_setCertEnabled`（未入金の停止／復帰）／`admin_requestCertChange` → `admin_approveCertChange`（失効・再有効化は別担当者の承認） |
-
-`admin_listContracts` は @deprecated（移行期間の参照用）。通常画面に契約ID・申込IDは出しません。
-ロールは SYSTEM_ADMIN / LEGAL_ADMIN / OPERATIONS / REVIEWER / AUDITOR（ACCOUNTING は廃止、旧行は `setup_migrateAdminRolesV2` で AUDITOR へ）。
-
-集計・結合（作品名・パートナー名・契約↔請求）はサーバー側で行い、UIは整形済みデータを描画します。
-シートが空でもエラーにならないよう防御的に実装しています（`readRows_` は未作成シートで空配列）。
-
-- 規約テンプレートは差込トークン `{{name}}{{pub}}{{ok}}{{no}}{{media}}{{fee}}{{credit}}` を作品ごとに展開し、
-  公開窓口 `index.html` が `api_getLegalTexts()` で取得して申込ウィザードに表示します（取得失敗時は既定文）。
-- 公開状態を `PUBLISHED` にした作品のみ `api_listWorks()` で公開窓口に表示されます。
-- 秘密情報（CloudSign secret・FormRun webhook secret）は保存時のみ入力し、読み出しでは
-  「設定済みか」だけを返します（値は画面に出しません）。
-
-### ワンクリック・セットアップ（setup_bootstrap）
-
-スプレッドシートや Drive フォルダを手作業で作らず、**Apps Script エディタで `setup_bootstrap` を一度 Run**
-すれば自動で初期化できます（冪等）。
-
-1. `npm run push` で最新コードを GAS へ反映 → `npm run open`（または `clasp open`）でエディタを開く。
-2. 関数選択で **`setup_bootstrap`** を選び **Run**。初回は Drive/Spreadsheet 作成の権限承認が出ます。
-3. 実行ログに作成された `SS_MASTER`/`SS_OPS`/`DRIVE_ROOT` の ID と URL が出力されます。
-
-`setup_bootstrap` の処理:
-
-- `SS_MASTER`（作品マスタ）/`SS_OPS`（業務台帳）を §3 スキーマの全シート・ヘッダ付きで作成
-- Drive 親フォルダ（`DRIVE_ROOT`）を作成し、各 ID を **ScriptProperties** へ登録
-- 既定の同意文・規約・レート（`DEFAULT_ROYALTY_RATE`/`HANDLING_FEE_RATE`）を `Config` へ投入
-- サンプル作品・パートナーを投入（`opts.seed:false` で無効化、`opts.force:true` で再作成）
-- `setup_status` で現在の接続先 ID を確認可能
-
-ScriptProperties は実行時に読まれるため、Run 後は**再デプロイ不要**で公開アプリが実データ（投入された作品）に切り替わります。
-
-### スプレッドシート（手動で作る場合）
-
-`SS_MASTER`（作品マスタ）／`SS_OPS`（業務台帳）の各シートを設計書 §3 のスキーマで作成します。
-1行目をヘッダ行とし、`Code.gs` の `readRows_/appendRow_/updateRow_` がヘッダ名で突合します。
-
-- 作品マスタ：`Works_Master` / `Review_Rules` / `Reference_Assets`
-- 業務台帳：`Applications` / `Contracts` / `Upload_Tokens` / `Submissions` /
-  `Submission_Files` / `AI_Review_Jobs` / `AI_Findings` / `Human_Reviews` /
-  `Compliance_Alerts` / `Usage_Reports` / `Invoices` / `Payments` / `Settlements` /
-  `Settlement_Details` / `Settlement_Statements` / `Partners` / `Events` / `Config`
-
-## HTML のモック／配線について
-
-`index.html` / `admin.html` / `report.html` はサンプルデータ内蔵のモックとしても単体表示でき、
-GAS 上では `google.script.run` 経由で実データに切り替わるよう配線済みです。
-
-- `index.html`：作品一覧は `api_listWorks()` を呼び、取得できない場合は内蔵サンプルにフォールバック。
-  **審査タイミング(A/B)は内部属性**で、公開UIにはバッジ・絞り込みを出しません。
-- `report.html`：`serveReport_()` がトークンをテンプレートへ差し込み、`report_getContext(token)`
-  で契約情報、`report_submit(token,data)` で報告送信。ログイン／マイページなし。
-- `admin.html`：**全タブ google.script.run で実配線済み**。ダッシュボード（6KPI＋要対応）、
-  審査キュー（人手判断＝承認／是正要求／上申）、契約一覧（提出案内送付）、入金・清算（入金記録・
-  取消・計算書承認）、および「設定」（同意文・規約／作品マスタ／CloudSign／FormRun）。
-  バックエンドは作品名の結合・状態の正規化を行い、UIがそのまま描画できる形で返します。
-  スタンドアロン表示時は内蔵モックで動作。社内GWS限定で公開。
+ロール：SYSTEM_ADMIN / LEGAL_ADMIN / OPERATIONS / REVIEWER / AUDITOR（ACCOUNTING は廃止）。
+通常画面に契約ID・申込IDは出しません（旧参照は詳細の「legacy」にだけ）。
 
 ## セキュリティ・個人情報
 
-- 秘密情報は ScriptProperties。公開APIは返却列をホワイトリスト化（内部メモ・配分は返さない）。
-- 提出物は Drive の案件フォルダ（`DRIVE_ROOT/SPLL-番号/`。旧案件は契約ID名のまま）に保存。契約者へ内部フォルダ閲覧権限は付与せず、
-  トークン付きアップロード画面のみ提供。
-- 台帳と実体の整合は `auditLicenseConsistency_`（日次）で監査し、矛盾は `System_Errors`（LICENSE_INCONSISTENCY）へ残す。
-- A経路の落選データは `retention_until`（取得+1年）で自動削除（`batch_purgeRejected`）。
-- **個人情報（住所・口座・電話）は Gemini に送らない**（契約条件と作品データのみ）。
-- AI結果やパトロール未実施を理由に、既発生のパートナー配分を当然に消滅させない。
+- 秘密情報は ScriptProperties / Secret Manager のみ。リポジトリには置きません。
+- クリエーター向けページはすべて用途別トークン（`Access_Tokens`：期限・回数付き）で認証。ログイン／マイページは持ちません。
+- バッジ画像は Drive 共有リンクを使わず、トークン検証後に GAS が配信します。認証が ACTIVE でなければ配布しません。
+- 認証の照合コードは平文を保存せずハッシュだけ（`check_code_hash`）。再試行や再発行では新しいコードを発行します。
+- **本番（production）では、公開版の法務文書（PRIVACY・GUIDELINE）が無いと申込を停止**します（既定文へフォールバックしない）。
+- 個人情報（氏名・住所・メール）は Gemini に送りません（作品データと契約条件のみ）。
+- 台帳と実体の整合は `auditLicenseConsistency_`（日次）で監査し、矛盾は `System_Errors`（LICENSE_INCONSISTENCY）へ残します。
+- 契約に至らなかった申込は `APPLICATION_RETENTION_DAYS`（既定 365 日）で匿名化します。
 
-## AI作品審査（runAiReview_）
+## テスト
 
-`enqueueAiReview_` が提出ファイルから `Submissions`/`Submission_Files` と `AI_Review_Jobs`(QUEUED)
-を作成し、`runAiReview_(aiReviewId)` が次を実行します（即時試行→失敗時は `batch_runAiReviews_` が再試行）。
+`node scripts/test-all.js` は build のあと `tests/harness.js`（業務フロー全体）、`tests/sec01.js`（セキュリティ）、
+`tests/form_v4.js`（CloudSign FORM v4）、`tests/partnership.js`、`tests/public_web.js`（Cloud Run）を実行します。
+日付依存のテストは固定の対象月を使っています。
 
-1. 提出ファイルBlobを取得（**作品ファイルのみ。個人情報はGeminiに送らない**）。
-2. `Works_Master` の許諾/禁止要素・クレジット・媒体と `Review_Rules`（有効期間内）を構造化（`buildRules_`）。
-3. `geminiReview_`（responseSchema 構造化出力）→ `AI_Findings` へ記録。
-4. 総合結果で経路別ルーティング（`postReviewRouting_`）:
-   - **A経路**：HIGH_RISK/UNREADABLE → `REJECTED`＋`retention_until`（取得+1年）。PASS候補/要確認 →
-     CloudSign 契約リンク送付＋`LINK_SENT`。
-   - **B経路**：HIGH_RISK → `Compliance_Alerts` 起票（`settlement_block` は空＝**既発生配分は止めない**）。
-5. 失敗時は `retry_count` を加算し `AI_MAX_RETRY`(3) 未満なら QUEUED、以上で ERROR。
+## ドキュメント
 
-レスポンスは HTTP エラー時に例外化し、構造化結果が得られない場合は安全側（`REVIEW_REQUIRED`）へ倒します。
-
-## 半期清算（batch_generateStatements）
-
-確定済（`APPROVED`/`LOCKED`）の `Usage_Reports` を集計し、パートナー別の計算書（仕入明細書方式・DRAFT）
-を生成します。計算チェーン（per 報告）:
-
-```
-net_sales × royalty_rate = license_fee × (1 − handling_fee_rate) = partner_share
-```
-
-- `royalty_rate` は `Works_Master.royalty_rate` 列、無ければ Config `DEFAULT_ROYALTY_RATE`(既定0.10)。
-  事務手数料は Config `HANDLING_FEE_RATE`(既定0.30)。各値は `rate_snapshot` に保存。
-- 作品→パートナーは `partner_id` 列 → 出版社名突合 → 疑似パートナー の順で解決（`resolveWorkPartner_`）。
-- `Settlements`／`Settlement_Details`／`Settlement_Statements`(DRAFT・`reg_number_snapshot`) を生成。
-  当期の有効な計算書が既にある場合は二重生成を避けてスキップ。
-
-ライフサイクル：生成(DRAFT) → `admin_approveStatement`(APPROVED) → `batch_sendApprovedStatements_`
-（CloudSign送信＝SENT・発効日＝本日・**異議期限＝発効日+1ヶ月**） → `batch_confirmDeemed`（みなし確認＝CONFIRMED）。
-管理コンソール「入金・清算」から `admin_generateStatements` / `admin_sendApprovedStatements` /
-`admin_runAiReviews` を手動起動できます（時間主導トリガーとも共用）。
-
-## CloudSign 連携（サンドボックス既定）
-
-電子契約・計算書送信を CloudSign Web API で実装。**試験運用のためサンドボックスを既定**とし、
-`CLOUDSIGN_SANDBOX` を `false` に設定したときのみ本番（`api.cloudsign.jp`）へ切り替わります。
-
-- `cloudSignAccessToken_`：`POST /token?client_id=` でトークン取得、`CacheService` で短期キャッシュ。
-- `cs_fetch_`：API共通呼び出し（Bearer認証・multipart対応・HTTPエラーを例外化）。
-- `cloudSignSend_`：契約書作成 → ファイル添付（`CLOUDSIGN_TEMPLATE_ID` があればテンプレ差込、無ければ
-  規約テンプレートから生成した PDF）→ 当事者設定 → 送信 → `cloudsign_document_id` を Applications に控え。
-  **AI審査ジョブとは分離**し、CloudSign障害時はAI審査を失敗させず申込を保留（再送可）にします。
-- `cloudSignSendStatement_`：仕入明細書PDFを生成→Drive保存（`pdf_file_id`）→みなし合意付きで送信。
-- `doPost`（締結Webhook）：`document_id`/`documentID`/`id` と `event_type`/`status` の差異を吸収、
-  重複排除のうえ Contracts へ締結書戻し。**ステータス値は CloudSign 公式仕様で要確認**（`cs_isCompletedEvent_`）。
-- 管理コンソール「設定 › CloudSign API」に **接続テスト**ボタン（`admin_cloudSignTest`）。トークンは先頭のみ表示。
-
-> エンドポイント・ステータス値・Web​hookペイロードは CloudSign 公式 Web API ドキュメントで最新仕様の
-> 確認が必要です（本実装は標準的なフローに基づくサンドボックス向けの実装）。
-
-## 実装時に確認・補完する箇所（設計書 §5・§9 由来の TODO）
-
-- **CloudSign 仕様確認**：`/documents`・`/files`・`/participants`・`/sent` の各エンドポイントと
-  締結ステータス値（`cs_isCompletedEvent_`）、Webhook署名検証を公式仕様で確認・調整。
-- **Vertex AI Gemini**：モデル・リージョン・データ所在地を確認（`runAiReview_` の審査ロジックは実装済）。
-- **作品提出ページ**：`?page=upload` の専用UI（現状は report テンプレートを暫定流用）。
-- **Q-01/Q-03/Q-05a**：A/B 振り分け運用、B経路解除条項、未成年締結ロジック（条文確定後）。
+- 契約書ひな形：`docs/SPLL_利用許諾契約書_CloudSign_FORM対応_v4.1.md`（振込先は個別条件に固定文言で記載）
+- CloudSign FORM の実装・設定：`docs/SPLL_CloudSign_FORM_実装仕様_v2.1.md`、`docs/SPLL_CloudSign_FORM_設定マッピング_v1.0.md`
+- 初期設定・手動テスト：`docs/SPLL_初期設定チェックリスト_v1.0.md`、`docs/SPLL_手動テスト手順_v1.0.md`
+- 法務3文書（正本 Markdown → `node docs/build_legal_html.js` で `docs/legal/` を生成）：
+  `SPLL_個人情報取得同意_v1.0.md`、`SPLL_二次創作ガイドライン_v4.1.md`、`SPLL_利用規約_v1.0.md`
+- 設計判断：`docs/SPLL_具体的修正案_v2.0.md`（RP-002）、`docs/SPLL_修正設計書_v2.0.md`
