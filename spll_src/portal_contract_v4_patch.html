@@ -117,8 +117,11 @@
 
   /**
    * 申込完了画面。
-   * この時点では「申込を受け付けた」だけで契約は成立していない。番号を大きく出すと
-   * 手続きが終わったように読めてしまうため、残りの手順を常に併記する。
+   * この時点では「申込を受け付けた」だけで契約は成立していない。
+   * SPLL番号を大きく出すと手続きが終わったように読めてしまうため、
+   *   ・見出しは「終わった」ではなく「あと何をするか」を示す
+   *   ・次の操作（契約者情報の入力）を画面の主役にする
+   * という組み方にしている。
    */
   onCreated = function(res){
     const ref=(res&&res.license_id)||(res&&res.application_ref)||'—';
@@ -129,7 +132,7 @@
       return '<ol style="text-align:left;max-width:44ch;margin:18px auto 0;padding-left:1.4em;line-height:2;">'+
         items.map(function(s){ return '<li>'+s+'</li>'; }).join('')+'</ol>';
     };
-    if(title) title.textContent='申込を受け付けました';
+    // 見出しは経路ごとに差し替える（下の分岐で設定）。既定は静的HTMLの「申込を受け付けました」
     // 進捗表示：申込までを済に、次にやること（契約者情報の入力）を現在地にする。
     // 個別確認へ回った場合は次が事務局の連絡なので、現在地は動かさない。
     const nextIndex = (res && res.template_route === 'MANUAL_REVIEW') ? -1 : 4;
@@ -138,7 +141,8 @@
       el.classList.toggle('on', i === nextIndex);
     });
     if(res && res.template_route === 'MANUAL_REVIEW'){
-      if(lead) lead.innerHTML='契約はまだ成立していません。事務局の確認をお待ちください。';
+      if(title) title.textContent='事務局からのご連絡をお待ちください';
+      if(lead) lead.innerHTML='お申込みを受け付けました。<b>契約はまだ成立していません。</b>';
       done.innerHTML='今回の申込は、標準の自動締結の対象外です。事務局で内容を確認のうえ、ご連絡します。'+
         '<br><span class="mono" style="font-size:11px">理由：'+esc((res.route_reasons||[]).join('／'))+'</span>'+
         steps(['<b>事務局からのご連絡をお待ちください</b>（このあと当社より対応方法をご案内します）',
@@ -148,14 +152,15 @@
       else { toForm.style.display='none'; }
       done.innerHTML+='<div style="margin-top:14px;font-size:12px;color:var(--soft)">SPLL番号は控えとして保管してください。お問い合わせの際に使います。</div>';
     }else{
-      if(lead) lead.innerHTML='契約はまだ成立していません。あと2つのお手続きが残っています。';
-      done.innerHTML=steps(['<b>クラウドサインフォームで契約者情報をご入力ください</b>（下のボタン。利用条件の再入力はありません）',
-                            '入力内容をもとに、クラウドサインから契約書が届きます',
+      if(title) title.textContent='契約成立まで、あと2ステップ';
+      if(lead) lead.innerHTML='お申込みを受け付けました。<b>この画面で手続きは終わりではありません。</b>契約はまだ成立していないため、下のボタンから続けてお進みください。';
+      done.innerHTML=steps(['<b>いま行うこと：</b>クラウドサインフォームで契約者情報をご入力ください（下のボタン。利用条件の再入力はありません）',
+                            '入力内容をもとに、クラウドサインから契約書がメールで届きます',
                             '<b>契約書にご同意いただいた時点で契約成立</b>です']);
       const url=buildFormUrl(res);
       if(url){
         toForm.textContent='契約者情報の入力へ進む →'; toForm.onclick=function(){ window.open(url,'_blank'); }; toForm.style.display='';
-        done.innerHTML+='<div style="margin-top:14px;font-size:12px;color:var(--warn)">'+
+        done.innerHTML+='<div style="margin-top:14px;font-size:12.5px;color:var(--warn);font-weight:700">'+
           'この画面を閉じると、このリンクは再表示できません。先にお手続きを済ませてください。</div>';
       }
       else { toForm.style.display='none'; done.innerHTML+='<div style="margin-top:14px;font-size:12px;color:var(--warn)">現在フォームをご案内できません。事務局へお問い合わせください。</div>'; }
