@@ -55,6 +55,8 @@ script.google.com → **admin** プロジェクト → 関数選択で `setup_al
 | `SS_MASTER` / `SS_OPS` | Step 1 のログの値 |
 | `HANDOFF_SECRET` | Step 1 のログの値 |
 | `ADMIN_CONSOLE_URL` | admin のウェブアプリURL（`/exec`） |
+| `FORM_HIDDEN_MAP`（＋経路別 `_FIXED` / `_RATE`） | ③フォーム構築時に設定（申込URLへ初期値を載せるhidden項目キー） |
+| `FORM_MAX_WORKS` | 契約書テンプレートの原作枠数。**3プロジェクトで同じ値**にする |
 
 ### workflow
 
@@ -66,13 +68,23 @@ script.google.com → **admin** プロジェクト → 関数選択で `setup_al
 | `CLOUDSIGN_WEBHOOK_KEY` | 任意の長い乱数（CloudSign WebhookのURLに `?key=` で付ける） |
 | `FORMRUN_WEBHOOK_SECRET` | 任意の長い乱数（formrun WebhookのURLに `&key=` で付ける） |
 | `CLOUDSIGN_CLIENT_ID` ほかCloudSign系 | ③フォーム構築時に設定（この時点では空でよい） |
-| `GCP_PROJECT` / `GCP_REGION` / `GEMINI_MODEL` | AI一次審査を使うとき |
+| `FORMRUN_FIELD_MAP`（＋経路別 `_FIXED` / `_RATE`） | ③フォーム構築時に設定（Webhookの項目名→正規キー） |
+| `FORM_MAX_WORKS` | portal と**同じ値**（ずれると契約条件ハッシュが一致しません） |
+| `GCP_PROJECT` / `GCP_REGION` / `GEMINI_MODEL` | AI一次審査を使うとき（Step 5.5） |
 
 ### admin
 
-Step 1 で自動設定済み。追加で必要になるのは CloudSign／X 連携の鍵のみ（管理画面の「設定」から投入可）。
+Step 1 で自動設定済み。追加で必要になるのは CloudSign／X 連携の鍵と `FORM_MAX_WORKS` のみ（管理画面の「設定」から投入可）。
 
-- [ ] portal に4件、workflow に必要分を設定した
+**formrun連携の4つ（`FORM_HIDDEN_MAP` / `FORM_REF_PARAM` / `FORMRUN_FORM_URL` / `FORMRUN_FIELD_MAP`）は admin に置かないでください。**
+読まれないだけでなく、管理コンソールの「v4切替の準備状況」はプロジェクトごとのプロパティを見るため、
+adminにだけ値がある状態は「実際は未設定なのに設定済みに見える」表示になります。
+管理コンソールの「外部連携」画面で保存した値も **admin自身のプロパティに入るだけで GAS①・GAS② には届きません**
+（hidden項目マッピングのひな形づくりに使い、生成したJSONは portal へ貼り付けてください）。
+一方、**申込導線のフォームURL**（`FORM_URL_STANDARD_FIXED` ほか）は Config台帳＝3プロジェクト共通なので、
+管理コンソールから保存すればそのまま効きます。
+
+- [ ] portal に必要分、workflow に必要分を設定した（admin には formrun連携の4つを入れていない）
 
 > `ENVIRONMENT` は3つとも同じ値にしてください。未設定だと起動を止めます。
 

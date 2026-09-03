@@ -530,9 +530,10 @@
         <div class="pfoot"><button class="btn" onclick="previewCorporateNotice()">案内表示をプレビュー</button><button class="save" onclick="savePortalRouting()">申込導線を保存</button></div>
       </div>
       <div class="panel">
-        <div class="ph"><h3>クラウドサインフォーム（powered by formrun）連携</h3><span class="hint">ScriptProperties（secretはマスク）</span></div>
+        <div class="ph"><h3>クラウドサインフォーム（powered by formrun）連携</h3><span class="hint">ScriptProperties（プロジェクトごと・secretはマスク）</span></div>
         <div class="pbody">
           <p class="setnote">公開ポータルで発行した <b>application_ref</b> を、クラウドサインフォームの<b>hidden項目</b>に引き継ぎ、申込→締結を突合します。Webhook Secret は保存時のみ入力してください。</p>
+          <div class="note" style="margin:0 0 12px"><b>この欄の設定値は、実際には別のプロジェクトで読まれます。</b>スクリプト プロパティはプロジェクトごとに独立しているため、<b>ここで保存してもGAS①・GAS②へは届きません</b>（この管理コンソール自身のプロパティに入るだけです）。<span class="mono">FORM_HIDDEN_MAP</span>・<span class="mono">FORM_REF_PARAM</span>・<span class="mono">FORMRUN_FORM_URL</span> は <b>GAS①(portal)</b>、<span class="mono">FORMRUN_FIELD_MAP</span>・<span class="mono">FORMRUN_WEBHOOK_SECRET</span> は <b>GAS②(workflow)</b> のプロジェクト設定へ入れてください。この画面は<b>hidden項目マッピングのひな形づくりと控え</b>としてお使いいただけます（下の「ひな形を挿入」で生成 → コピーしてGAS①へ貼り付け）。</div>
           <div class="fld"><label>フォームURL <span class="h">FORMRUN_FORM_URL</span></label><input id="fr-form_url" placeholder="https://form.run/@… または クラウドサインフォームのURL"></div>
           <div class="fld"><label>application_ref 引き継ぎパラメータ <span class="h">FORM_REF_PARAM（formrunのhidden項目キー）</span></label><input id="fr-ref_param" placeholder="_field_xxxxxxxx"></div>
           <div class="grid2">
@@ -548,7 +549,7 @@
         </div>
         <div class="pfoot"><button class="save" onclick="saveFormRun()">連携設定を保存</button></div>
       </div>
-      <div class="note">
+      <div class="note" id="formrun-tips">
         <b>連携の要点（クラウドサインフォームの仕様に基づく）：</b>
         <ol style="margin:6px 0 0;padding-left:18px;font-size:12px;line-height:1.7;">
           <li>フォームに<b>hidden項目</b>を作成し、契約書テンプレートの差込フィールドに対応させます：<span class="mono">application_ref</span> と、対象原作分の <span class="mono">work_id_1..N / work_title_1..N</span>（Nは上の「最大数」）。各hidden項目のキー（<span class="mono">_field_xxxx</span>）を「hidden項目マッピング」にJSONで登録してください。</li>
@@ -717,6 +718,11 @@ var MOCK = {
     schema_fields:["overall_result","risk_score","human_review_required","findings"] }; },
   admin_saveAiConfig:function(c){ if(c&&c.prompt) _mAiPrompt=c.prompt; return { effective_version:"v1:9f8e7d6c", warnings:(c&&c.prompt&&c.prompt.indexOf("{{rules}}")<0)?["{{rules}} が含まれていないため、原作別ルールは本文の末尾へ自動付与されます"]:[] }; },
   admin_previewAiPrompt:function(){ return { text:_mAiPrompt.replace("{{rules}}", JSON.stringify([{work_id:"WRK-ARK00012",work_name:"新クトゥルフ神話TRPG",ok:["世界観・神話設定"],no:["公式イラスト流用"],rules:[]}],null,1)), length:420, works:["新クトゥルフ神話TRPG"], effective_version:"v1:1a2b3c4d" }; },
+  admin_getContractV4Status:function(){ return { privacy_published:true, guideline_published:true, form_url_individual:true,
+    contract_template_version:"v4.1",
+    elsewhere:[{key:"FORM_HIDDEN_MAP",where:"GAS①(portal)",what:"申込URLへ初期値を載せるhidden項目キー"},
+      {key:"FORMRUN_FIELD_MAP",where:"GAS②(workflow)",what:"Webhookのフィールド名→正規キー"},
+      {key:"HANDOFF_SECRET",where:"GAS①・GAS②",what:"申込引き継ぎの署名鍵（両者で同じ値）"}] }; },
   admin_aiTest:function(){ return { ok:true, http:200, project:"legalbridge-488506", region:"asia-northeast1", model:"gemini-2.0-flash" }; },
   admin_setCertEnabled:function(id,on){ _mContracts&&0; return { status:on?"ACTIVE":"SUSPENDED", reason_code:on?"FEE_PAYMENT_CONFIRMED":"FEE_PAYMENT_UNCONFIRMED", changed:true }; },
   admin_getMailStatus:function(){ return {enabled:_mGuide.guide_email_auto_send!=="false",sent:12,pending:1,failed:0,remaining_quota:1487,from_name:_mGuide.mail_from_name,reply_to:_mGuide.mail_reply_to}; },

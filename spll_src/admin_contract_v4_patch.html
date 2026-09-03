@@ -2,13 +2,16 @@
 (function(){
   // 同意文・規約（PRIVACY／GUIDELINE／TERMS）の管理は admin.html 本体へ取り込み済み。
 
-  const formPane=document.getElementById('p-formrun');
-  if(formPane){
-    const note=formPane.querySelector('.setnote');
+  // formrun連携パネルへの追記。パネルは自身の入力欄から辿る（申込導線パネルの説明文を
+  // 上書きしてしまわないように、id で範囲を確定させる）。
+  const frInput=document.getElementById('fr-hidden_map');
+  const frPanel=frInput&&frInput.closest?frInput.closest('.panel'):null;
+  if(frPanel){
+    const note=frPanel.querySelector('.setnote');
     if(note) note.innerHTML='CloudSign FORM v4では、クリエーターが入力するのは契約者情報のみです。SPLL番号・対象原作・料金・期間・クレジット等は<b>システムhidden項目</b>として契約書へ引き継ぎ、Webhookで改変検知します。';
-    const notes=formPane.querySelectorAll('.note');
-    if(notes[0]) notes[0].innerHTML='<b>v4設定：</b>「hidden項目ひな形」を挿入し、各canonical keyをFormRunの実フィールドIDへ割り当ててください。逆方向の <span class="mono">FORMRUN_FIELD_MAP</span> も同じ項目で設定します。契約成立はFormRun送信時ではなくCloudSign上の同意完了時です。';
   }
+  const tips=document.getElementById('formrun-tips');
+  if(tips) tips.insertAdjacentHTML('afterbegin','<div style="margin:0 0 8px"><b>v4設定：</b>「hidden項目ひな形」を挿入し、各canonical keyをFormRunの実フィールドIDへ割り当ててください。逆方向の <span class="mono">FORMRUN_FIELD_MAP</span> も同じ項目で設定します。契約成立はFormRun送信時ではなくCloudSign上の同意完了時です。</div>');
   insertHiddenMapSkeleton=function(){
     const n=parseInt((document.getElementById('fr-max_works')||{}).value||'5',10)||5;
     const o={license_id:'',application_ref:'',handoff_token:'',terms_snapshot_hash:'',contract_template_version:'',usage_category:'',work_count:'',work_names:''};
@@ -25,8 +28,17 @@
     legacyLoadLegal();
     call('admin_getContractV4Status',[],function(s){
       const el=document.getElementById('v4-status'); if(!el||!s) return;
-      const flags=[['PRIVACY公開',s.privacy_published],['GUIDELINE公開',s.guideline_published],['個人FORM URL',s.form_url_individual],['hidden map',s.form_hidden_map],['Webhook map',s.formrun_field_map],['HMAC鍵',s.handoff_secret]];
-      el.innerHTML='<b>'+esc(s.contract_template_version||'v4')+'</b> ／ '+flags.map(function(x){return (x[1]?'✓ ':'⚠ ')+esc(x[0]);}).join(' ／ ');
+      const flags=[['PRIVACY公開',s.privacy_published],['GUIDELINE公開',s.guideline_published],['申込フォームURL',s.form_url_individual]];
+      let html='<b>'+esc(s.contract_template_version||'v4')+'</b> ／ '+
+        flags.map(function(x){return (x[1]?'✓ ':'⚠ ')+esc(x[0]);}).join(' ／ ')+
+        ' <span class="h">（ここまでは設定台帳＝3プロジェクト共通のため、この画面で確認できます）</span>';
+      const other=s.elsewhere||[];
+      if(other.length){
+        html+='<div style="margin-top:6px">この管理コンソールからは<b>確認できない設定</b>（プロジェクトごとのスクリプト プロパティのため）：'+
+          other.map(function(x){return '<span class="mono">'+esc(x.key)+'</span>＝'+esc(x.where);}).join(' ／ ')+
+          '<br><span class="h">管理コンソール（GAS③）に同じ値を置く必要はありません。むしろ置くと「実際は未設定なのに設定済みに見える」ため、置かないでください。</span></div>';
+      }
+      el.innerHTML=html;
     });
   };
 })();

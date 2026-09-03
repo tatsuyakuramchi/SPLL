@@ -116,7 +116,9 @@ npm run deploy:portal       # 個別（deploy:workflow / deploy:admin）
 | `SS_MASTER` / `SS_OPS` | ✔ | ✔ | ✔ |
 | `DRIVE_ROOT` | — | ✔ | ✔ |
 | `GCP_PROJECT` / `GCP_REGION` / `GEMINI_MODEL` | — | ✔ | ✔ |
-| `FORMRUN_FORM_URL` / `FORM_REF_PARAM` / `FORM_HIDDEN_MAP` / `FORM_MAX_WORKS` | ✔ | — | ✔ |
+| `FORM_HIDDEN_MAP`（＋経路別 `_FIXED` / `_RATE` / `_MANUAL`）／`FORM_REF_PARAM`（旧）／`FORMRUN_FORM_URL`（旧・経路別URL未設定時のみ） | ✔ | — | — |
+| `FORMRUN_FIELD_MAP`（＋経路別 `_FIXED` / `_RATE` / `_MANUAL`。Webhookの項目名→正規キー） | — | ✔ | — |
+| `FORM_MAX_WORKS`（**3つとも同じ値にする**。ずれると契約条件ハッシュが一致しなくなる） | ✔ | ✔ | ✔ |
 | CloudSign FORM v4：`FORM_URL_STANDARD_FIXED` / `FORM_URL_STANDARD_RATE`（無ければ `FORM_URL_INDIVIDUAL`）／`FORM_URL_MANUAL_REVIEW`（個別確認）※Config（台帳）に保存 | ✔ | — | ✔ |
 | 法人の退避先：`CORPORATE_INQUIRY_URL` / `CORPORATE_INQUIRY_EMAIL`（窓口は個人専用）※Config | ✔ | — | ✔ |
 | 大容量提出：`SUBMIT_FOLDER_MAX_FILES` / `SUBMIT_FOLDER_MAX_GB` / `SUBMIT_FOLDER_OPEN_DAYS` ※Config | — | ✔ | ✔ |
@@ -129,6 +131,15 @@ npm run deploy:portal       # 個別（deploy:workflow / deploy:admin）
 | `ALLOW_DEV_BOOTSTRAP`（development で管理者未登録時の暫定操作を許可する場合のみ true） | — | — | ✔ |
 | `HANDOFF_SECRET`（フォーム引継ぎ改変検知・HMAC鍵） | ✔ | ✔ | — |
 | `ADMIN_CONSOLE_URL`（adminのウェブアプリURL。ポータルの「管理コンソール」スイッチ先） | ✔ | — | — |
+
+> **「—」の欄には値を置かないでください。** 置いても読まれないうえ、管理コンソールの
+> 「v4切替の準備状況」がプロジェクトごとのプロパティを見ているため、**adminにだけ値がある状態は
+> 「実際は未設定なのに設定済みに見える」**という一番危険な表示になります。
+> 管理コンソールの「設定 → 外部連携 → クラウドサインフォーム連携」で保存した値も、
+> **保存先はadmin自身のプロパティで、GAS①・GAS②へは届きません**（hidden項目マッピングの
+> ひな形づくり用と考え、生成したJSONはGAS①へ貼り付けてください）。
+> 一方、**申込導線のフォームURL**（`FORM_URL_STANDARD_FIXED` ほか）はConfig台帳＝3プロジェクト共通なので、
+> 管理コンソールから保存すればそのまま効きます。
 
 ### 実行する関数（GASエディタから1回ずつ）
 
