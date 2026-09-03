@@ -472,6 +472,33 @@ function admin_saveAiConfig(c){ const actor = requireRole_(['SYSTEM_ADMIN','OPER
     { effective_version: aiPromptVersion_(), length: aiReviewPrompt_().length });
   return { effective_version: aiPromptVersion_(), warnings: warnings };
 }
+/**
+ * Vertex AI への接続テスト。ごく短い応答を1回だけ求め、設定の穴を切り分ける。
+ * 失敗の大半は「GASスクリプトのGCPプロジェクトが既定のままで aiplatform が有効でない」
+ * ことに起因するため、APIから返ったメッセージ（プロジェクト番号を含む）をそのまま返す。
+ */
+function admin_aiTest(){ requireRole_(['SYSTEM_ADMIN','OPERATIONS','LEGAL_ADMIN']);
+  const region = cfg_('GCP_REGION'), project = cfg_('GCP_PROJECT'), model = cfg_('GEMINI_MODEL');
+  const base = { project:project||'', region:region||'', model:model||'' };
+  if(!project || project === CFG.GCP_PROJECT)
+    return Object.assign(base, { ok:false, error:'GCP_PROJECT が未設定です（設定→データソース接続で登録してください）' });
+  if(!region || !model)
+    return Object.assign(base, { ok:false, error:'GCP_REGION または GEMINI_MODEL が未設定です' });
+  const url = 'https://' + region + '-aiplatform.googleapis.com/v1/projects/' + project +
+    '/locations/' + region + '/publishers/google/models/' + model + ':generateContent';
+  try{
+    const res = UrlFetchApp.fetch(url, { method:'post', contentType:'application/json',
+      headers:{ Authorization:'Bearer ' + ScriptApp.getOAuthToken() },
+      payload: JSON.stringify({ contents:[{ role:'user', parts:[{ text:'接続テストです。「OK」とだけ返してください。' }] }],
+        generationConfig:{ maxOutputTokens:16 } }), muteHttpExceptions:true });
+    const code = res.getResponseCode();
+    const body = String(res.getContentText() || '');
+    if(code >= 200 && code < 300) return Object.assign(base, { ok:true, http:code });
+    return Object.assign(base, { ok:false, http:code, error: body.slice(0, 800) });
+  }catch(e){
+    return Object.assign(base, { ok:false, error:String(e.message || e) });
+  }
+}
 /** 実際にGeminiへ送る文面のプレビュー（指定契約の対象原作ルールを差し込む） */
 function admin_previewAiPrompt(contractId){ requireRole_([]);
   let works = [];

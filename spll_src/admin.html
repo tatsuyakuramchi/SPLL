@@ -453,6 +453,16 @@
           <button class="save" onclick="saveAiConfig()">プロンプトを保存</button>
         </div>
       </div>
+
+      <div class="panel">
+        <div class="ph"><h3>Vertex AI への接続確認</h3><span class="hint">GCP_PROJECT / GCP_REGION / GEMINI_MODEL</span></div>
+        <div class="pbody">
+          <p class="setnote">設定済みのプロジェクト・リージョン・モデルへ、ごく短い問い合わせを1回だけ送って疎通を確認します。<b>審査ジョブは作られません。</b>失敗したときは、Vertex AI が呼び出しを拒んだ理由をそのまま表示します（<span class="mono">SERVICE_DISABLED</span> の場合は、メッセージ中のプロジェクト番号の側で Vertex AI API を有効にしてください）。</p>
+          <div class="note" id="ait-status" style="margin:0">未確認です。</div>
+          <pre id="ait-detail" style="display:none;white-space:pre-wrap;word-break:break-all;background:#F7F6FA;border:1px solid var(--line);border-radius:8px;padding:12px;font-size:11.5px;max-height:260px;overflow:auto;margin:12px 0 0;"></pre>
+        </div>
+        <div class="pfoot"><button class="btn" onclick="testAi()">接続を確認する</button></div>
+      </div>
       <div class="note"><b>運用上の注意：</b>AI審査は一次スクリーニングであり、承認・適法性保証ではありません（最終判断は人手）。プロンプトを変更すると版が変わり、各審査ジョブの <span class="mono">prompt_version</span> に「ラベル:本文ハッシュ」で記録されるため、<b>どの文面で出た結果かを後から追えます</b>。モデル・GCPプロジェクト・リージョンは「作品マスタ→データソース接続」で設定します。</div>
     </div>
 
@@ -707,6 +717,7 @@ var MOCK = {
     schema_fields:["overall_result","risk_score","human_review_required","findings"] }; },
   admin_saveAiConfig:function(c){ if(c&&c.prompt) _mAiPrompt=c.prompt; return { effective_version:"v1:9f8e7d6c", warnings:(c&&c.prompt&&c.prompt.indexOf("{{rules}}")<0)?["{{rules}} が含まれていないため、原作別ルールは本文の末尾へ自動付与されます"]:[] }; },
   admin_previewAiPrompt:function(){ return { text:_mAiPrompt.replace("{{rules}}", JSON.stringify([{work_id:"WRK-ARK00012",work_name:"新クトゥルフ神話TRPG",ok:["世界観・神話設定"],no:["公式イラスト流用"],rules:[]}],null,1)), length:420, works:["新クトゥルフ神話TRPG"], effective_version:"v1:1a2b3c4d" }; },
+  admin_aiTest:function(){ return { ok:true, http:200, project:"legalbridge-488506", region:"asia-northeast1", model:"gemini-2.0-flash" }; },
   admin_setCertEnabled:function(id,on){ _mContracts&&0; return { status:on?"ACTIVE":"SUSPENDED", reason_code:on?"FEE_PAYMENT_CONFIRMED":"FEE_PAYMENT_UNCONFIRMED", changed:true }; },
   admin_getMailStatus:function(){ return {enabled:_mGuide.guide_email_auto_send!=="false",sent:12,pending:1,failed:0,remaining_quota:1487,from_name:_mGuide.mail_from_name,reply_to:_mGuide.mail_reply_to}; },
   admin_sendGuideEmailTest:function(to){ return {sent:true,to:to}; },
@@ -928,6 +939,24 @@ function saveAiConfig(){
     toast("プロンプトを保存しました（版 "+((r&&r.effective_version)||"")+"）");
     if(r&&r.warnings&&r.warnings.length) toast(r.warnings.join(" ／ "), true);
     loadAiConfig();
+  });
+}
+function testAi(){
+  var st=$("ait-status"), dt=$("ait-detail");
+  if(st) st.textContent="確認中です…";
+  if(dt) dt.style.display="none";
+  call("admin_aiTest",[],function(r){
+    if(!r||!st) return;
+    var where=esc(r.project||"未設定")+" / "+esc(r.region||"未設定")+" / "+esc(r.model||"未設定");
+    if(r.ok){
+      st.innerHTML='<b style="color:var(--pass)">接続できました。</b>　'+where;
+      if(dt) dt.style.display="none";
+      toast("Vertex AI に接続できました");
+    }else{
+      st.innerHTML='<b style="color:var(--fail)">接続できませんでした。</b>　'+where+(r.http?("　HTTP "+r.http):"");
+      if(dt){ dt.style.display=""; dt.textContent=r.error||""; }
+      toast("Vertex AI に接続できませんでした",true);
+    }
   });
 }
 
