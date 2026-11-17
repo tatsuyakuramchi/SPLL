@@ -3,10 +3,11 @@
  *
  *   基本契約（参加契約） … docs/SPLL_基本契約書_参加契約_v5.0.md
  *       CloudSign テンプレートに載せる固定文面。formrun（CloudSign FORM）経由で締結。差込は当事者欄だけ
- *   個別利用許諾書       … docs/SPLL_個別利用許諾書_v1.0.md
- *       SPLL が台帳から PDF を作り CloudSign API で送る。別表1（対象作品）は行数の上限なし
+ *   個別利用許諾書（別紙）… docs/SPLL_個別利用許諾書_v1.0.md
+ *       専用ページでの申込みを受けて SPLL が台帳から PDF を作り、メールで送る（送付で個別契約が成立）。
+ *       別表1（対象作品）は行数の上限なし。クラウドサインは使わない
  *
- * 本番では個別利用許諾書の組み立てを GAS 側で行い、PDF を POST /documents/{id}/files へ渡す。
+ * 本番では別紙の組み立てを GAS 側で行い、PDF を Drive に保存してメールに添付し、専用ページにも掲示する。
  * 基本契約はテンプレートとしてクラウドサインへ1回登録するだけ（ここで出す PDF はその版下）。
  *
  * 使い方:
@@ -56,7 +57,7 @@ const sentence = (md, head) => { const m = md.match(new RegExp('\\n(' + head + '
 
 /** 個別条件のハッシュ（本番は台帳のスナップショットと同じ正規化に揃える） */
 function termsHash(t){
-  const canon = JSON.stringify([t.license_id, t.participant_id, t.usage_category, t.fee_amount_or_rate, t.payment_due,
+  const canon = JSON.stringify([t.license_id, t.participant_id, t.usage_category, t.fee_amount_or_rate, t.fee_schedule_version, t.payment_due,
     t.works.map(w => [w.work_id, w.work_title, w.licensor_name, w.credit_text])]);
   return crypto.createHash('sha256').update(canon).digest('hex').slice(0, 16);
 }
@@ -133,7 +134,7 @@ function buildIndividual(t, variant){
   const lic = variant === 'A' ? '別表1に記載の各対象作品の権利者（代理人 TRPGライツ事務局）' : 'TRPGライツ事務局';
   const works = t.works.map((w, i) => `<tr><td class="no">${i + 1}</td><td>${esc(w.work_title)}</td><td>${esc(w.licensor_name)}</td><td>${esc(w.credit_text)}</td></tr>`).join('');
   const checks = md.slice(md.indexOf('## 確認事項'), md.indexOf('## 別表1')).split('\n').filter(l => /^\d+\. /.test(l)).map(l => `<li>${esc(l.replace(/^\d+\. /, ''))}</li>`).join('');
-  const lead = sentence(md, '利用者は、参加者番号').replace('`{{participant_id}}`', t.participant_id);
+  const lead = sentence(md, 'TRPGライツ事務局は、参加者番号').replace('`{{participant_id}}`', t.participant_id).replace('`{{applied_at}}`', t.applied_at);
   return page('SPLL個別利用許諾書 ' + t.license_id, `
 <h1>SPLL個別利用許諾書</h1>
 <p class="lead">${esc(lead)}</p>
@@ -147,8 +148,8 @@ ${row('ライセンサー', esc(lic))}
 ${row('利用区分', esc(t.usage_category))}
 ${row('許諾期間', esc(t.license_term))}
 ${row('利用地域', esc(t.territory))}
-${row('利用許諾料', esc(t.fee_amount_or_rate))}
-${row('支払期日', esc(t.payment_due) + '（振込先は基本契約第6条のとおり）')}
+${row('利用許諾料', esc(t.fee_amount_or_rate) + '（料金表 ' + esc(t.fee_schedule_version) + ' により算定）')}
+${row('支払期限', esc(t.payment_due) + '（振込先は基本契約第6条のとおり）')}
 ${row('利用報告', esc(t.reporting_terms))}
 ${row('権利表記', '別表1のとおり（基本契約第7条第1項）')}
 ${row('特約', esc(t.special_terms || '該当なし'))}
@@ -158,7 +159,7 @@ ${row('特約', esc(t.special_terms || '該当なし'))}
 <h2>別表1　対象作品</h2>
 <div class="sum"><span>SPLL番号 ${esc(t.license_id)}</span><span>全${t.works.length}作品</span></div>
 <table class="works"><thead><tr><th>No.</th><th>対象作品</th><th>権利者</th><th>権利表記</th></tr></thead><tbody>${works}</tbody></table>
-<p class="closing">${esc(sentence(md, '本個別契約の成立を証するため'))}</p>
+<p class="end" style="margin-top:6mm">発行日：${esc(t.issued_at)}　発行者：TRPGライツ事務局</p>
 <p class="end">以上</p>
 <p class="note">条件照合コード：${hash}（本書の個別条件及び別表1が、SPLLの台帳に記録した内容と一致することの照合に用います）</p>`);
 }
@@ -176,7 +177,8 @@ const TITLES = ['星喰いの迷宮','黄昏ギルド戦記','深淵図書館RPG
 function sampleIndividual(id, n){
   return Object.assign({}, PARTY, {
     license_id: id, usage_category: '商品販売（同人誌・物販）', license_term: '個別契約の成立日から1年間（基本契約の有効期間内に限る）', territory: '日本国内',
-    fee_amount_or_rate: '16,500円（税込）。対象作品が複数の場合も同額', payment_due: '個別契約の成立日から30日以内',
+    fee_amount_or_rate: '16,500円（税込）。対象作品が複数の場合も同額', fee_schedule_version: '2026-10版',
+    applied_at: '2026年11月17日 10時12分', issued_at: '2026年11月17日', payment_due: '2026年12月17日（本書の発行日から30日。後払い）',
     reporting_terms: '定額のため利用報告は不要', special_terms: '',
     works: Array.from({ length: n }, (_, i) => {
       const lic = LICENSORS[i % LICENSORS.length], title = TITLES[i % TITLES.length];

@@ -271,7 +271,6 @@ const CS = {
   APPLICATION_RECEIVED:{l:'申込受付',g:'申込〜締結',c:'info'},
   CONTRACT_PENDING:{l:'基本契約待ち',g:'申込〜締結',c:'info'},
   MANUAL_REVIEW:{l:'個別確認',g:'申込〜締結',c:'warn',need:true},
-  SIGNING:{l:'個別契約の同意待ち',g:'申込〜締結',c:'info'},
   HOLD:{l:'条件不一致',g:'申込〜締結',c:'warn',need:true},
   AWAITING_SUBMISSION:{l:'提出待ち',g:'締結後',c:'info'},
   REVIEWING:{l:'審査中',g:'締結後',c:'warn',need:true},
@@ -281,7 +280,7 @@ const CS = {
   TERMINATED:{l:'終了',g:'終了',c:'idle'},
   CANCELLED:{l:'取消',g:'終了',c:'idle'}
 };
-const CT = {NOT_STARTED:['未着手','idle','○'],SIGNING:['署名待ち','info','◐'],SIGNED:['締結済','ok','●'],TERMINATED:['終了','bad','✕']};
+const CT = {NOT_STARTED:['未成立','idle','○'],SIGNED:['成立（別紙送付済）','ok','●'],TERMINATED:['終了','bad','✕']};
 const RV = {NOT_STARTED:['未着手','idle','○'],AWAITING_SUBMISSION:['提出待ち','idle','○'],IN_REVIEW:['審査中','info','◐'],PENDING:['審査中','info','◐'],
   CLEARED:['承認','ok','●'],CORRECTION_REQUIRED:['是正','bad','✕'],ESCALATED:['上申','warn','!']};
 const AG = {NOT_STARTED:['未締結','idle','○'],SIGNING:['同意待ち','info','◐'],ACTIVE:['有効','ok','●'],TERMINATED:['終了','bad','✕']};
@@ -317,14 +316,17 @@ const PID = {131:'P-00042',121:'P-00042',130:'P-00043',129:'P-00044',128:'P-0004
 const mk = (n,party,circle,cs,ct,rv,ce,works,extra) => Object.assign({
   id:'SPLL-2026-'+String(n).padStart(4,'0'),party,circle,cs,ct,rv,ce,works,reason:'',usage:'商品販売',route:'定額',fee:'16,500円／契約',
   email:'creator'+n+'@example.com',pid:PID[n],sub:null,req:null,mismatch:false,updated:'11/16 18:20',
+  issued:['SIGNED','TERMINATED'].includes(ct)?'2026-10-20':'', due:['SIGNED','TERMINATED'].includes(ct)?'2026-11-19':'',
   tl:[{t:'10/02 10:12',w:'portal',e:'申込受付（SPLL番号発行）'}]},extra||{});
+const TODAY = '2026-11-17';
+const addDays = (d,n) => { const x=new Date(d+'T00:00:00Z'); x.setUTCDate(x.getUTCDate()+n); return x.toISOString().slice(0,10); };
 const CASES = [
   mk(131,'山田 太郎','星屑工房','REVIEWING','SIGNED','IN_REVIEW','NOT_ISSUED',['W01','W03'],{sub:{title:'シナリオ集『迷宮の夜明け』',ver:2,ai:'指摘2件（クレジット表記の位置、軽微な表現）'},updated:'11/17 09:41'}),
   mk(130,'佐藤 花子','くじら亭','HOLD','SIGNED','NOT_STARTED','NOT_ISSUED',['W02'],{updated:'11/17 08:05',note:'締結内容の利用区分が台帳と一致しない（台帳：商品販売／契約書：無償配布）'}),
   mk(129,'鈴木 一郎','','MANUAL_REVIEW','NOT_STARTED','NOT_STARTED','NOT_ISSUED',['W01','W02','W03','W04','W05','W06','W07'],{updated:'11/16 21:10',note:'特約の希望あり（イベント限定の頒布部数）。条件を確認してから個別利用許諾書を送付する。対象原作 7 件でも別表に全件載る'}),
-  mk(128,'高橋 美咲','Lantern','SUSPENDED','SIGNED','CLEARED','SUSPENDED',['W05'],{reason:'FEE_PAYMENT_UNCONFIRMED',sub:{title:'リプレイ本『月下の宴』',ver:1,ai:'指摘なし'},updated:'11/15 12:00'}),
+  mk(128,'高橋 美咲','Lantern','SUSPENDED','SIGNED','CLEARED','SUSPENDED',['W05'],{reason:'FEE_PAYMENT_UNCONFIRMED',sub:{title:'リプレイ本『月下の宴』',ver:1,ai:'指摘なし'},updated:'11/15 12:00',issued:'2026-10-01',due:'2026-10-31'}),
   mk(127,'伊藤 健','夜更かし卓','CERTIFIED','SIGNED','CLEARED','ACTIVE',['W04'],{sub:{title:'サプリ『蒸気と歯車』',ver:1,ai:'指摘なし'},updated:'11/14 16:30'}),
-  mk(126,'渡辺 葵','あおい堂','SIGNING','SIGNING','NOT_STARTED','NOT_ISSUED',['W03','W07'],{updated:'11/16 15:02'}),
+  mk(126,'渡辺 葵','あおい堂','AWAITING_SUBMISSION','SIGNED','AWAITING_SUBMISSION','NOT_ISSUED',['W03','W07'],{updated:'11/16 15:02',issued:'2026-11-16',due:'2026-12-16'}),
   mk(125,'中村 蓮','','AWAITING_SUBMISSION','SIGNED','AWAITING_SUBMISSION','NOT_ISSUED',['W06'],{updated:'11/12 11:45'}),
   mk(124,'小林 楓','楓文庫','CORRECTION_REQUIRED','SIGNED','CORRECTION_REQUIRED','NOT_ISSUED',['W02','W06'],{sub:{title:'TRPGアンソロジー『辺境の灯』',ver:1,ai:'指摘4件（原作の固有画像の流用の疑い）'},updated:'11/10 10:20'}),
   mk(123,'加藤 翼','ツバサ会','CERTIFIED','SIGNED','CLEARED','ACTIVE',['W01'],{sub:{title:'ソロアドベンチャー『星の底』',ver:1,ai:'指摘なし'},updated:'11/08 09:00',req:{kind:'revoke',to:'REVOKED',reason:'RIGHTS_CLAIM',text:'権利者から表現の差し止め申立て（11/07受付）',by:'sasaki',at:'11/16 17:44'}}),
@@ -351,14 +353,14 @@ const ax = (map,v,name) => { const m=map[v]||['—','idle','·']; return `<span 
 /* ===== ステータススイッチ：押せるか（事前検証）を状態から計算する ===== */
 function switches(c){
   const L = [];
-  const pre = ['APPLICATION_RECEIVED','CONTRACT_PENDING','MANUAL_REVIEW','SIGNING','HOLD'];
+  const pre = ['APPLICATION_RECEIVED','CONTRACT_PENDING','MANUAL_REVIEW','HOLD'];
   // S1 契約書の作成と送付（CloudSign API）
   const ag = PARTS[c.pid].st;
   let sendWhy = '';
-  if(c.cs==='SIGNING') sendWhy = '送付済みです（個別契約の同意待ち）';
+  if(c.ct==='SIGNED') sendWhy = '別紙は送付済みです（個別契約は成立済み）';
   else if(!['APPLICATION_RECEIVED','CONTRACT_PENDING','MANUAL_REVIEW'].includes(c.cs)) sendWhy = `現在地「${CS[c.cs].l}」からは送付できません`;
   else if(ag!=='ACTIVE') sendWhy = '基本契約が締結されていません（参加者の同意待ち）。締結されると自動で送付します';
-  L.push({key:'send',grp:'contract',t:'個別利用許諾書を作成して送付',d:'台帳の条件から個別利用許諾書（別表1に対象作品を全件）を作り、CloudSign API で送る',kind:'button',role:'OPERATIONS',
+  L.push({key:'send',grp:'contract',t:'別紙を発行してメールで送る',d:'台帳の条件から別紙（個別利用許諾書・別表1に対象作品を全件）を作り、登録メールへ送る。送った時点で個別契約が成立する',kind:'button',role:'OPERATIONS',
     why: sendWhy, extra:'preview'});
   // S2 条件確認
   L.push({key:'confirm',grp:'contract',t:'条件を確認して締結を有効にする',d:'締結内容と台帳の食い違いを法務が確認した後に使う',kind:'button',role:'LEGAL_ADMIN',
@@ -461,7 +463,7 @@ function swRow(s,c){
   }
   else ctl = `<button type="button" class="btn${s.danger?' danger':(s.key==='send'?' primary':'')}" data-sw="${s.key}" ${off?'disabled':''}>${s.key==='send'?'送付':'実行'}</button>`;
   const why = locked ? `<div class="why">${ROLE_LABEL[s.role]}の権限が必要です</div>` : (s.why ? `<div class="why">${esc(s.why)}</div>` : '');
-  const pv = s.extra==='preview' ? `<div class="d"><button type="button" class="btn" data-preview="${c.id}" style="padding:3px 10px;font-size:12px">個別利用許諾書プレビュー</button></div>` : '';
+  const pv = s.extra==='preview' ? `<div class="d"><button type="button" class="btn" data-preview="${c.id}" style="padding:3px 10px;font-size:12px">別紙プレビュー</button></div>` : '';
   return `<div class="sw${off?' off':''}${locked?' locked':''}"><div class="t">${esc(s.t)}${tags}</div>${ctl}<div class="d">${esc(s.d)}</div>${why}${pv}</div>`;
 }
 function pendingBlock(c){
@@ -498,12 +500,14 @@ function renderDetail(){
     ${grp('contract','申込・締結')}${grp('review','作品審査')}${grp('cert','認証')}${grp('contract2','終了・取消')}
   </div>
   <div class="sec"><h3>状態を変えない作業</h3><div class="chips">
-    <button class="btn" type="button" data-op="guide" ${c.ct==='SIGNED'?'':'disabled'}>案内リンクを発行</button>
+    <button class="btn" type="button" data-op="guide" ${PARTS[c.pid].st==='ACTIVE'?'':'disabled'}>専用ページのリンクを再発行</button>
     <button class="btn" type="button" data-op="badge" ${c.ce==='ACTIVE'?'':'disabled'}>バッジ生成を再試行</button>
     <button class="btn" type="button" data-op="code" ${certLive(c.ce)?'':'disabled'}>照合コードを再発行</button>
-    <button class="btn" type="button" data-preview="${c.id}">個別利用許諾書を表示</button></div></div>
+    <button class="btn" type="button" data-preview="${c.id}">別紙を表示</button></div></div>
   <div class="sec"><h3>参加者（基本契約）</h3><dl class="kv"><dt>参加者番号</dt><dd class="mono">${c.pid}</dd><dt>基本契約</dt><dd>${pill(AG[PARTS[c.pid].st][0],AG[PARTS[c.pid].st][1])} ${PARTS[c.pid].at?'締結 '+PARTS[c.pid].at:''}</dd>
     <dt>この参加者の案件</dt><dd>${CASES.filter(x=>x.pid===c.pid).map(x=>x.id===c.id?`<b class="mono">${x.id.slice(10)}</b>`:`<button type="button" class="btn" style="padding:0 8px;font-size:12px" data-id="${x.id}">${x.id.slice(10)}</button>`).join(' ')}</dd></dl></div>
+  <div class="sec"><h3>別紙（個別利用許諾書）</h3>${c.issued?`<dl class="kv"><dt>発行・送付</dt><dd class="mono">${c.issued}</dd><dt>支払期限</dt><dd><span class="mono">${c.due}</span> ${c.due<TODAY?'<span class="tag" style="color:var(--warn);border-color:var(--warn)">期限を過ぎています</span>':''}</dd></dl>
+    <div class="muted" style="font-size:12px;margin-top:6px">入金は時限式で、SPLL では追いません。期限後に経理から未入金の連絡があれば「入金未確認で停止」を使います。</div>`:'<div class="muted" style="font-size:13px">まだ発行していません</div>'}</div>
   <div class="sec"><h3>対象原作（${c.works.length}作品）</h3><div class="works">${c.works.map((w,i)=>`<div class="work"><span class="no">${i+1}</span><div>${esc(W(w).name)}<small>${esc(W(w).lic)}／${esc(W(w).credit)}</small></div></div>`).join('')}</div></div>
   <div class="sec"><details class="more"><summary>契約・提出・AI審査の中身</summary><dl class="kv" style="margin-top:10px">
     <dt>連絡先</dt><dd>${esc(c.email)}</dd><dt>住所</dt><dd class="muted">基本契約（CloudSign）にだけ記載</dd><dt>利用許諾料</dt><dd>${esc(c.fee)}</dd>
@@ -511,7 +515,6 @@ function renderDetail(){
   <div class="sec"><details class="more" open><summary>履歴</summary><div class="tl" style="margin-top:10px">${c.tl.slice().reverse().map(x=>`<div><time>${x.t}</time><span>${esc(x.e)} <span class="muted">— ${esc(x.w)}</span></span></div>`).join('')}</div></details></div>
   <div class="sec demo"><h3>外部からの出来事を起こす</h3><div class="chips">
     <button class="btn" type="button" data-demo="master" ${PARTS[c.pid].st==='SIGNING'?'':'disabled'}>基本契約に同意された</button>
-    <button class="btn" type="button" data-demo="signed" ${c.cs==='SIGNING'?'':'disabled'}>個別契約に同意された</button>
     <button class="btn" type="button" data-demo="submit" ${['AWAITING_SUBMISSION','CORRECTION_REQUIRED','CERTIFIED','SUSPENDED'].includes(c.cs)?'':'disabled'}>作品が提出された</button></div>
     <div class="muted" style="font-size:12px;margin-top:6px">本番では Webhook と提出ページが起こす遷移です。流れを試すためだけに置いています。</div></div>`;
 }
@@ -525,7 +528,8 @@ function returnFromCert(c){ // 認証の状態に応じて現在地を戻す（C
   if(['CERTIFIED','SUSPENDED','TERMINATED'].includes(c.cs)) c.cs = byReview[c.rv] || 'CERTIFIED';
 }
 const APPLY = {
-  send(c,w){ c.cs='SIGNING'; c.ct='SIGNING'; log(c,`個別利用許諾書を作成しCloudSign APIで送付（${c.works.length}作品・${pageCount(c.works.length)}ページ）`, w==='system'?'system':undefined); return '個別利用許諾書を送付しました'; },
+  send(c,w){ c.ct='SIGNED'; c.cs='AWAITING_SUBMISSION'; c.rv='AWAITING_SUBMISSION'; c.issued=TODAY; c.due=addDays(TODAY,30); c.note='';
+    log(c,`別紙を発行しメールで送付＝個別契約が成立（${c.works.length}作品・${pageCount(c.works.length)}ページ・支払期限 ${c.due}）`, w==='system'?'system':undefined); return '別紙を送付しました。個別契約が成立し、提出待ちになりました'; },
   confirm(c,f){ c.cs='AWAITING_SUBMISSION'; c.rv='AWAITING_SUBMISSION'; c.note=''; log(c,'条件確認済み：'+f.text); return '締結を有効にしました。案内メールを送信キューに入れました'; },
   review(c,f){
     if(f.v==='CLEARED'){
@@ -620,20 +624,21 @@ function openPreview(c,opt){
     const wrow = (w,i) => `<tr><td>${i+1}</td><td>${esc(w.name)}</td><td>${esc(w.lic)}</td><td>${esc(w.credit)}</td></tr>`;
     const thead = `<tr><th>No.</th><th>対象原作</th><th>許諾者</th><th>権利表記</th></tr>`;
     let pages = `<div class="sheet"><h1>SPLL個別利用許諾書</h1>
-      <p>利用者は、参加者番号 ${c.pid} の SPLL基本契約第3条に基づき、本書の個別条件で個別契約を締結します。</p>
+      <p>TRPGライツ事務局は、参加者番号 ${c.pid} の SPLL基本契約第3条に基づき、利用者の申込みについて、次の個別条件により個別契約が成立したことを通知します。</p>
       <h2>個別条件</h2><table>
       <tr><th>SPLL番号</th><td>${c.id}</td></tr><tr><th>参加者番号</th><td>${c.pid}</td></tr><tr><th>利用者</th><td>${esc(c.party)}${c.circle?'（'+esc(c.circle)+'）':''}</td></tr>
       <tr><th>対象作品</th><td>別表1のとおり（全${ws.length}作品）</td></tr><tr><th>利用区分</th><td>${esc(c.usage)}</td></tr>
-      <tr><th>利用許諾料</th><td>${esc(c.fee)}</td></tr><tr><th>支払期日</th><td>成立日から30日以内（振込先は基本契約第6条）</td></tr></table>
+      <tr><th>利用許諾料</th><td>${esc(c.fee)}</td></tr><tr><th>支払期限</th><td>${c.due||addDays(TODAY,30)}（発行日から30日。後払い。振込先は基本契約第6条）</td></tr></table>
       <h2>別表1　対象作品</h2><table class="wt">${thead}${ws.slice(0,FIRST_ROWS).map(wrow).join('')}</table>
       ${ws.length>FIRST_ROWS?`<p style="margin-top:4px">（次ページへ続く）</p>`:''}${foot(1)}</div>`;
     let p = 2;
     for(let i=FIRST_ROWS;i<ws.length;i+=NEXT_ROWS){
       pages += `<div class="sheet"><h2>別表1　対象作品（続き）</h2><table class="wt">${thead}${ws.slice(i,i+NEXT_ROWS).map((w,k)=>wrow(w,i+k)).join('')}</table>${foot(p++)}</div>`;
     }
-    pages += `<div class="sheet"><h2>確認事項</h2><p>1. 本個別契約は、利用者が電子契約システム上で本書の内容を確認し、所定の方法により同意した時点で成立します（基本契約第3条第3項）。</p>
-      <p>2. 本個別契約の成立後、利用者は、事務局の案内に従い二次創作物を提出し、審査を受けます（基本契約第8条）。</p>
-      <p>3. 基本契約が終了した場合、本個別契約も同時に終了します（基本契約第12条第3項）。</p>
+    pages += `<div class="sheet"><h2>確認事項</h2><p>1. 本個別契約は、事務局が本書を利用者の登録メールアドレスへ送付した時点で成立しています（基本契約第3条第3項）。内容が申込みと異なる場合は7日以内にお申し出ください。</p>
+      <p>2. 利用許諾料は支払期限までに基本契約第6条の振込先へ。支払いがない場合、認証が一時停止されることがあります。</p>
+      <p>3. 本個別契約の成立後、利用者は、事務局の案内に従い二次創作物を提出し、審査を受けます（基本契約第8条）。</p>
+      <p>4. 基本契約が終了した場合、本個別契約も同時に終了します（基本契約第12条第3項）。</p>
       <p style="color:#777">共通条件（禁止事項・解除など）は基本契約に記載。本書には載せない。</p>${foot(p)}</div>`;
     L.querySelector('.pages').innerHTML = pages;
     L.querySelector('#pvStat').innerHTML = `<b>${ws.length}</b>作品・<b>${total}</b>ページ`;
@@ -642,21 +647,19 @@ function openPreview(c,opt){
   const L = $('#layer');
   const canSend = P.send && ['APPLICATION_RECEIVED','CONTRACT_PENDING','MANUAL_REVIEW'].includes(c.cs) && can('OPERATIONS');
   L.innerHTML = `<div class="pv" role="dialog" aria-modal="true" aria-labelledby="pvT">
-    <div class="ptop"><h2 id="pvT">個別利用許諾書プレビュー</h2><span class="mono muted">${c.id}</span><span id="pvStat" class="muted"></span>
+    <div class="ptop"><h2 id="pvT">別紙（個別利用許諾書）プレビュー</h2><span class="mono muted">${c.id}</span><span id="pvStat" class="muted"></span>
       <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">${canSend?'<button class="btn primary" type="button" id="pvSend">この内容で送付</button>':''}<button class="btn" type="button" id="pvClose">閉じる</button></span></div>
     <div class="pbody"><div class="pages"></div>
       <div class="side">
         <div><b>作品数を変えて試す</b><div class="seg" style="margin-top:6px"><button type="button" data-n="0">実データ</button><button type="button" data-n="12">12</button><button type="button" data-n="40">40</button><button type="button" data-n="100">100</button></div>
-          <div class="muted" style="font-size:12px;margin-top:6px">別表はページをまたいで伸びます。個別利用許諾書は SPLL が作って API で送るので、FORM の URL 長やテンプレートの欄の大きさに縛られません。</div></div>
-        <div><b>送付の流れ（CloudSign API）</b><div class="flow" style="margin-top:6px">
+          <div class="muted" style="font-size:12px;margin-top:6px">別表はページをまたいで伸びます。別紙は SPLL が台帳から作ってメールで送るので、FORM の URL 長やテンプレートの欄の大きさに縛られません。</div></div>
+        <div><b>成立までの流れ</b><div class="flow" style="margin-top:6px">
           <div><b>0</b>基本契約は formrun → CloudSign で締結済み</div>
-          <div><b>1</b>ひな形＋条件スナップショット → PDF</div>
-          <div><b>2</b>POST /documents（書類を作成）</div>
-          <div><b>3</b>POST /documents/{id}/files（PDF）</div>
-          <div><b>4</b>POST /documents/{id}/participants</div>
-          <div><b>5</b>POST /documents/{id}/sent（送付）</div>
-          <div><b>6</b>締結 Webhook → 条件ハッシュを照合</div></div></div>
-        <div class="muted" style="font-size:12px">条件ハッシュは、送付したPDFの条件と台帳のスナップショットが同じであることの照合に使います（現行の改変検知と同じ考え方）。</div>
+          <div><b>1</b>専用ページ（トークン式）で原作を選んで申込</div>
+          <div><b>2</b>台帳の条件 → 別紙PDF（Drive に保存）</div>
+          <div><b>3</b>登録メールへ送付・専用ページに掲示 → 成立</div>
+          <div><b>4</b>支払期限まで振込（後払い可・SPLL は追わない）</div></div></div>
+        <div class="muted" style="font-size:12px">クラウドサインは基本契約だけに使います。別紙の条件照合コードは、送付したPDFと台帳が同じであることの確認に使います。</div>
       </div></div></div>`;
   L.querySelectorAll('[data-n]').forEach(b=>b.onclick=()=>{ P.n=+b.dataset.n; draw(); });
   $('#pvClose').onclick = () => L.innerHTML='';
@@ -675,7 +678,8 @@ function openSettings(){
         <small>オフ：担当者1名のスイッチ（現行）。オン：申請 → 別の担当者が承認（移行予定）。試すとスイッチの形が変わります。</small></div></div>
     <div class="card"><h4>契約書（2段契約）</h4>
       <div class="setrow"><span>基本契約（参加契約）</span><span class="muted">v5.0・formrun → CloudSign</span><small>クラウドサインのテンプレートに登録する固定文面。差込は当事者欄だけ。前文は案A／案Bのどちらか（法務確認中）</small></div>
-      <div class="setrow"><span>個別利用許諾書</span><span class="muted">v1.0・API 送付</span><small>台帳から生成。別表1（対象作品）は作品数に応じて行が増えます</small></div>
+      <div class="setrow"><span>別紙（個別利用許諾書）</span><span class="muted">v1.0・メール送付</span><small>専用ページの申込みから台帳で生成し、送付の時点で個別契約が成立。別表1（対象作品）は作品数に応じて行が増えます</small></div>
+      <div class="setrow"><span>支払期限</span><span class="muted">発行日から30日</span><small>時限式。入金は SPLL では追わない（後払いを含む）</small></div>
       <div class="setrow"><span>接続先</span><span>${pill('サンドボックス','info')}</span><small>Client ID は ScriptProperties に保存（画面には出しません）</small></div>
       <div class="setrow"><span>接続テスト</span><button class="btn" type="button" onclick="toast('モック：接続テストは本番で実行します')">実行</button></div></div>
     <div class="card"><h4>その他の設定</h4>
@@ -721,13 +725,13 @@ document.addEventListener('click', e => {
     else { log(c,'申請を取り下げ'); c.req=null; render(); toast('取り下げました'); }
     return;
   }
-  if(t.dataset.op){ const c = CASES.find(x=>x.id===S.sel); const m={guide:'案内リンクを発行しました（有効期限 365日）',badge:'バッジ生成ジョブを再登録しました',code:'照合コードを再発行しました'}[t.dataset.op]; log(c,m); renderDetail(); toast(m); return; }
+  if(t.dataset.op){ const c = CASES.find(x=>x.id===S.sel); const m={guide:'専用ページのリンクを再発行し、登録メールへ送りました（旧リンクは失効）',badge:'バッジ生成ジョブを再登録しました',code:'照合コードを再発行しました'}[t.dataset.op]; log(c,m); renderDetail(); toast(m); return; }
   if(t.dataset.demo){
     const c = CASES.find(x=>x.id===S.sel);
     if(t.dataset.demo==='master'){
       PARTS[c.pid].st='ACTIVE'; PARTS[c.pid].at='2026-11-17'; let n=0;
       CASES.filter(x=>x.pid===c.pid && ['APPLICATION_RECEIVED','CONTRACT_PENDING'].includes(x.cs)).forEach(x=>{ log(x,'基本契約の締結 Webhook：参加者 '+x.pid+' の基本契約が有効','cloudsign'); APPLY.send(x,'system'); n++; });
-      toast('基本契約が有効になりました。個別利用許諾書を '+n+' 件自動で送付しました');
+      toast('基本契約が有効になりました。専用ページのリンクと、別紙 '+n+' 件を送付しました');
     }
     else if(t.dataset.demo==='signed'){ c.ct='SIGNED'; c.cs='AWAITING_SUBMISSION'; c.rv='AWAITING_SUBMISSION'; log(c,'個別契約の締結 Webhook：同意完了・照合コード一致','cloudsign'); toast('個別契約が成立しました。提出待ちになりました'); }
     else { c.sub = {title:(c.sub?c.sub.title:'新しい作品'),ver:(c.sub?c.sub.ver+1:1),ai:'指摘なし'}; c.rv='IN_REVIEW'; c.cs='REVIEWING'; log(c,'作品提出（第'+c.sub.ver+'版）→ AI一次審査完了','upload'); toast('提出を受け付けました。審査中になりました'); }
