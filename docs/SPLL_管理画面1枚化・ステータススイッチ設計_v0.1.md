@@ -65,24 +65,28 @@
 
 | 区分 | 値 | 表示名 | 意味 | 次に進める人 | 要対応 |
 |---|---|---|---|---|:-:|
-| 申込〜締結 | `APPLICATION_RECEIVED` | 申込受付 | SPLL番号を発行し、別表（対象作品）を確定した | システム／クリエーター | |
-| | `CONTRACT_PENDING` | 利用許諾契約待ち | 利用許諾契約が未締結（formrun → CloudSign で同意待ち） | クリエーター | |
-| | `MANUAL_REVIEW` | 個別確認 | 申込の条件が自動締結に載らない／審査の上申 | **事務局** | ⚠ |
-| | `HOLD` | 条件不一致 | 締結した利用許諾契約が台帳と合わない（版違いなど）／別紙の内容相違の申出（7日以内） | **事務局（法務）** | ⚠ |
-| 締結後 | `AWAITING_SUBMISSION` | 提出待ち | 別紙を送付し許諾が有効、作品の提出待ち（入金は待たない） | クリエーター | |
+| 申込〜別紙 | `APPLICATION_RECEIVED` | 申込受付 | 専用ページで作品を選び、SPLL番号を発行した（別紙の作成・送信待ち） | システム | |
+| | `MANUAL_REVIEW` | 個別確認 | 申込の条件が自動送信に載らない／審査の上申 | **事務局** | ⚠ |
+| | `SIGNING` | 別紙の同意待ち | 別紙を CloudSign で送信済み。送信から3か月で失効 | クリエーター | |
+| | `PAYMENT_PENDING`（新設） | 入金待ち | 前払いの別紙に同意済み。入金CSVの取込で次へ。追加から3か月で失効 | クリエーター／経理 | |
+| | `HOLD` | 条件不一致 | 同意された別紙の照合コードが台帳と合わない | **事務局（法務）** | ⚠ |
+| 許諾後 | `AWAITING_SUBMISSION` | 提出待ち | 許諾が有効（後払いは同意の時点、前払いは入金確認の時点）、作品の提出待ち | クリエーター | |
 | | `REVIEWING` | 審査中 | 提出済み（AI一次審査→人手審査） | **事務局** | ⚠ |
 | | `CORRECTION_REQUIRED` | 是正中 | 是正を依頼した | クリエーター | |
-| 認証 | `CERTIFIED` | 認証済 | 認証が有効 | — | |
-| | `SUSPENDED` | 停止中 | 認証を一時停止中 | 事務局 | |
-| 終了 | `TERMINATED` | 終了 | 失効・契約終了 | — | |
-| | `CANCELLED` | 取消 | 申込取消・再申込で置換 | — | |
+| 認証 | `CERTIFIED` | 認証済 | 審査で承認され、認証が有効・バッジ発行済み | — | |
+| | `SUSPENDED` | 停止中 | 認証を一時停止中（後払いの支払期限超過など） | 事務局 | |
+| 終了 | `TERMINATED` | 終了 | 失効・別紙の取消し・契約終了 | — | |
+| | `CANCELLED` | 取消 | 申込取消、別紙の同意期限切れ、前払いの入金期限切れ | — | |
+
+利用許諾契約そのもの（契約番号ごと）の状態は案件とは別に持つ（§3.2）。利用許諾契約がまだ無いクリエーターは案件を作れない（専用ページのリンクが届かない）ため、案件の現在地に「利用許諾契約待ち」は置かない。
 
 ### 3.2 4軸の状態（一覧の記号）
 
 | 軸 | 値 | 記号 |
 |---|---|:-:|
 | 利用許諾契約（契約番号ごと）`Agreements.status` | `NOT_STARTED` / `SIGNING` / `ACTIVE` / `TERMINATED` | ○ / ◐ / ● / ✕ |
-| 別紙（許諾）`contract_status` | `NOT_STARTED` / `SIGNED`（別紙送付済み）/ `TERMINATED` | ○ / ● / ✕ |
+| 別紙 `contract_status` | `NOT_STARTED` / `SIGNING`（同意待ち）/ `SIGNED`（本契約に追加済み）/ `TERMINATED` | ○ / ◐ / ● / ✕ |
+| 入金 `payment_status`（新設） | `NOT_REQUIRED`（未請求）/ `UNPAID` / `PAID` / `OVERDUE`（後払いの期限超過） | ○ / ◐ / ● / ! |
 | 審査 `review_status` | `NOT_STARTED`・`AWAITING_SUBMISSION` / `IN_REVIEW`・`PENDING` / `CLEARED` / `CORRECTION_REQUIRED` / `ESCALATED` | ○ / ◐ / ● / ✕ / ⚠ |
 | 認証 `certification_status` | `NOT_ISSUED` / `ACTIVE` / `SUSPENDED` / `EXPIRED` / `REVOKED` / `TERMINATED` | ○ / ● / ‖ / ⌛ / ✕ / ✕ |
 
@@ -107,22 +111,23 @@
 
 | # | スイッチ | 形 | 遷移イベント | 押せる現在地 | 呼ぶ既存関数 | 承認 | ロール |
 |---:|---|---|---|---|---|:-:|---|
-| S1 | 別紙を発行してメールで送る | ボタン（送付前にプレビュー） | 新設 `INDIVIDUAL_ISSUED`（別紙の追加＝許諾の効力発生） | 申込受付・個別確認（利用許諾契約が ACTIVE のとき） | 新設：別紙PDFの生成 → Drive 保存 → メール送付・専用ページに掲示（§8） | — | OPERATIONS |
+| S1 | 別紙を作成して CloudSign で送る | ボタン（送信前にプレビュー） | `CLOUDSIGN_SENT` | 申込受付・個別確認 | 新設：別紙PDFの生成 → `cs_createDocument_` / `cs_attachFile_` / `cs_addParticipant_` / `cs_sendDocument_`（§8）。通常は申込の直後にシステムが自動で行い、S1 は個別確認の後と再送に使う | — | OPERATIONS |
+| S11 | 入金CSVを取り込む（画面上部の操作。案件ごとではない） | ファイル選択 → 照合結果の確認 → 反映 | 前払い：新設 `PAYMENT_CONFIRMED`（入金待ち → 提出待ち）／後払い：入金の記録だけ | 入金待ち・後払いの未入金 | 新設（§8.4） | — | OPERATIONS |
 | S2 | 条件を確認して有効化 | ボタン | `CLOUDSIGN_SIGNED` | 条件不一致 | `admin_confirmContractTerms(contractId, note)` | — | LEGAL_ADMIN |
 | S3 | 審査判定 | 3択（承認／是正／上申） | `HUMAN_REVIEW_CLEARED` / `CORRECTION_REQUIRED` / `REVIEW_ESCALATED` | 審査中・是正中・個別確認・認証済・停止中 | `admin_setHumanReview(submissionId, result, comment, reviewer, versionId)` | — | REVIEWER |
 | S4 | 入金未確認で停止 | オン／オフ（2名体制では申請） | `CERTIFICATE_SUSPENDED` ⇄ `CERTIFICATE_RESTORED` | 認証が ACTIVE、またはこの理由で停止中 | `admin_setCertEnabled(contractId, enabled, reason)`（2名体制では `admin_requestCertChange` → `admin_approveCertChange`） | 設定で切替 | OPERATIONS |
 | S5 | 一時停止（その他の理由）／復帰 | 申請 | `CERTIFICATE_SUSPENDED` / `CERTIFICATE_RESTORED` | 認証あり | `admin_requestCertChange(...)` → `admin_approveCertChange(...)` | ✔ | LEGAL_ADMIN |
 | S6 | 失効 | 申請 | `CERTIFICATE_REVOKED` | 認証あり | 同上（`requestedStatus='REVOKED'`） | ✔ | LEGAL_ADMIN |
-| S7 | 別紙の取消し（この作品の許諾だけ終了） | 申請 | `CONTRACT_TERMINATED` | 別紙 送付済み | 同上（`requestedStatus='TERMINATED'`） | ✔ | LEGAL_ADMIN |
+| S7 | 別紙の取消し（この作品の許諾だけ終了） | 申請 | `CONTRACT_TERMINATED` | 別紙が本契約に追加済み | 同上（`requestedStatus='TERMINATED'`） | ✔ | LEGAL_ADMIN |
 | S10 | 契約の終了（全別紙） | 申請 | `AGREEMENT_TERMINATED` → その契約の全案件に `CONTRACT_TERMINATED` | 契約 ACTIVE | 新設 | ✔ | LEGAL_ADMIN |
 | S8 | 失効からの再有効化 | 申請 | `CERTIFICATE_RESTORED` | 契約 SIGNED かつ認証 REVOKED 等 | 同上（`requestedStatus='ACTIVE'`） | ✔ | LEGAL_ADMIN |
-| S9 | 申込取消 | ボタン（確認つき） | `APPLICATION_CANCELLED` | 申込受付〜条件不一致 | `admin_cancelApplication(applicationId, reason)` | — | OPERATIONS |
+| S9 | 申込取消 | ボタン（確認つき） | `APPLICATION_CANCELLED` | 申込受付〜入金待ち（別紙の同意待ちなら CloudSign の書類も取り消す） | `admin_cancelApplication(applicationId, reason)` | — | OPERATIONS |
 
-**スイッチにしないもの**（システムだけが起こす遷移）：`APPLICATION_CREATED`、`FORM_SUBMITTED`、`MANUAL_REVIEW_REQUIRED`、
-`TERMS_MISMATCH`、`SUBMISSION_CREATED`、`CERTIFICATE_ISSUED`（S3 の「承認」から自動で続く）。
+**スイッチにしないもの**（システムだけが起こす遷移）：`APPLICATION_CREATED`、`CLOUDSIGN_SENT`（自動送信）、`CLOUDSIGN_SIGNED`（別紙への同意）、`MANUAL_REVIEW_REQUIRED`、
+`TERMS_MISMATCH`、`SUBMISSION_CREATED`、`CERTIFICATE_ISSUED`（S3 の「承認」から自動で続く）、`APPLICATION_EXPIRED`（新設。同意待ち・入金待ちが3か月を過ぎたら日次バッチで取消）。
 画面には履歴として表示するだけにする。
 
-**状態を変えない作業**（スイッチ欄の下に並べる）：案内リンク発行、提出リンク発行、バッジ生成ジョブの再試行、照合コードの再発行、再申込（訂正）。
+**状態を変えない作業**（スイッチ欄の下に並べる）：専用ページのリンクの再発行、提出リンク発行、バッジ生成ジョブの再試行、照合コードの再発行、再申込（訂正）。
 
 ### 4.3 スイッチの見え方
 
@@ -177,9 +182,12 @@ admin_applySwitch(licenseId, switchKey, params)   // params: { value, reason, no
 |---|---|
 | 事務局運営（会議・議決・報告・精算） | 1枚には入れない。設定と同じ**別パネル**（歯車から開く。タブ「設定」「事務局運営」） |
 | S4 入金未確認で停止 | 当面は**担当者1名のスイッチ**。のちに**申請→別担当者の承認（2名体制）**へ移す。切り替えは設定パネルの運用ルール `FEE_HOLD_TWO_PERSON`（Config）で行い、コードの書き換えなしで移行できるようにする |
-| 契約の構成 | **利用許諾契約＋別紙**（§8）。①利用許諾契約（全利用区分の利用条件・料金の決め方・振込先）を初回に formrun（CloudSign FORM）→ CloudSign で締結。②作品ごとに、専用ページで選ぶと別紙（許諾作品通知書）をメールで送り、**送付の時点で本契約に追加され許諾が有効**になる。別紙ごとのクラウドサイン締結はしない。※「全部を API 送付」「別紙も API 送付」の案は取りやめ。名称は「基本契約／個別契約」から「利用許諾契約／別紙」に改めた |
+| 契約の構成 | **利用許諾契約＋別紙**（§8）。①利用許諾契約（全利用区分の利用条件・料金の決め方・振込先）を初回に formrun（CloudSign FORM）→ CloudSign で締結。作品はまだ選ばない。②登録メールへ専用ページのリンクを送り、そこで作品を選ぶと、SPLL が別紙（契約番号入り）を作って **CloudSign API で送信し、同意で本契約に追加**する。名称は「基本契約／個別契約」から「利用許諾契約／別紙」に改めた |
 | 専用ページ | **トークン式**（ログインなし）。利用許諾契約で登録したメール宛てに長期の入口リンクを送る。今の案内ページを広げて作る |
-| 入金 | **時限式**。別紙に支払期限（後払いを含む）を書くだけで、SPLL は入金を追わず許諾を有効にする。期限を過ぎて未払いのときは事務局が S4（入金未確認で停止）で止める（利用許諾契約書第6条第4項） |
+| 支払方法 | **利用区分で決める**（料金表に前払い／後払いの列を足す）。前払い：入金確認で許諾が有効、そのあと提出。後払い：同意の時点で許諾が有効、すぐ提出できる |
+| 入金の確認 | **入金CSVの取込**（経理から受け取る）。前払いは取込で入金待ち → 提出待ちへ進む。後払いは入金を記録し、支払期限を過ぎて未入金なら要対応に出す（止めるのは S4） |
+| 期限 | 別紙の同意待ち・前払いの入金待ちとも **3か月**。過ぎたら日次バッチで取消（`APPLICATION_EXPIRED`） |
+| 認証バッジ | 支払方法にかかわらず **審査で承認された後** に発行（利用許諾契約書第8条第5項）。今のルールのまま |
 | 契約の相手方 | 未決（法務確認）。案A：事務局が各権利者の代理人として締結／案B：事務局が再許諾権に基づき自ら締結。ひな形は両案を併記 |
 
 未決：一覧の既定の絞り込み（モックは「要対応」）。
@@ -190,58 +198,60 @@ admin_applySwitch(licenseId, switchKey, params)   // params: { value, reason, no
 
 | | 利用許諾契約（本契約） | 別紙（許諾作品通知書） |
 |---|---|---|
-| 単位 | クリエーター1人につき1本（契約番号） | ライセンス1本ごと（SPLL番号）。数の上限なし |
-| 中身 | 当事者（氏名・住所・メール）、全利用区分の共通条件、料金の決め方（申込時の料金表）、振込先、別紙の追加方法 | 対象作品（表・行数の上限なし）、利用区分、許諾期間、利用許諾料、支払期限、利用報告、権利表記、特約 |
+| 単位 | クリエーター1人につき1本（契約番号） | 作品1本ごと（SPLL番号）。数の上限なし |
+| 中身 | 当事者（氏名・住所・メール）、全利用区分の共通条件、料金の決め方（申込時の料金表）、前払い／後払いの扱い、振込先、別紙の追加方法、認証は審査後 | 契約番号、対象作品（表・行数の上限なし）、利用区分、許諾期間、利用許諾料、支払方法、支払期限、利用報告、権利表記、特約 |
 | 作る人 | クラウドサインのテンプレート（固定文面）。formrun が当事者欄を差し込む | SPLL が台帳（申込時に確定した条件）から PDF を作る |
-| 成立・追加 | クラウドサイン上の同意 | **別紙をメールで送った時点で本契約に追加**（利用許諾契約書第3条第3項）。内容相違の申出は7日以内 |
-| 個人情報 | formrun で入力。SPLL が受け取るのは氏名・メール（今と同じ） | 氏名・契約番号だけ。住所・振込先は載せない |
+| 送り方・成立 | サイト → formrun → CloudSign。同意で成立 | CloudSign API で送信。**同意で本契約に追加**。送信から3か月で失効 |
+| 個人情報 | formrun で入力。SPLL が受け取るのは氏名・メール（今と同じ） | 氏名・契約番号・送信先メールだけ。住所・振込先は載せない |
 | 正本 | `docs/SPLL_利用許諾契約書_v5.0.md` | `docs/SPLL_別紙_許諾作品通知書_v1.0.md` |
 
-サンプルPDF（利用許諾契約書 案A／案B、別紙 3作品／25作品）は `docs/contract/`。組み立ては `docs/contract/build_contract.js`。
+サンプルPDF（利用許諾契約書 案A／案B、別紙 3作品・前払い／25作品・後払い）は `docs/contract/`。組み立ては `docs/contract/build_contract.js`。
 
 ### 8.2 流れ
 
 ```
-【初回】
-サイトで原作を選んで申込 → SPLL番号・別表を確定（APPLICATION_RECEIVED）
-  └ 利用許諾契約が無い → formrun へ（URL に載せるのは 契約番号・照合トークン・ハッシュだけ）（CONTRACT_PENDING）
-       → CloudSign で利用許諾契約に同意 → 締結 Webhook → 利用許諾契約 ACTIVE
-       → 登録メールへ専用ページのリンクを送る
-  → 待っている申込の別紙を自動で発行・送付（INDIVIDUAL_ISSUED → AWAITING_SUBMISSION）
-
-【2本目以降】
-専用ページ（トークン式）で原作を選んで申込 → 別紙を発行・送付 → 提出待ち
-
-【入金】
-別紙の支払期限までに振込（後払いを含む）。SPLL は入金を待たない・追わない
-  └ 期限を過ぎて未払いと経理から連絡 → 事務局が S4 で認証を一時停止（入金を確認したら S4 で復帰）
+① サイト → formrun で契約情報を入力 → CloudSign で利用許諾契約に同意 → 締結 Webhook → 契約番号 ACTIVE
+② 登録メールへ専用ページ（トークン式）のリンクを送る
+③ 専用ページで作品を選んで申込 → SPLL番号を発行・条件を確定（APPLICATION_RECEIVED）
+④ 別紙PDFを作成（契約番号入り）→ CloudSign API で送信（CLOUDSIGN_SENT → SIGNING）
+   └ 3か月同意がなければ取消（APPLICATION_EXPIRED → CANCELLED）
+⑤ 別紙に同意 → 締結 Webhook → 照合コードを確認 → 本契約に追加（CLOUDSIGN_SIGNED）
+     後払い：許諾が有効 → AWAITING_SUBMISSION
+     前払い：PAYMENT_PENDING → 入金CSVの取込で PAYMENT_CONFIRMED → AWAITING_SUBMISSION
+             └ 3か月入金がなければ取消（APPLICATION_EXPIRED → CANCELLED）
+⑥ 専用ページから作品を提出 → AI一次審査 → 人手審査（REVIEWING）
+⑦ 承認 → 認証を有効にし、バッジを発行（CERTIFIED）
+   後払いで支払期限を過ぎて未入金 → 要対応に表示 → 事務局が S4 で一時停止
 ```
 
 - 個別確認（`MANUAL_REVIEW`）に回った申込は、事務局の確認後に S1 で別紙を送る。
-- 別紙の作成と送付は申込の処理と切り離し、即時起動のトリガーか5分バッチで行う。完了画面は「別紙を数分以内にメールでお送りします」。
-- 申込から送付までに原作マスタや料金表が変わっても、別紙は申込時に確定した内容で作る。
+- 別紙の作成と送信は申込の処理と切り離し、即時起動のトリガーか5分バッチで行う。専用ページの完了表示は「クラウドサインから別紙をお送りします」。
+- 申込から送信までに原作マスタや料金表が変わっても、別紙は申込時に確定した内容で作る。
 - 専用ページのリンクは本人専用（利用許諾契約書第3条第7項）。期限切れ・紛失時は管理画面から再発行する。
 
 ### 8.3 これで不要になるもの
 
 - formrun の URL 長の検査（`FORM_URL_MAX_CHARS`）と、3作品を超えたら個別確認に回す処理。
 - 作品名・金額・権利表記を formrun の hidden 項目で運ぶこと（`FORM_HIDDEN_MAP_*` は当事者欄と照合用の項目だけになる）。
-- 別紙ごとのクラウドサイン送付（API 送付の実装・プランの確認も不要）。
-- 締結後の条件照合で HOLD になる経路の大半。
+- 最初の申込で作品を選ばせること（利用許諾契約の段階では作品を選ばない）。
 
 ### 8.4 システムへの影響
 
-- 台帳：`Agreements`（契約番号・氏名・メール・利用許諾契約の CloudSign 書類ID・版・状態・締結日時）を新設。`License_Cases` に `agreement_no`、別紙の発行日時・PDFのファイルID・ハッシュ・支払期限を足す。
-- 状態遷移：契約側に `AGREEMENT_SIGNED` / `AGREEMENT_TERMINATED` を新設。案件側は `INDIVIDUAL_ISSUED`（別紙送付＝別紙の追加＝許諾の効力発生。`contract_status` を `SIGNED` にする）を新設し、`CLOUDSIGN_SENT` / `SIGNING` は案件では使わなくなる。利用許諾契約の締結で、待っている案件に `INDIVIDUAL_ISSUED` を自動で起こす。利用許諾契約の終了で、その契約の全案件に `CONTRACT_TERMINATED`。
-- 専用ページ：`Access_Tokens` に用途 `MY_PAGE`（長期・本人の登録メールにだけ送る）を足す。今の案内ページ（`44_guide.gs` / `guide.html`）に「新しく申し込む（原作を選ぶ）」「別紙の一覧・再表示」を加える。
-- 管理画面：案件の詳細に「利用許諾契約（契約番号）」「別紙（発行日・支払期限）」欄を足す。S1 は別紙の発行、S10（利用許諾契約の終了・承認制）を追加。
-- メール：別紙送付のテンプレートを追加（本文に口座情報を書かない）。
+- 台帳：`Agreements`（契約番号・氏名・メール・CloudSign 書類ID・版・状態・締結日時）を新設。`License_Cases` に `agreement_no`、別紙の CloudSign 書類ID・PDFのファイルID・照合コード・送信日時・同意日時、`payment_timing` / `payment_status` / `payment_due` / `paid_at` を足す。
+- 料金表（`Fee_Schedule`）：利用区分ごとに `payment_timing`（PREPAID / POSTPAID）を足す。
+- 状態遷移：契約側に `AGREEMENT_SIGNED` / `AGREEMENT_TERMINATED`。案件側に `PAYMENT_PENDING` 状態と `PAYMENT_CONFIRMED` / `APPLICATION_EXPIRED` イベントを新設。`CLOUDSIGN_SIGNED` は、前払いなら `PAYMENT_PENDING`、後払いなら `AWAITING_SUBMISSION` へ進める。`SUBMISSION_CREATED` は許諾が有効な案件（`AWAITING_SUBMISSION` 以降）でだけ受け付ける。契約の終了で、その契約の全案件に `CONTRACT_TERMINATED`。
+- 締結 Webhook：書類IDで「利用許諾契約」か「別紙」かを振り分ける。
+- 入金CSVの取込（S11）：取込 → 照合結果の確認 → 反映 の3段。照合キーは振込名義に入れてもらう **SPLL番号**（別紙と案内メールで「振込名義の前に SPLL番号を付けてください」と案内）と金額。照合できない行・金額が合わない行は反映せず、要対応に「未照合の入金」として残す。同じCSVを2回取り込んでも二重に反映しない（行のハッシュで判定）。取込の記録は `Payment_Imports` / `Payments` に残す。
+- 日次バッチ：同意待ち・入金待ちが3か月を過ぎた案件を取消（CloudSign の書類も取り消す）。後払いの支払期限超過を `OVERDUE` にして要対応に出す。
+- 専用ページ：`Access_Tokens` に用途 `MY_PAGE`（長期・本人の登録メールにだけ送る）を足す。今の案内ページ（`44_guide.gs` / `guide.html`）に「新しく申し込む（作品を選ぶ）」「別紙と状態の一覧」「作品の提出」を集める。
+- 管理画面：案件の詳細に「利用許諾契約」「別紙（同意・入金）」欄を足す。S1 は別紙の送信、S10（契約の終了・承認制）、S11（入金CSVの取込）を追加。
+- 確認が要ること：CloudSign のプランで API 送信が使えるか。経理から受け取る入金CSVの列（日付・金額・振込名義など）。
 
 ## 9. モック
 
 `docs/SPLL_管理画面1枚化モック_v0.1.html`（サンプルデータで操作できる）。操作者の切り替えで権限と職務分離、
 設定パネルの「2名体制」で S4 の形の変化、別紙のプレビューで作品数を増やしたときの別表のページ送り、
-「利用許諾契約待ち」の案件で利用許諾契約の締結から別紙の自動発行までの流れを確認できる。
+別紙の同意待ち・入金待ちの案件で、同意 → 入金CSVの取込 → 提出待ちの流れを確認できる。
 
 ---
 

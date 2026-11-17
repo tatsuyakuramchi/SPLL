@@ -4,10 +4,10 @@
  *   利用許諾契約書       … docs/SPLL_利用許諾契約書_v5.0.md
  *       CloudSign テンプレートに載せる固定文面。formrun（CloudSign FORM）経由で締結。差込は当事者欄だけ
  *   別紙（許諾作品通知書）… docs/SPLL_別紙_許諾作品通知書_v1.0.md
- *       専用ページでの申込みを受けて SPLL が台帳から PDF を作り、メールで送る（送付で本契約に追加され許諾が有効）。
- *       対象作品の表は行数の上限なし。クラウドサインは使わない
+ *       専用ページでの申込みを受けて SPLL が台帳から PDF を作り、CloudSign API で送る（利用者の同意で本契約に追加）。
+ *       対象作品の表は行数の上限なし
  *
- * 本番では別紙の組み立てを GAS 側で行い、PDF を Drive に保存してメールに添付し、専用ページにも掲示する。
+ * 本番では別紙の組み立てを GAS 側で行い、PDF を Drive に保存して POST /documents/{id}/files へ渡す。
  * 利用許諾契約書はテンプレートとしてクラウドサインへ1回登録するだけ（ここで出す PDF はその版下）。
  *
  * 使い方:
@@ -57,7 +57,7 @@ const sentence = (md, head) => { const m = md.match(new RegExp('\\n(' + head + '
 
 /** 別紙の条件のハッシュ（本番は台帳のスナップショットと同じ正規化に揃える） */
 function termsHash(t){
-  const canon = JSON.stringify([t.license_id, t.agreement_no, t.usage_category, t.fee_amount_or_rate, t.fee_schedule_version, t.payment_due,
+  const canon = JSON.stringify([t.license_id, t.agreement_no, t.usage_category, t.fee_amount_or_rate, t.fee_schedule_version, t.payment_timing, t.payment_due,
     t.works.map(w => [w.work_id, w.work_title, w.licensor_name, w.credit_text])]);
   return crypto.createHash('sha256').update(canon).digest('hex').slice(0, 16);
 }
@@ -127,7 +127,7 @@ ${row('ライセンサー', esc(lic) + '（電子契約システム上で合意�
 </table>`);
 }
 
-/* ---- 別紙（許諾作品通知書）：SPLL が台帳から生成してメールで送る ---- */
+/* ---- 別紙（許諾作品通知書）：SPLL が台帳から生成して CloudSign API で送る ---- */
 function buildIndividual(t, variant){
   const md = fs.readFileSync(IL_SRC, 'utf8');
   const hash = termsHash(t);
@@ -149,6 +149,7 @@ ${row('利用区分', esc(t.usage_category))}
 ${row('許諾期間', esc(t.license_term))}
 ${row('利用地域', esc(t.territory))}
 ${row('利用許諾料', esc(t.fee_amount_or_rate) + '（料金表 ' + esc(t.fee_schedule_version) + ' により算定）')}
+${row('支払方法', esc(t.payment_timing) + '（利用区分により料金表で定める）')}
 ${row('支払期限', esc(t.payment_due) + '（振込先は本契約書第6条のとおり）')}
 ${row('利用報告', esc(t.reporting_terms))}
 ${row('権利表記', '下表のとおり（本契約書第7条第1項）')}
@@ -159,7 +160,8 @@ ${row('特約', esc(t.special_terms || '該当なし'))}
 <h2>対象作品</h2>
 <div class="sum"><span>SPLL番号 ${esc(t.license_id)}</span><span>全${t.works.length}作品</span></div>
 <table class="works"><thead><tr><th>No.</th><th>対象作品</th><th>権利者</th><th>権利表記</th></tr></thead><tbody>${works}</tbody></table>
-<p class="end" style="margin-top:6mm">発行日：${esc(t.issued_at)}　発行者：TRPGライツ事務局</p>
+<p class="closing">${esc(sentence(md, '本別紙への同意を証するため'))}</p>
+<p class="end" style="margin-top:4mm">作成日：${esc(t.issued_at)}　作成者：TRPGライツ事務局</p>
 <p class="end">以上</p>
 <p class="note">条件照合コード：${hash}（本別紙の条件及び対象作品が、SPLLの台帳に記録した内容と一致することの照合に用います）</p>`);
 }
@@ -174,12 +176,17 @@ const PARTY = { agreement_no: 'C-2026-00042', party_name: '山田 太郎', circl
   party_address: '東京都千代田区神田小川町1-2-3 サンプルビル4階', email: 'creator@example.com' };
 const LICENSORS = ['株式会社サンプルゲームズ','ギルドワークス合同会社','アルヴァ制作委員会','月影書房','有限会社テーブルトーク企画'];
 const TITLES = ['星喰いの迷宮','黄昏ギルド戦記','深淵図書館RPG','蒸気都市アルヴァ','月影の神話TRPG','辺境開拓記','夢見る機械の国','砂海のキャラバン','七つ鐘の聖堂','霧の港町奇譚','銀翼の騎士団','百鬼夜行録','氷原の探索者','星図なき航海','虹色魔法学園','黒鉄の帝国','風読みの谷','時計塔の秘密結社','竜骨山脈紀行','灯火の巡礼者','碧の庭園RPG','双子月の王国','忘れられた神々','路地裏怪異譚','終末の図書館'];
-function sampleIndividual(id, n){
-  return Object.assign({}, PARTY, {
-    license_id: id, usage_category: '商品販売（同人誌・物販）', license_term: '本別紙の送付日から1年間（本契約の有効期間内に限る）', territory: '日本国内',
-    fee_amount_or_rate: '16,500円（税込）。対象作品が複数の場合も同額', fee_schedule_version: '2026-10版',
-    applied_at: '2026年11月17日 10時12分', issued_at: '2026年11月17日', payment_due: '2026年12月17日（本別紙の発行日から30日。後払い）',
-    reporting_terms: '定額のため利用報告は不要', special_terms: '',
+/* 3作品＝商品販売（定額・前払い）、25作品＝電子配信（売上連動・後払い）。支払方法は利用区分で決まる */
+const USAGE = {
+  prepaid:  { usage_category: '商品販売（同人誌・物販）', fee_amount_or_rate: '16,500円（税込）。対象作品が複数の場合も同額', payment_timing: '前払い',
+              payment_due: '本別紙が本契約に追加された日から3か月以内（入金確認で許諾が有効）', reporting_terms: '定額のため利用報告は不要' },
+  postpaid: { usage_category: '電子配信（ダウンロード販売）', fee_amount_or_rate: '販売額（税抜）の10%', payment_timing: '後払い',
+              payment_due: '各四半期の末日から30日以内（利用報告に基づき算定）', reporting_terms: '四半期ごとに販売数・販売額を報告（四半期末から15日以内）' },
+};
+function sampleIndividual(id, n, mode){
+  return Object.assign({}, PARTY, USAGE[mode], {
+    license_id: id, license_term: '本別紙が本契約に追加された日から1年間（本契約の有効期間内に限る）', territory: '日本国内',
+    fee_schedule_version: '2026-10版', applied_at: '2026年11月17日 10時12分', issued_at: '2026年11月17日', special_terms: '',
     works: Array.from({ length: n }, (_, i) => {
       const lic = LICENSORS[i % LICENSORS.length], title = TITLES[i % TITLES.length];
       return { work_id: 'W' + String(i + 1).padStart(3, '0'), work_title: title, licensor_name: lic, credit_text: '©' + lic + '／「' + title + '」' };
@@ -194,8 +201,8 @@ async function main(){
   const jobs = [];
   variants.forEach(v => jobs.push({ name: `SPLL_利用許諾契約書サンプル_v5.0_案${v}`, html: buildMaster(PARTY, v),
     hf: headFoot('SPLL-LIC-001 / v5.0', 'SPLL利用許諾契約書'), code: '契約番号 ' + PARTY.agreement_no }));
-  [['3作品', 3, 'SPLL-2026-0131'], ['25作品', 25, 'SPLL-2026-0129']].forEach(([label, n, id]) => {
-    const t = sampleIndividual(id, n);
+  [['3作品_前払い', 3, 'SPLL-2026-0131', 'prepaid'], ['25作品_後払い', 25, 'SPLL-2026-0129', 'postpaid']].forEach(([label, n, id, mode]) => {
+    const t = sampleIndividual(id, n, mode);
     jobs.push({ name: `SPLL_別紙サンプル_v1.0_${label}`, html: buildIndividual(t, variants[variants.length - 1]),
       hf: headFoot('SPLL-LIC-001-A / v1.0', 'SPLL利用許諾契約 別紙'), code: `${t.license_id}　契約番号 ${t.agreement_no}　条件照合コード ${termsHash(t)}` });
   });
