@@ -194,6 +194,7 @@ admin_applySwitch(licenseId, switchKey, params)   // params: { value, reason, no
 - formrun（CloudSign FORM）は使わなくなる。`FORM_HIDDEN_MAP_*` / `FORMRUN_FIELD_MAP_*`、URL長の検査（`FORM_URL_MAX_CHARS`）、
   クレジット表記を契約書から外した措置（実装仕様 v2.1 §4）は不要になる。権利表記は別表に戻す。
 - 申込ウィザードに契約者情報（氏名・屋号・住所・メール・成年確認）の入力を移す。個人情報同意の範囲は変わらない。
+- 契約書のひな形は `docs/SPLL_利用許諾契約書_CloudSign_API対応_v4.2.md`（正本・法務確認前）。レイアウトは `docs/contract/build_contract.js` で組み立て、サンプルPDF（3作品・25作品）を `docs/contract/` に置いた。
 - 確認が要ること：利用中の CloudSign プランで API が使えるか、API 送付の書類で受信者のメール認証・同意操作が今の FORM 経由と同じになるか。
 
 ## 9. モック
