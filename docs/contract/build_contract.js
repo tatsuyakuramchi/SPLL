@@ -13,7 +13,6 @@
  * 使い方:
  *   node docs/contract/build_contract.js           … サンプル HTML を docs/contract/ に出力
  *   node docs/contract/build_contract.js --pdf     … PDF も出力（Playwright が必要）
- *   --variant=A|B  … 前文（A：代理／B：再許諾）。既定は両方出す
  * 依存パッケージなし（Markdown は両文書で使う書式だけを読む小さな変換で処理する）。
  */
 const fs = require('fs');
@@ -52,7 +51,6 @@ function articlesHtml(md){
   closeLists(0); if(inArticle) html += '</section>';
   return html;
 }
-const lineAfter = (md, marker) => { const i = md.indexOf(marker); return i < 0 ? '' : md.slice(i + marker.length).split('\n').find(l => l.trim()).trim(); };
 const sentence = (md, head) => { const m = md.match(new RegExp('\\n(' + head + '[^\\n]+)\\n')); return m ? m[1] : ''; };
 
 /** 別紙の条件のハッシュ（本番は台帳のスナップショットと同じ正規化に揃える） */
@@ -92,20 +90,19 @@ li{margin:0 0 .6mm}
 .works td.no{text-align:right;width:10mm;font-variant-numeric:tabular-nums}
 .works td:nth-child(2){width:32%} .works td:nth-child(3){width:26%}
 .sum{display:flex;justify-content:space-between;margin:0 0 2mm;font-size:8.6pt;color:#333}
-.var{font-size:7.5pt;color:#8a5a00;border:.25mm dashed #c9a24a;padding:.5mm 2mm;display:inline-block;margin-bottom:2mm}
 `;
 const page = (title, body) => `<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>${esc(title)}</title><style>${CSS}</style></head><body>${body}</body></html>`;
 const row = (k, v) => `<tr><th>${k}</th><td>${v}</td></tr>`;
 
 /* ---- 利用許諾契約書：CloudSign テンプレートの版下（サンプル値入り） ---- */
-function buildMaster(p, variant){
+function buildMaster(p){
   const md = fs.readFileSync(MA_SRC, 'utf8');
-  const lead = lineAfter(md, variant === 'A' ? '【案A：代理】' : '【案B：再許諾】');
+  const lead = sentence(md, 'TRPGライツ事務局（以下「事務局」又は「ライセンサー」');
   const closing = sentence(md, '本契約の成立を証するため');
-  const lic = variant === 'A' ? 'SPLL制度に参加する作品の各権利者（代理人 TRPGライツ事務局）' : 'TRPGライツ事務局';
+  const lic = 'TRPGライツ事務局';
   return page('SPLL利用許諾契約書', `
 <h1>SPLL利用許諾契約書</h1>
-<div class="var">前文：案${variant}（${variant === 'A' ? '事務局が各権利者の代理人として締結' : '事務局が再許諾権に基づき自ら締結'}）／法務確認前</div>
+
 <p class="lead">${esc(lead)}</p>
 <h2>当事者</h2>
 <table class="terms">
@@ -128,10 +125,10 @@ ${row('ライセンサー', esc(lic) + '（電子契約システム上で合意�
 }
 
 /* ---- 別紙（許諾作品通知書）：SPLL が台帳から生成して CloudSign API で送る ---- */
-function buildIndividual(t, variant){
+function buildIndividual(t){
   const md = fs.readFileSync(IL_SRC, 'utf8');
   const hash = termsHash(t);
-  const lic = variant === 'A' ? '下表に記載の各対象作品の権利者（代理人 TRPGライツ事務局）' : 'TRPGライツ事務局';
+  const lic = 'TRPGライツ事務局（対象作品の権利者から再許諾権を得て許諾します）';
   const works = t.works.map((w, i) => `<tr><td class="no">${i + 1}</td><td>${esc(w.work_title)}</td><td>${esc(w.licensor_name)}</td><td>${esc(w.credit_text)}</td></tr>`).join('');
   const checks = md.slice(md.indexOf('## 確認事項'), md.indexOf('## 対象作品')).split('\n').filter(l => /^\d+\. /.test(l)).map(l => `<li>${esc(l.replace(/^\d+\. /, ''))}</li>`).join('');
   const lead = sentence(md, 'TRPGライツ事務局は、契約番号').replace('`{{agreement_no}}`', t.agreement_no).replace('`{{applied_at}}`', t.applied_at);
@@ -196,14 +193,12 @@ function sampleIndividual(id, n, mode){
 
 async function main(){
   const pdf = process.argv.includes('--pdf');
-  const vArg = (process.argv.find(a => a.startsWith('--variant=')) || '').split('=')[1];
-  const variants = vArg ? [vArg] : ['A', 'B'];
   const jobs = [];
-  variants.forEach(v => jobs.push({ name: `SPLL_利用許諾契約書サンプル_v5.0_案${v}`, html: buildMaster(PARTY, v),
-    hf: headFoot('SPLL-LIC-001 / v5.0', 'SPLL利用許諾契約書'), code: '契約番号 ' + PARTY.agreement_no }));
+  jobs.push({ name: 'SPLL_利用許諾契約書サンプル_v5.0', html: buildMaster(PARTY),
+    hf: headFoot('SPLL-LIC-001 / v5.0', 'SPLL利用許諾契約書'), code: '契約番号 ' + PARTY.agreement_no });
   [['3作品_前払い', 3, 'SPLL-2026-0131', 'prepaid'], ['25作品_後払い', 25, 'SPLL-2026-0129', 'postpaid']].forEach(([label, n, id, mode]) => {
     const t = sampleIndividual(id, n, mode);
-    jobs.push({ name: `SPLL_別紙サンプル_v1.0_${label}`, html: buildIndividual(t, variants[variants.length - 1]),
+    jobs.push({ name: `SPLL_別紙サンプル_v1.0_${label}`, html: buildIndividual(t),
       hf: headFoot('SPLL-LIC-001-A / v1.0', 'SPLL利用許諾契約 別紙'), code: `${t.license_id}　契約番号 ${t.agreement_no}　条件照合コード ${termsHash(t)}` });
   });
   let browser = null;

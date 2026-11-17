@@ -28,7 +28,7 @@ TRPGライツ事務局は、契約番号 `{{agreement_no}}` の SPLL利用許諾
 | 契約番号 | `{{agreement_no}}` |
 | 利用者氏名 | `{{party_name}}`（屋号・サークル名 `{{circle_name}}`） |
 | 対象作品 | 下表のとおり（全`{{work_count}}`作品） |
-| ライセンサー | 【案A】下表に記載の各対象作品の権利者（代理人 TRPGライツ事務局）／【案B】TRPGライツ事務局 |
+| ライセンサー | TRPGライツ事務局（対象作品の権利者から再許諾権を得て許諾します） |
 | 利用区分 | `{{usage_category}}` |
 | 許諾期間 | `{{license_term}}` |
 | 利用地域 | `{{territory}}` |
