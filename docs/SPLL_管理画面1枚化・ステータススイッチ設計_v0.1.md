@@ -66,10 +66,10 @@
 | 区分 | 値 | 表示名 | 意味 | 次に進める人 | 要対応 |
 |---|---|---|---|---|:-:|
 | 申込〜締結 | `APPLICATION_RECEIVED` | 申込受付 | SPLL番号を発行し、別表（対象作品）を確定した | システム／クリエーター | |
-| | `CONTRACT_PENDING` | 基本契約待ち | 参加者の基本契約が未締結（formrun → CloudSign で同意待ち） | クリエーター | |
+| | `CONTRACT_PENDING` | 利用許諾契約待ち | 利用許諾契約が未締結（formrun → CloudSign で同意待ち） | クリエーター | |
 | | `MANUAL_REVIEW` | 個別確認 | 申込の条件が自動締結に載らない／審査の上申 | **事務局** | ⚠ |
-| | `HOLD` | 条件不一致 | 締結した基本契約が台帳と合わない（版違いなど）／別紙の内容相違の申出（7日以内） | **事務局（法務）** | ⚠ |
-| 締結後 | `AWAITING_SUBMISSION` | 提出待ち | 別紙を送付し個別契約が成立、作品の提出待ち（入金は待たない） | クリエーター | |
+| | `HOLD` | 条件不一致 | 締結した利用許諾契約が台帳と合わない（版違いなど）／別紙の内容相違の申出（7日以内） | **事務局（法務）** | ⚠ |
+| 締結後 | `AWAITING_SUBMISSION` | 提出待ち | 別紙を送付し許諾が有効、作品の提出待ち（入金は待たない） | クリエーター | |
 | | `REVIEWING` | 審査中 | 提出済み（AI一次審査→人手審査） | **事務局** | ⚠ |
 | | `CORRECTION_REQUIRED` | 是正中 | 是正を依頼した | クリエーター | |
 | 認証 | `CERTIFIED` | 認証済 | 認証が有効 | — | |
@@ -81,8 +81,8 @@
 
 | 軸 | 値 | 記号 |
 |---|---|:-:|
-| 基本契約（参加者ごと）`Participants.agreement_status` | `NOT_STARTED` / `SIGNING` / `ACTIVE` / `TERMINATED` | ○ / ◐ / ● / ✕ |
-| 個別契約 `contract_status` | `NOT_STARTED` / `SIGNED`（別紙送付済み）/ `TERMINATED` | ○ / ● / ✕ |
+| 利用許諾契約（契約番号ごと）`Agreements.status` | `NOT_STARTED` / `SIGNING` / `ACTIVE` / `TERMINATED` | ○ / ◐ / ● / ✕ |
+| 別紙（許諾）`contract_status` | `NOT_STARTED` / `SIGNED`（別紙送付済み）/ `TERMINATED` | ○ / ● / ✕ |
 | 審査 `review_status` | `NOT_STARTED`・`AWAITING_SUBMISSION` / `IN_REVIEW`・`PENDING` / `CLEARED` / `CORRECTION_REQUIRED` / `ESCALATED` | ○ / ◐ / ● / ✕ / ⚠ |
 | 認証 `certification_status` | `NOT_ISSUED` / `ACTIVE` / `SUSPENDED` / `EXPIRED` / `REVOKED` / `TERMINATED` | ○ / ● / ‖ / ⌛ / ✕ / ✕ |
 
@@ -107,14 +107,14 @@
 
 | # | スイッチ | 形 | 遷移イベント | 押せる現在地 | 呼ぶ既存関数 | 承認 | ロール |
 |---:|---|---|---|---|---|:-:|---|
-| S1 | 別紙を発行してメールで送る | ボタン（送付前にプレビュー） | 新設 `INDIVIDUAL_ISSUED`（個別契約の成立） | 申込受付・個別確認（基本契約が ACTIVE のとき） | 新設：別紙PDFの生成 → Drive 保存 → メール送付・専用ページに掲示（§8） | — | OPERATIONS |
+| S1 | 別紙を発行してメールで送る | ボタン（送付前にプレビュー） | 新設 `INDIVIDUAL_ISSUED`（別紙の追加＝許諾の効力発生） | 申込受付・個別確認（利用許諾契約が ACTIVE のとき） | 新設：別紙PDFの生成 → Drive 保存 → メール送付・専用ページに掲示（§8） | — | OPERATIONS |
 | S2 | 条件を確認して有効化 | ボタン | `CLOUDSIGN_SIGNED` | 条件不一致 | `admin_confirmContractTerms(contractId, note)` | — | LEGAL_ADMIN |
 | S3 | 審査判定 | 3択（承認／是正／上申） | `HUMAN_REVIEW_CLEARED` / `CORRECTION_REQUIRED` / `REVIEW_ESCALATED` | 審査中・是正中・個別確認・認証済・停止中 | `admin_setHumanReview(submissionId, result, comment, reviewer, versionId)` | — | REVIEWER |
 | S4 | 入金未確認で停止 | オン／オフ（2名体制では申請） | `CERTIFICATE_SUSPENDED` ⇄ `CERTIFICATE_RESTORED` | 認証が ACTIVE、またはこの理由で停止中 | `admin_setCertEnabled(contractId, enabled, reason)`（2名体制では `admin_requestCertChange` → `admin_approveCertChange`） | 設定で切替 | OPERATIONS |
 | S5 | 一時停止（その他の理由）／復帰 | 申請 | `CERTIFICATE_SUSPENDED` / `CERTIFICATE_RESTORED` | 認証あり | `admin_requestCertChange(...)` → `admin_approveCertChange(...)` | ✔ | LEGAL_ADMIN |
 | S6 | 失効 | 申請 | `CERTIFICATE_REVOKED` | 認証あり | 同上（`requestedStatus='REVOKED'`） | ✔ | LEGAL_ADMIN |
-| S7 | 個別契約の終了 | 申請 | `CONTRACT_TERMINATED` | 個別契約 SIGNED | 同上（`requestedStatus='TERMINATED'`） | ✔ | LEGAL_ADMIN |
-| S10 | 基本契約の終了 | 申請 | 参加者の `AGREEMENT_TERMINATED` → その参加者の全案件に `CONTRACT_TERMINATED` | 基本契約 ACTIVE | 新設 | ✔ | LEGAL_ADMIN |
+| S7 | 別紙の取消し（この作品の許諾だけ終了） | 申請 | `CONTRACT_TERMINATED` | 別紙 送付済み | 同上（`requestedStatus='TERMINATED'`） | ✔ | LEGAL_ADMIN |
+| S10 | 契約の終了（全別紙） | 申請 | `AGREEMENT_TERMINATED` → その契約の全案件に `CONTRACT_TERMINATED` | 契約 ACTIVE | 新設 | ✔ | LEGAL_ADMIN |
 | S8 | 失効からの再有効化 | 申請 | `CERTIFICATE_RESTORED` | 契約 SIGNED かつ認証 REVOKED 等 | 同上（`requestedStatus='ACTIVE'`） | ✔ | LEGAL_ADMIN |
 | S9 | 申込取消 | ボタン（確認つき） | `APPLICATION_CANCELLED` | 申込受付〜条件不一致 | `admin_cancelApplication(applicationId, reason)` | — | OPERATIONS |
 
@@ -177,35 +177,35 @@ admin_applySwitch(licenseId, switchKey, params)   // params: { value, reason, no
 |---|---|
 | 事務局運営（会議・議決・報告・精算） | 1枚には入れない。設定と同じ**別パネル**（歯車から開く。タブ「設定」「事務局運営」） |
 | S4 入金未確認で停止 | 当面は**担当者1名のスイッチ**。のちに**申請→別担当者の承認（2名体制）**へ移す。切り替えは設定パネルの運用ルール `FEE_HOLD_TWO_PERSON`（Config）で行い、コードの書き換えなしで移行できるようにする |
-| 契約の構成 | **2段契約**（§8）。①基本契約（全利用区分の利用条件・料金の決め方・振込先）を初回に formrun（CloudSign FORM）→ CloudSign で締結。②個別契約は専用ページで作品を選ぶと別紙をメールで送り、**送付の時点で成立**。個別ごとのクラウドサイン締結はしない。※「全部を API 送付」「個別も API 送付」の案は取りやめ |
-| 専用ページ | **トークン式**（ログインなし）。基本契約で登録したメール宛てに長期の入口リンクを送る。今の案内ページを広げて作る |
-| 入金 | **時限式**。別紙に支払期限（後払いを含む）を書くだけで、SPLL は入金を追わず許諾を有効にする。期限を過ぎて未払いのときは事務局が S4（入金未確認で停止）で止める（基本契約第6条第4項） |
-| 基本契約の相手方 | 未決（法務確認）。案A：事務局が各権利者の代理人として締結／案B：事務局が再許諾権に基づき自ら締結。ひな形は両案を併記 |
+| 契約の構成 | **利用許諾契約＋別紙**（§8）。①利用許諾契約（全利用区分の利用条件・料金の決め方・振込先）を初回に formrun（CloudSign FORM）→ CloudSign で締結。②作品ごとに、専用ページで選ぶと別紙（許諾作品通知書）をメールで送り、**送付の時点で本契約に追加され許諾が有効**になる。別紙ごとのクラウドサイン締結はしない。※「全部を API 送付」「別紙も API 送付」の案は取りやめ。名称は「基本契約／個別契約」から「利用許諾契約／別紙」に改めた |
+| 専用ページ | **トークン式**（ログインなし）。利用許諾契約で登録したメール宛てに長期の入口リンクを送る。今の案内ページを広げて作る |
+| 入金 | **時限式**。別紙に支払期限（後払いを含む）を書くだけで、SPLL は入金を追わず許諾を有効にする。期限を過ぎて未払いのときは事務局が S4（入金未確認で停止）で止める（利用許諾契約書第6条第4項） |
+| 契約の相手方 | 未決（法務確認）。案A：事務局が各権利者の代理人として締結／案B：事務局が再許諾権に基づき自ら締結。ひな形は両案を併記 |
 
 未決：一覧の既定の絞り込み（モックは「要対応」）。
 
-## 8. 2段契約（基本契約＋別紙）
+## 8. 契約の構成（利用許諾契約＋別紙）
 
 ### 8.1 契約の構成
 
-| | 基本契約（参加契約） | 個別契約（別紙＝個別利用許諾書） |
+| | 利用許諾契約（本契約） | 別紙（許諾作品通知書） |
 |---|---|---|
-| 単位 | クリエーター1人につき1本（参加者番号） | ライセンス1本ごと（SPLL番号）。数の上限なし |
-| 中身 | 当事者（氏名・住所・メール）、全利用区分の共通条件、料金の決め方（申込時の料金表）、振込先、個別契約の成立方法 | 対象作品（別表1・行数の上限なし）、利用区分、許諾期間、利用許諾料、支払期限、利用報告、権利表記、特約 |
+| 単位 | クリエーター1人につき1本（契約番号） | ライセンス1本ごと（SPLL番号）。数の上限なし |
+| 中身 | 当事者（氏名・住所・メール）、全利用区分の共通条件、料金の決め方（申込時の料金表）、振込先、別紙の追加方法 | 対象作品（表・行数の上限なし）、利用区分、許諾期間、利用許諾料、支払期限、利用報告、権利表記、特約 |
 | 作る人 | クラウドサインのテンプレート（固定文面）。formrun が当事者欄を差し込む | SPLL が台帳（申込時に確定した条件）から PDF を作る |
-| 成立 | クラウドサイン上の同意 | **別紙をメールで送った時点**（基本契約第3条第3項）。内容相違の申出は7日以内 |
-| 個人情報 | formrun で入力。SPLL が受け取るのは氏名・メール（今と同じ） | 氏名・参加者番号だけ。住所・振込先は載せない |
-| 正本 | `docs/SPLL_基本契約書_参加契約_v5.0.md` | `docs/SPLL_個別利用許諾書_v1.0.md` |
+| 成立・追加 | クラウドサイン上の同意 | **別紙をメールで送った時点で本契約に追加**（利用許諾契約書第3条第3項）。内容相違の申出は7日以内 |
+| 個人情報 | formrun で入力。SPLL が受け取るのは氏名・メール（今と同じ） | 氏名・契約番号だけ。住所・振込先は載せない |
+| 正本 | `docs/SPLL_利用許諾契約書_v5.0.md` | `docs/SPLL_別紙_許諾作品通知書_v1.0.md` |
 
-サンプルPDF（基本契約 案A／案B、別紙 3作品／25作品）は `docs/contract/`。組み立ては `docs/contract/build_contract.js`。
+サンプルPDF（利用許諾契約書 案A／案B、別紙 3作品／25作品）は `docs/contract/`。組み立ては `docs/contract/build_contract.js`。
 
 ### 8.2 流れ
 
 ```
 【初回】
 サイトで原作を選んで申込 → SPLL番号・別表を確定（APPLICATION_RECEIVED）
-  └ 基本契約が無い → formrun へ（URL に載せるのは 参加者番号・照合トークン・ハッシュだけ）（CONTRACT_PENDING）
-       → CloudSign で基本契約に同意 → 締結 Webhook → 参加者の基本契約 ACTIVE
+  └ 利用許諾契約が無い → formrun へ（URL に載せるのは 契約番号・照合トークン・ハッシュだけ）（CONTRACT_PENDING）
+       → CloudSign で利用許諾契約に同意 → 締結 Webhook → 利用許諾契約 ACTIVE
        → 登録メールへ専用ページのリンクを送る
   → 待っている申込の別紙を自動で発行・送付（INDIVIDUAL_ISSUED → AWAITING_SUBMISSION）
 
@@ -220,28 +220,28 @@ admin_applySwitch(licenseId, switchKey, params)   // params: { value, reason, no
 - 個別確認（`MANUAL_REVIEW`）に回った申込は、事務局の確認後に S1 で別紙を送る。
 - 別紙の作成と送付は申込の処理と切り離し、即時起動のトリガーか5分バッチで行う。完了画面は「別紙を数分以内にメールでお送りします」。
 - 申込から送付までに原作マスタや料金表が変わっても、別紙は申込時に確定した内容で作る。
-- 専用ページのリンクは本人専用（基本契約第3条第7項）。期限切れ・紛失時は管理画面から再発行する。
+- 専用ページのリンクは本人専用（利用許諾契約書第3条第7項）。期限切れ・紛失時は管理画面から再発行する。
 
 ### 8.3 これで不要になるもの
 
 - formrun の URL 長の検査（`FORM_URL_MAX_CHARS`）と、3作品を超えたら個別確認に回す処理。
 - 作品名・金額・権利表記を formrun の hidden 項目で運ぶこと（`FORM_HIDDEN_MAP_*` は当事者欄と照合用の項目だけになる）。
-- 個別契約ごとのクラウドサイン送付（API 送付の実装・プランの確認も不要）。
+- 別紙ごとのクラウドサイン送付（API 送付の実装・プランの確認も不要）。
 - 締結後の条件照合で HOLD になる経路の大半。
 
 ### 8.4 システムへの影響
 
-- 台帳：`Participants`（参加者番号・氏名・メール・基本契約の CloudSign 書類ID・版・状態・締結日時）を新設。`License_Cases` に `participant_id`、別紙の発行日時・PDFのファイルID・ハッシュ・支払期限を足す。
-- 状態遷移：参加者側に `AGREEMENT_SIGNED` / `AGREEMENT_TERMINATED` を新設。案件側は `INDIVIDUAL_ISSUED`（別紙送付＝個別契約の成立。`contract_status` を `SIGNED` にする）を新設し、`CLOUDSIGN_SENT` / `SIGNING` は案件では使わなくなる。基本契約の締結で、待っている案件に `INDIVIDUAL_ISSUED` を自動で起こす。基本契約の終了で、その参加者の全案件に `CONTRACT_TERMINATED`。
+- 台帳：`Agreements`（契約番号・氏名・メール・利用許諾契約の CloudSign 書類ID・版・状態・締結日時）を新設。`License_Cases` に `agreement_no`、別紙の発行日時・PDFのファイルID・ハッシュ・支払期限を足す。
+- 状態遷移：契約側に `AGREEMENT_SIGNED` / `AGREEMENT_TERMINATED` を新設。案件側は `INDIVIDUAL_ISSUED`（別紙送付＝別紙の追加＝許諾の効力発生。`contract_status` を `SIGNED` にする）を新設し、`CLOUDSIGN_SENT` / `SIGNING` は案件では使わなくなる。利用許諾契約の締結で、待っている案件に `INDIVIDUAL_ISSUED` を自動で起こす。利用許諾契約の終了で、その契約の全案件に `CONTRACT_TERMINATED`。
 - 専用ページ：`Access_Tokens` に用途 `MY_PAGE`（長期・本人の登録メールにだけ送る）を足す。今の案内ページ（`44_guide.gs` / `guide.html`）に「新しく申し込む（原作を選ぶ）」「別紙の一覧・再表示」を加える。
-- 管理画面：案件の詳細に「参加者（基本契約）」「別紙（発行日・支払期限）」欄を足す。S1 は別紙の発行、S10（基本契約の終了・承認制）を追加。
+- 管理画面：案件の詳細に「利用許諾契約（契約番号）」「別紙（発行日・支払期限）」欄を足す。S1 は別紙の発行、S10（利用許諾契約の終了・承認制）を追加。
 - メール：別紙送付のテンプレートを追加（本文に口座情報を書かない）。
 
 ## 9. モック
 
 `docs/SPLL_管理画面1枚化モック_v0.1.html`（サンプルデータで操作できる）。操作者の切り替えで権限と職務分離、
-設定パネルの「2名体制」で S4 の形の変化、個別利用許諾書のプレビューで作品数を増やしたときの別表のページ送り、
-「基本契約待ち」の案件で基本契約の締結から別紙の自動発行までの流れを確認できる。
+設定パネルの「2名体制」で S4 の形の変化、別紙のプレビューで作品数を増やしたときの別表のページ送り、
+「利用許諾契約待ち」の案件で利用許諾契約の締結から別紙の自動発行までの流れを確認できる。
 
 ---
 
@@ -284,7 +284,7 @@ URLに値を載せないため1000字の制約がなくなり、1行テキスト
 | B. CloudSign API で直接送る | 作品数に合わせた契約書PDFをGAS（Googleドキュメントのひな形→PDF）で作り、CloudSign API で送付する。`30_cloudsign.gs` に書類作成・PDF添付・送付の関数（`cs_createDocument_` / `cs_attachFile_` / `cs_sendDocument_`）がすでにある | 無制限（ページが伸びる） | PDF生成と送付処理の実装。フォーム画面は公開サイトの申込ウィザードが担う。CloudSign API が使えるプランかの確認 |
 | C. 現行のまま | 3作品を超える申込は個別確認（`MANUAL_REVIEW`）へ回す | 3程度 | 4作品以上は事務局の手作業 |
 
-**推奨は B。** ※最終的には、基本契約を formrun 経由で締結し、個別の条件は別紙をメールで送る2段契約を採用した（本文 §8）。 1ライセンス＝1作品で、1作品が複数の原作を使う形なので、「対象原作」は契約の中核であり、契約書PDFの中に全件を載せるべき。
+**推奨は B。** ※最終的には、利用許諾契約を formrun 経由で締結し、作品ごとの条件は別紙をメールで送って本契約に追加する構成を採用した（本文 §8）。 1ライセンス＝1作品で、1作品が複数の原作を使う形なので、「対象原作」は契約の中核であり、契約書PDFの中に全件を載せるべき。
 B なら formrun の1000字制約とテンプレートの欄の大きさの両方から外れる。締結の Webhook（`35_webhooks.gs` の CloudSign 受信）と
 条件の改変検知（スナップショットのハッシュ）はそのまま使える。
 B に移るまでの間は C を続け、必要ならコード型フォームで①だけを外して上限を3から数件増やす。
