@@ -107,10 +107,10 @@
 
 | # | スイッチ | 形 | 遷移イベント | 押せる現在地 | 呼ぶ既存関数 | 承認 | ロール |
 |---:|---|---|---|---|---|:-:|---|
-| S1 | CloudSign送付済みにする（手動送付） | ボタン | `CLOUDSIGN_SENT` | 申込受付・送付待ち・個別確認 | `admin_markManualCloudSignSent(applicationId, documentId, note)` | — | OPERATIONS |
+| S1 | 契約書を作成して送付（CloudSign API） | ボタン（送付前にプレビュー） | `CLOUDSIGN_SENT` | 申込受付・送付待ち・個別確認 | 新設：契約書PDFの生成 → `cs_createDocument_` / `cs_attachFile_` / `cs_addParticipant_` / `cs_sendDocument_`（§8） | — | OPERATIONS |
 | S2 | 条件を確認して有効化 | ボタン | `CLOUDSIGN_SIGNED` | 条件不一致 | `admin_confirmContractTerms(contractId, note)` | — | LEGAL_ADMIN |
 | S3 | 審査判定 | 3択（承認／是正／上申） | `HUMAN_REVIEW_CLEARED` / `CORRECTION_REQUIRED` / `REVIEW_ESCALATED` | 審査中・是正中・個別確認・認証済・停止中 | `admin_setHumanReview(submissionId, result, comment, reviewer, versionId)` | — | REVIEWER |
-| S4 | 入金未確認で停止 | オン／オフ | `CERTIFICATE_SUSPENDED` ⇄ `CERTIFICATE_RESTORED` | 認証が ACTIVE、またはこの理由で停止中 | `admin_setCertEnabled(contractId, enabled, reason)` | — | OPERATIONS |
+| S4 | 入金未確認で停止 | オン／オフ（2名体制では申請） | `CERTIFICATE_SUSPENDED` ⇄ `CERTIFICATE_RESTORED` | 認証が ACTIVE、またはこの理由で停止中 | `admin_setCertEnabled(contractId, enabled, reason)`（2名体制では `admin_requestCertChange` → `admin_approveCertChange`） | 設定で切替 | OPERATIONS |
 | S5 | 一時停止（その他の理由）／復帰 | 申請 | `CERTIFICATE_SUSPENDED` / `CERTIFICATE_RESTORED` | 認証あり | `admin_requestCertChange(...)` → `admin_approveCertChange(...)` | ✔ | LEGAL_ADMIN |
 | S6 | 失効 | 申請 | `CERTIFICATE_REVOKED` | 認証あり | 同上（`requestedStatus='REVOKED'`） | ✔ | LEGAL_ADMIN |
 | S7 | 契約終了 | 申請 | `CONTRACT_TERMINATED` | 任意 | 同上（`requestedStatus='TERMINATED'`） | ✔ | LEGAL_ADMIN |
@@ -170,11 +170,36 @@ admin_applySwitch(licenseId, switchKey, params)   // params: { value, reason, no
 2. 新画面 `admin_board.html` を作り、旧画面と並べて置く（`?view=board`）。
 3. 運用で問題がなければ既定の画面を新画面に切り替え、旧タブ（ダッシュボード／ライセンス／作品審査／認証管理）を外す。設定は歯車パネルへ移す。
 
-## 7. 決めてほしいこと
+## 7. 決定事項（2026-11-17）
 
-- 「事務局運営」（`52_admin_partnership.gs`：会議・議決・報告・精算）も1枚に入れるか、設定と同じ別パネルにするか。
-- S4（入金未確認で停止）を引き続き担当者1名のスイッチにするか。
-- 一覧の既定の絞り込みを「要対応」にするか「すべて」にするか。
+| 論点 | 決定 |
+|---|---|
+| 事務局運営（会議・議決・報告・精算） | 1枚には入れない。設定と同じ**別パネル**（歯車から開く。タブ「設定」「事務局運営」） |
+| S4 入金未確認で停止 | 当面は**担当者1名のスイッチ**。のちに**申請→別担当者の承認（2名体制）**へ移す。切り替えは設定パネルの運用ルール `FEE_HOLD_TWO_PERSON`（Config）で行い、コードの書き換えなしで移行できるようにする |
+| 契約書の送り方 | **CloudSign API で直接送る方式に移す**（§8） |
+
+未決：一覧の既定の絞り込み（モックは「要対応」）。
+
+## 8. 契約書の送付を CloudSign API に移す
+
+```
+申込ウィザード（公開サイト）で契約者情報まで入力
+  → 条件スナップショットを確定（作品数の上限なし）
+  → 契約書PDFを生成（Googleドキュメントのひな形＋別表「対象原作」。行数に応じてページが増える）
+  → POST /documents → /files（PDF）→ /participants → /sent
+  → 締結 Webhook → スナップショットのハッシュを照合 → CLOUDSIGN_SIGNED
+```
+
+- 自動締結に載る申込はシステムが送付まで行う。個別確認（`MANUAL_REVIEW`）に回った申込は、確認後に S1 で送る。
+- formrun（CloudSign FORM）は使わなくなる。`FORM_HIDDEN_MAP_*` / `FORMRUN_FIELD_MAP_*`、URL長の検査（`FORM_URL_MAX_CHARS`）、
+  クレジット表記を契約書から外した措置（実装仕様 v2.1 §4）は不要になる。権利表記は別表に戻す。
+- 申込ウィザードに契約者情報（氏名・屋号・住所・メール・成年確認）の入力を移す。個人情報同意の範囲は変わらない。
+- 確認が要ること：利用中の CloudSign プランで API が使えるか、API 送付の書類で受信者のメール認証・同意操作が今の FORM 経由と同じになるか。
+
+## 9. モック
+
+`docs/SPLL_管理画面1枚化モック_v0.1.html`（サンプルデータで操作できる）。操作者の切り替えで権限と職務分離、
+設定パネルの「2名体制」で S4 の形の変化、契約書プレビューで作品数を増やしたときの別表のページ送りを確認できる。
 
 ---
 
@@ -217,7 +242,7 @@ URLに値を載せないため1000字の制約がなくなり、1行テキスト
 | B. CloudSign API で直接送る | 作品数に合わせた契約書PDFをGAS（Googleドキュメントのひな形→PDF）で作り、CloudSign API で送付する。`30_cloudsign.gs` に書類作成・PDF添付・送付の関数（`cs_createDocument_` / `cs_attachFile_` / `cs_sendDocument_`）がすでにある | 無制限（ページが伸びる） | PDF生成と送付処理の実装。フォーム画面は公開サイトの申込ウィザードが担う。CloudSign API が使えるプランかの確認 |
 | C. 現行のまま | 3作品を超える申込は個別確認（`MANUAL_REVIEW`）へ回す | 3程度 | 4作品以上は事務局の手作業 |
 
-**推奨は B。** 1ライセンス＝1作品で、1作品が複数の原作を使う形なので、「対象原作」は契約の中核であり、契約書PDFの中に全件を載せるべき。
+**推奨は B（2026-11-17 に採用決定。本文 §8）。** 1ライセンス＝1作品で、1作品が複数の原作を使う形なので、「対象原作」は契約の中核であり、契約書PDFの中に全件を載せるべき。
 B なら formrun の1000字制約とテンプレートの欄の大きさの両方から外れる。締結の Webhook（`35_webhooks.gs` の CloudSign 受信）と
 条件の改変検知（スナップショットのハッシュ）はそのまま使える。
 B に移るまでの間は C を続け、必要ならコード型フォームで①だけを外して上限を3から数件増やす。
