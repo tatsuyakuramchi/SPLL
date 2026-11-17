@@ -654,9 +654,9 @@ function openPreview(c,opt){
     const h = hash(c.id+'|'+ws.map(w=>w.name).join('|'));
     const foot = p => `<div class="foot"><span>${c.id}・条件ハッシュ ${h}</span><span>${p} / ${total}</span></div>`;
     const wrow = (w,i) => `<tr><td>${i+1}</td><td>${esc(w.name)}</td><td>${esc(w.lic)}</td><td>${esc(w.credit)}</td></tr>`;
-    const thead = `<tr><th>No.</th><th>対象原作</th><th>許諾者</th><th>権利表記</th></tr>`;
+    const thead = `<tr><th>No.</th><th>対象原作</th><th>権利者（ライセンサー）</th><th>権利表記</th></tr>`;
     let pages = `<div class="sheet"><h1>SPLL利用許諾契約　別紙（許諾作品通知書）</h1>
-      <p>TRPGライツ事務局は、契約番号 ${c.pid} の SPLL利用許諾契約（本契約）第3条に基づき、利用者の申込みについて、次の対象作品及び条件による許諾を本契約に追加することを提案します。利用者が電子契約システム上で同意した時点で、本別紙は本契約に追加されます。</p>
+      <p>SPLL事業TRPG事務局代表法人株式会社アークライトは、各ライセンサーを代表して、契約番号 ${c.pid} の SPLL利用許諾契約（本契約）第3条に基づき、利用者の申込みについて、次の対象作品及び条件による許諾を本契約に追加することを提案します。利用者が電子契約システム上で同意した時点で、本別紙は本契約に追加されます。</p>
       <h2>許諾の条件</h2><table>
       <tr><th>SPLL番号</th><td>${c.id}</td></tr><tr><th>契約番号</th><td>${c.pid}</td></tr><tr><th>利用者</th><td>${esc(c.party)}${c.circle?'（'+esc(c.circle)+'）':''}</td></tr>
       <tr><th>対象作品</th><td>下表のとおり（全${ws.length}作品）</td></tr><tr><th>利用区分</th><td>${esc(c.usage)}</td></tr>
@@ -763,7 +763,7 @@ function openSettings(){
         <button class="toggle" role="switch" id="twoPerson" aria-checked="${S.feeHoldTwoPerson}" aria-label="2名体制"></button>
         <small>オフ：担当者1名のスイッチ（現行）。オン：申請 → 別の担当者が承認（移行予定）。試すとスイッチの形が変わります。</small></div></div>
     <div class="card"><h4>契約書と支払い</h4>
-      <div class="setrow"><span>利用許諾契約書</span><span class="muted">v5.0・formrun → CloudSign</span><small>クラウドサインのテンプレートに登録する固定文面。差込は当事者欄だけ。ライセンサーは事務局（再許諾方式）</small></div>
+      <div class="setrow"><span>利用許諾契約書</span><span class="muted">v5.0・formrun → CloudSign</span><small>クラウドサインのテンプレートに登録する固定文面。差込は当事者欄だけ。当事者表記は「SPLL事業TRPG事務局代表法人株式会社アークライト」（各パートナーを代表）</small></div>
       <div class="setrow"><span>別紙（許諾作品通知書）</span><span class="muted">v1.0・CloudSign API</span><small>専用ページの申込みから台帳で生成し、CloudSign API で送信。同意で本契約に追加。対象作品の表は作品数に応じて行が増えます</small></div>
       <div class="setrow"><span>支払方法（利用区分ごと）</span><span class="muted">商品販売＝前払い／電子配信＝後払い</span><small>料金表の列で決める。前払いは入金確認で許諾が有効、後払いは同意の時点で有効</small></div>
       <div class="setrow"><span>期限</span><span class="muted">同意待ち・入金待ち 3か月</span><small>過ぎたら日次バッチで取消（同意待ちは CloudSign の書類も取り消す）</small></div>

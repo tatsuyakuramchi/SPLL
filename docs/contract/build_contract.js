@@ -97,9 +97,9 @@ const row = (k, v) => `<tr><th>${k}</th><td>${v}</td></tr>`;
 /* ---- 利用許諾契約書：CloudSign テンプレートの版下（サンプル値入り） ---- */
 function buildMaster(p){
   const md = fs.readFileSync(MA_SRC, 'utf8');
-  const lead = sentence(md, 'TRPGライツ事務局（以下「事務局」又は「ライセンサー」');
+  const lead = sentence(md, 'SPLL事業TRPG事務局代表法人株式会社アークライト（以下「事務局」');
   const closing = sentence(md, '本契約の成立を証するため');
-  const lic = 'TRPGライツ事務局';
+  const lic = 'SPLL事業TRPG事務局代表法人株式会社アークライト（各パートナーを代表）';
   return page('SPLL利用許諾契約書', `
 <h1>SPLL利用許諾契約書</h1>
 
@@ -128,10 +128,10 @@ ${row('ライセンサー', esc(lic) + '（電子契約システム上で合意�
 function buildIndividual(t){
   const md = fs.readFileSync(IL_SRC, 'utf8');
   const hash = termsHash(t);
-  const lic = 'TRPGライツ事務局（対象作品の権利者から再許諾権を得て許諾します）';
+  const lic = '下表に記載の各対象作品の権利者（パートナー）。代表：SPLL事業TRPG事務局代表法人株式会社アークライト';
   const works = t.works.map((w, i) => `<tr><td class="no">${i + 1}</td><td>${esc(w.work_title)}</td><td>${esc(w.licensor_name)}</td><td>${esc(w.credit_text)}</td></tr>`).join('');
   const checks = md.slice(md.indexOf('## 確認事項'), md.indexOf('## 対象作品')).split('\n').filter(l => /^\d+\. /.test(l)).map(l => `<li>${esc(l.replace(/^\d+\. /, ''))}</li>`).join('');
-  const lead = sentence(md, 'TRPGライツ事務局は、契約番号').replace('`{{agreement_no}}`', t.agreement_no).replace('`{{applied_at}}`', t.applied_at);
+  const lead = sentence(md, 'SPLL事業TRPG事務局代表法人株式会社アークライト（以下「事務局」といいます。）は、各ライセンサー').replace('`{{agreement_no}}`', t.agreement_no).replace('`{{applied_at}}`', t.applied_at);
   return page('SPLL別紙 ' + t.license_id, `
 <h1 style="font-size:14pt;letter-spacing:.08em">SPLL利用許諾契約　別紙<br><span style="font-size:11pt">（許諾作品通知書）</span></h1>
 <p class="lead">${esc(lead)}</p>
@@ -156,9 +156,9 @@ ${row('特約', esc(t.special_terms || '該当なし'))}
 <h2>確認事項</h2><ol>${checks}</ol>
 <h2>対象作品</h2>
 <div class="sum"><span>SPLL番号 ${esc(t.license_id)}</span><span>全${t.works.length}作品</span></div>
-<table class="works"><thead><tr><th>No.</th><th>対象作品</th><th>権利者</th><th>権利表記</th></tr></thead><tbody>${works}</tbody></table>
+<table class="works"><thead><tr><th>No.</th><th>対象作品</th><th>権利者（ライセンサー）</th><th>権利表記</th></tr></thead><tbody>${works}</tbody></table>
 <p class="closing">${esc(sentence(md, '本別紙への同意を証するため'))}</p>
-<p class="end" style="margin-top:4mm">作成日：${esc(t.issued_at)}　作成者：TRPGライツ事務局</p>
+<p class="end" style="margin-top:4mm">作成日：${esc(t.issued_at)}　作成者：SPLL事業TRPG事務局代表法人株式会社アークライト</p>
 <p class="end">以上</p>
 <p class="note">条件照合コード：${hash}（本別紙の条件及び対象作品が、SPLLの台帳に記録した内容と一致することの照合に用います）</p>`);
 }
