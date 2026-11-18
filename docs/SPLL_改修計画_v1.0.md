@@ -187,3 +187,14 @@ P0（確認）──┬─ P1（データ・状態遷移）── P2（入口・
 | 入金CSVの形が決まらない | P5 が止まる | P0-6。決まるまでは手入力の照合を用意 |
 
 **未決（仮の値で進めるもの）**：後払いの支払期限（仮：各四半期末から30日）、専用ページのリンクの有効期限（仮：365日）、利用許諾契約の有効期間（仮：1年・自動更新）、一覧の既定の絞り込み（仮：要対応）。
+
+## 8. 進捗
+
+| 日付 | 段階 | 内容 |
+|---|---|---|
+| 2026-11-18 | P0-1・P0-3 | 法務確認（利用許諾契約書 v5.0・別紙）と CloudSign の API 送信の可否：**OK** |
+| 2026-11-18 | P1-1・P1-2 | スキーマ v13：`Agreements`・`Apply_Queue`・`Payment_Imports`・`Payments`・`Partner_List_Versions`、`License_Cases` の別紙・支払い列、`Fee_Schedule.payment_timing`、`Access_Tokens.agreement_no`（`05_schema.gs`。`setup_migrate` で追加） |
+| 2026-11-18 | P1-3 | 状態遷移：`PAYMENT_PENDING`、`PAYMENT_CONFIRMED`、`APPLICATION_EXPIRED`。`CLOUDSIGN_SIGNED` は前払い→入金待ち／後払い・旧案件→提出待ち（入金済みなら再送でも戻らない）（`12_license_state.gs`）。支払方法は料金表の列、空欄なら売上連動＝後払い・それ以外＝`DEFAULT_PAYMENT_TIMING`（既定 前払い）（`15_fee.gs`） |
+| 2026-11-18 | P1-4 | 利用許諾契約：`13_agreement_state.gs`（締結書類から契約番号 C-YYYYMM-#### を発行・冪等）、`54_admin_agreement.gs`（終了と別紙への波及） |
+| 2026-11-18 | P0-5（試作） | 別紙の HTML/PDF：`48_besshi.gs`（文言は正本と一致をテストで確認）。**GAS 上の見た目の確認は未了**：GASエディタ（管理プロジェクト）で `setup_testBesshiPdf()` を実行し、出力された3つの PDF を確認する |
+| 2026-11-18 | テスト | `tests/harness.js` に P1 の検証を追加（50件）。全テスト通過 |

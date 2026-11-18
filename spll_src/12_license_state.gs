@@ -18,7 +18,8 @@ const LICENSE_CASE_STATUSES = [
   'APPLICATION_RECEIVED',   // 申込受付（SPLL番号発行）
   'CONTRACT_PENDING',       // フォーム送信済・契約書送付待ち
   'MANUAL_REVIEW',          // 事務局の個別確認（申込段階／審査上申）
-  'SIGNING',                // CloudSign 送付済・同意待ち
+  'SIGNING',                // CloudSign 送付済・同意待ち（v5：別紙の同意待ち）
+  'PAYMENT_PENDING',        // v5：前払いの別紙に同意済み・入金待ち（入金CSVの取込で提出待ちへ）
   'HOLD',                   // 締結したが条件不一致。法務確認まで自動処理を止める
   'AWAITING_SUBMISSION',    // 契約成立・作品提出待ち
   'REVIEWING',              // 提出済・審査中
@@ -78,9 +79,29 @@ const LICENSE_TRANSITIONS = {
     from: ['APPLICATION_RECEIVED','CONTRACT_PENDING','MANUAL_REVIEW','SIGNING','HOLD'],
     to: { case_status:'HOLD', contract_status:'SIGNED' }
   },
+  // 締結（v5：別紙への同意で本契約に追加）。支払方法で行き先が分かれる（利用許諾契約書 第6条第5項・第6項）
+  //   後払い（POSTPAID）・旧案件（payment_timing なし）：許諾が有効 → 提出待ち
+  //   前払い（PREPAID）：入金待ち。ただし入金が確認済み（同じ通知の再送など）なら提出待ちのまま
   CLOUDSIGN_SIGNED: {
-    from: ['APPLICATION_RECEIVED','CONTRACT_PENDING','MANUAL_REVIEW','SIGNING','HOLD','AWAITING_SUBMISSION'],
-    to: { case_status:'AWAITING_SUBMISSION', contract_status:'SIGNED', review_status:'AWAITING_SUBMISSION', certification_status:'NOT_ISSUED' }
+    from: ['APPLICATION_RECEIVED','CONTRACT_PENDING','MANUAL_REVIEW','SIGNING','HOLD','PAYMENT_PENDING','AWAITING_SUBMISSION'],
+    to: function(ctx, cur){
+      const prepaidUnpaid = cur.payment_timing === 'PREPAID' && cur.payment_status !== 'PAID';
+      if(prepaidUnpaid) return { case_status:'PAYMENT_PENDING', contract_status:'SIGNED', review_status:'NOT_STARTED', certification_status:'NOT_ISSUED' };
+      return { case_status:'AWAITING_SUBMISSION', contract_status:'SIGNED', review_status:'AWAITING_SUBMISSION', certification_status:'NOT_ISSUED' };
+    }
+  },
+  // 前払いの入金を確認（入金CSVの取込）。許諾の効力が生じ、提出できるようになる
+  PAYMENT_CONFIRMED: {
+    from: ['PAYMENT_PENDING'],
+    to: { case_status:'AWAITING_SUBMISSION', review_status:'AWAITING_SUBMISSION' }
+  },
+  // 期限切れ（日次バッチ）：別紙の同意待ち（送信から3か月）・前払いの入金待ち（追加から3か月）
+  //   同意待ちの別紙は未成立のまま、入金待ちの別紙は効力を失う（利用許諾契約書 第3条第4項・第6条第5項）
+  APPLICATION_EXPIRED: {
+    from: ['SIGNING','PAYMENT_PENDING'],
+    to: function(ctx, cur){
+      return { case_status:'CANCELLED', contract_status: cur.contract_status === 'SIGNED' ? 'TERMINATED' : 'NOT_STARTED' };
+    }
   },
   // 提出（再提出を含む）。認証済の案件が新しい版を出しても認証は取り消さない（審査で改めて判断する）。
   SUBMISSION_CREATED: {
@@ -168,7 +189,7 @@ const LICENSE_TRANSITIONS = {
     }
   },
   APPLICATION_CANCELLED: {
-    from: ['APPLICATION_RECEIVED','CONTRACT_PENDING','MANUAL_REVIEW','SIGNING','HOLD'],
+    from: ['APPLICATION_RECEIVED','CONTRACT_PENDING','MANUAL_REVIEW','SIGNING','HOLD','PAYMENT_PENDING'],
     to: { case_status:'CANCELLED' }
   }
 };
@@ -209,7 +230,10 @@ function validateLicenseTransition_(licenseId, event, ctx){
     case_status: normalizeCaseStatus_(row.case_status),
     contract_status: String(row.contract_status || 'NOT_STARTED'),
     review_status: String(row.review_status || 'NOT_STARTED'),
-    certification_status: String(row.certification_status || 'NOT_ISSUED')
+    certification_status: String(row.certification_status || 'NOT_ISSUED'),
+    // 遷移の判断にだけ使う参照値（状態列ではない。書き換えは updateLicenseCaseInfo_）
+    payment_timing: String(row.payment_timing || ''),
+    payment_status: String(row.payment_status || '')
   };
   if(def.from !== '*' && !ctx.force){
     if(def.from.indexOf(cur.case_status) < 0)

@@ -62,12 +62,17 @@ function updateRow_(ss, name, keyCol, keyVal, patch){
 }
 /** ID採番： PREFIX-YYYYMM-#### */
 function newId_(prefix){
+  const lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try{ return newIdUnlocked_(prefix); }
+  finally{ lock.releaseLock(); }
+}
+/** ID採番（ロックなし）。呼び出し側がすでにスクリプトロックを持っているときに使う（ロックは再入できないため） */
+function newIdUnlocked_(prefix){
   const ym = Utilities.formatDate(new Date(), 'JST', 'yyyyMM');
   const key = prefix+'-'+ym;
-  const lock = LockService.getScriptLock(); lock.waitLock(10000);
   const sp = PropertiesService.getScriptProperties();
   const n = (parseInt(sp.getProperty(key)||'0',10)+1);
-  sp.setProperty(key, String(n)); lock.releaseLock();
+  sp.setProperty(key, String(n));
   return `${prefix}-${ym}-${String(n).padStart(4,'0')}`;
 }
 function logEvent_(entityType, entityId, actor, before, after){

@@ -110,7 +110,7 @@ const Utilities={
     return rows;
   },
   zip:function(blobs,name){ return Blob('ZIP:'+(blobs||[]).map(b=>b.name).join('|'),'application/zip',name||'archive.zip'); },
-  DigestAlgorithm:{SHA_256:1}, MacAlgorithm:{HMAC_SHA_1:1}
+  DigestAlgorithm:{SHA_256:1}, MacAlgorithm:{HMAC_SHA_1:1}, Charset:{UTF_8:'UTF-8'}
 };
 
 // ---- Properties / Cache / Lock ----
@@ -2191,6 +2191,122 @@ ok(/apply_blocked/.test(portalPatch)&&/APPLY_BLOCKED/.test(portalPatch)&&/failCl
 const readme=fs.readFileSync(path.join(__dirname,'..','README.md'),'utf8');
 ok(!/Code\.gs|report\.html|半期清算|入金管理|batch_generateStatements/.test(readme),'README に旧アーキテクチャの説明が無い');
 ok(/apps\/public-web/.test(readme)&&/License_Cases/.test(readme)&&/12_license_state/.test(readme)&&/scripts\/deploy\.js/.test(readme),'README は 3つのGAS＋Cloud Run・License_Cases 中心・現行のデプロイ手順を説明する');
+
+// ============ 改修計画 P1：利用許諾契約 v5.0 と別紙のデータ・状態遷移 ============
+const gv=n=>vm.runInContext(n,sandbox);   // GAS の const はサンドボックスの外から直接は見えない
+// 400. スキーマ v13：新しい表と列がある（setup_migrate は足りないものだけ追加する）
+['Agreements','Apply_Queue','Payment_Imports','Payments','Partner_List_Versions'].forEach(function(n){ ok(!!G.sheet_(OPS,n),'v13 の表がある: '+n); });
+const lcHead=G.sheet_(OPS,'License_Cases').getRange(1,1,1,G.sheet_(OPS,'License_Cases').getLastColumn()).getValues()[0];
+['agreement_no','besshi_document_id','besshi_hash','payment_timing','payment_status','payment_due','paid_at'].forEach(function(c){ ok(lcHead.indexOf(c)>=0,'License_Cases に列がある: '+c); });
+ok(gv('SCHEMA_VERSION')===13,'SCHEMA_VERSION は 13');
+G.migrateSchema_();
+ok(G.sheet_(OPS,'Agreements').getLastRow()===1,'移行は冪等（行は増えない）');
+
+// 401. 支払方法は利用区分ごと（料金表）。空欄は売上連動なら後払い、それ以外は既定（前払い）
+const feeAll=rows(MAS,'Fee_Schedule');
+const rateRow=feeAll.find(r=>String(r.fee_model).toUpperCase()==='RATE'), flatRow=feeAll.find(r=>String(r.fee_model).toUpperCase()!=='RATE');
+ok(rateRow&&G.paymentTimingFor_(rateRow.usage_category)==='POSTPAID','売上連動の利用区分は後払い（列が空のとき）');
+ok(flatRow&&G.paymentTimingFor_(flatRow.usage_category)==='PREPAID','定額の利用区分は前払い（列が空のとき・既定）');
+G.updateRow_(MAS,'Fee_Schedule','usage_category',flatRow.usage_category,{payment_timing:'POSTPAID'});
+ok(G.paymentTimingFor_(flatRow.usage_category)==='POSTPAID'&&G.computeFeeTerms_(flatRow.usage_category,1).payment_timing==='POSTPAID','料金表の列で上書きでき、条件計算にも載る');
+G.updateRow_(MAS,'Fee_Schedule','usage_category',flatRow.usage_category,{payment_timing:''});
+ok(G.paymentTimingFor_('存在しない区分')==='','料金表に無い区分は空');
+
+// 402. 前払いの別紙：同意で入金待ち → 入金確認で提出待ち。入金待ちでは提出できない
+const pp=mkAppV4(['WRK-ARK00012'],'書籍');
+const ppCase=()=>rows(OPS,'License_Cases').find(k=>k.license_id===pp.license_id);
+G.updateLicenseCaseInfo_(pp.license_id,{ payment_timing:'PREPAID', payment_status:'UNPAID' });
+G.transitionLicenseCase_(pp.license_id,'CLOUDSIGN_SENT',{actor:'test'});
+G.transitionLicenseCase_(pp.license_id,'CLOUDSIGN_SIGNED',{actor:'test'});
+ok(ppCase().case_status==='PAYMENT_PENDING'&&ppCase().contract_status==='SIGNED'&&ppCase().certification_status==='NOT_ISSUED','前払い：同意で入金待ち（別紙は本契約に追加済み）');
+let ppSubmit=false; try{ G.transitionLicenseCase_(pp.license_id,'SUBMISSION_CREATED',{actor:'test'}); }catch(e){ ppSubmit=/STATE_ERROR/.test(String(e.message)); }
+ok(ppSubmit,'入金待ちの間は提出できない（許諾の効力がまだ無い）');
+G.updateLicenseCaseInfo_(pp.license_id,{ payment_status:'PAID', paid_at:'2026-11-18' });
+G.transitionLicenseCase_(pp.license_id,'PAYMENT_CONFIRMED',{actor:'test'});
+ok(ppCase().case_status==='AWAITING_SUBMISSION'&&ppCase().review_status==='AWAITING_SUBMISSION','入金確認で提出待ち');
+G.transitionLicenseCase_(pp.license_id,'CLOUDSIGN_SIGNED',{actor:'test'});
+ok(ppCase().case_status==='AWAITING_SUBMISSION','同意の通知が再送されても、入金済みなら入金待ちに戻らない');
+let ppConfirmTwice=false; try{ G.transitionLicenseCase_(pp.license_id,'PAYMENT_CONFIRMED',{actor:'test'}); }catch(e){ ppConfirmTwice=/STATE_ERROR/.test(String(e.message)); }
+ok(ppConfirmTwice,'入金待ちでない案件に入金確認は適用できない');
+
+// 403. 後払い・旧案件（支払方法なし）は同意の時点で許諾が有効
+const po=mkAppV4(['WRK-ARK00012'],'書籍');
+G.updateLicenseCaseInfo_(po.license_id,{ payment_timing:'POSTPAID', payment_status:'UNPAID' });
+G.transitionLicenseCase_(po.license_id,'CLOUDSIGN_SENT',{actor:'test'});
+G.transitionLicenseCase_(po.license_id,'CLOUDSIGN_SIGNED',{actor:'test'});
+ok(rows(OPS,'License_Cases').find(k=>k.license_id===po.license_id).case_status==='AWAITING_SUBMISSION','後払い：同意で提出待ち');
+const lg=mkAppV4(['WRK-ARK00012'],'書籍');
+G.transitionLicenseCase_(lg.license_id,'CLOUDSIGN_SIGNED',{actor:'test'});
+ok(rows(OPS,'License_Cases').find(k=>k.license_id===lg.license_id).case_status==='AWAITING_SUBMISSION','旧案件（支払方法なし）は今までどおり提出待ち');
+
+// 404. 期限切れ：同意待ち・入金待ちは3か月で取消（日次バッチが起こす）。許諾後の案件には適用できない
+const ex1=mkAppV4(['WRK-ARK00012'],'書籍');
+G.transitionLicenseCase_(ex1.license_id,'CLOUDSIGN_SENT',{actor:'test'});
+G.transitionLicenseCase_(ex1.license_id,'APPLICATION_EXPIRED',{actor:'batch'});
+const ex1c=rows(OPS,'License_Cases').find(k=>k.license_id===ex1.license_id);
+ok(ex1c.case_status==='CANCELLED'&&ex1c.contract_status==='NOT_STARTED','同意待ちの期限切れ：取消、別紙は未成立のまま');
+const ex2=mkAppV4(['WRK-ARK00012'],'書籍');
+G.updateLicenseCaseInfo_(ex2.license_id,{ payment_timing:'PREPAID', payment_status:'UNPAID' });
+G.transitionLicenseCase_(ex2.license_id,'CLOUDSIGN_SIGNED',{actor:'test'});
+G.transitionLicenseCase_(ex2.license_id,'APPLICATION_EXPIRED',{actor:'batch'});
+const ex2c=rows(OPS,'License_Cases').find(k=>k.license_id===ex2.license_id);
+ok(ex2c.case_status==='CANCELLED'&&ex2c.contract_status==='TERMINATED','入金待ちの期限切れ：取消、追加済みの別紙は効力を失う');
+let exAfter=false; try{ G.transitionLicenseCase_(po.license_id,'APPLICATION_EXPIRED',{actor:'batch'}); }catch(e){ exAfter=/STATE_ERROR/.test(String(e.message)); }
+ok(exAfter,'許諾が有効になった案件は期限切れにならない');
+const cx=mkAppV4(['WRK-ARK00012'],'書籍');
+G.updateLicenseCaseInfo_(cx.license_id,{ payment_timing:'PREPAID' });
+G.transitionLicenseCase_(cx.license_id,'CLOUDSIGN_SIGNED',{actor:'test'});
+G.transitionLicenseCase_(cx.license_id,'APPLICATION_CANCELLED',{actor:'test'});
+ok(rows(OPS,'License_Cases').find(k=>k.license_id===cx.license_id).case_status==='CANCELLED','入金待ちは取消できる');
+
+// 405. 利用許諾契約：CloudSign の書類1つから1つだけ作る。契約番号は C-YYYYMM-####
+const ag1=G.createAgreementFromSigned_({ cloudsign_document_id:'CSDOC-AG-1', party_display_name:'山田 太郎', contact_email:' Creator@Example.com ', intake_ref:'IN-abc', template_version:'SPLL-LIC-001 v5.0' },'cloudsign');
+ok(ag1.created&&/^C-\d{6}-\d{4}$/.test(ag1.agreement_no),'契約番号を発行: '+ag1.agreement_no);
+const ag1row=G.agreementByNo_(ag1.agreement_no);
+ok(ag1row.status==='ACTIVE'&&ag1row.contact_email==='Creator@Example.com'&&ag1row.cloudsign_document_id==='CSDOC-AG-1','締結書類から作り、メールは前後の空白を除いて保存（既存の normalizeEmail_ と同じ扱い）');
+const ag1again=G.createAgreementFromSigned_({ cloudsign_document_id:'CSDOC-AG-1', party_display_name:'別名' },'cloudsign');
+ok(!ag1again.created&&ag1again.agreement_no===ag1.agreement_no&&rows(OPS,'Agreements').filter(a=>a.cloudsign_document_id==='CSDOC-AG-1').length===1,'同じ書類の通知が再送されても1つだけ');
+const ag2=G.createAgreementFromSigned_({ cloudsign_document_id:'CSDOC-AG-2', party_display_name:'佐藤' },'cloudsign');
+ok(ag2.agreement_no!==ag1.agreement_no,'別の書類は別の契約番号');
+let agNoDoc=false; try{ G.createAgreementFromSigned_({ party_display_name:'書類なし' }); }catch(e){ agNoDoc=/書類ID/.test(String(e.message)); }
+ok(agNoDoc,'書類IDの無い締結からは作らない');
+ok(G.agreementActive_(ag1.agreement_no)&&!G.agreementActive_('C-000000-0000'),'有効な契約かどうか');
+ok(rows(OPS,'Events').some(e=>e.entity_type==='agreement'&&e.entity_id===ag1.agreement_no),'作成は Events に残る');
+
+// 406. 利用許諾契約の終了：すべての別紙に波及（認証あり→認証も終了／追加済み→契約終了／追加前→取消）
+const tA=mkAppV4(['WRK-ARK00012'],'書籍');   // 追加済み・認証なし
+G.transitionLicenseCase_(tA.license_id,'CLOUDSIGN_SIGNED',{actor:'test'});
+const tB=mkAppV4(['WRK-ARK00012'],'書籍');   // 同意待ち
+G.transitionLicenseCase_(tB.license_id,'CLOUDSIGN_SENT',{actor:'test'});
+G.updateLicenseCaseInfo_(tB.license_id,{ besshi_document_id:'CSDOC-BESSHI-B' });
+const agCertRow=rows(OPS,'Certificates').find(c=>c.status==='ACTIVE'&&c.license_id&&rows(OPS,'License_Cases').some(k=>k.license_id===c.license_id&&k.case_status==='CERTIFIED'));
+[tA.license_id,tB.license_id].concat(agCertRow?[agCertRow.license_id]:[]).forEach(id=>G.updateLicenseCaseInfo_(id,{ agreement_no:ag2.agreement_no }));
+const term=G.terminateAgreement_(ag2.agreement_no,'テストのため終了','legal@example.com');
+const kc=id=>rows(OPS,'License_Cases').find(k=>k.license_id===id);
+ok(G.agreementByNo_(ag2.agreement_no).status==='TERMINATED','利用許諾契約は TERMINATED');
+ok(kc(tA.license_id).case_status==='TERMINATED'&&kc(tA.license_id).contract_status==='TERMINATED','追加済みの別紙は契約終了');
+ok(kc(tB.license_id).case_status==='CANCELLED'&&term.signing_documents.indexOf('CSDOC-BESSHI-B')>=0,'同意待ちの別紙は取消、CloudSign の書類IDを返す（取消は別処理）');
+ok(agCertRow&&kc(agCertRow.license_id).certification_status==='TERMINATED'&&rows(OPS,'Certificates').find(c=>c.cert_id===agCertRow.cert_id).status==='TERMINATED',
+  '認証のある別紙は認証の行も台帳も TERMINATED');
+let termTwice=false; try{ G.terminateAgreement_(ag2.agreement_no,'二度目','legal@example.com'); }catch(e){ termTwice=/STATE_ERROR/.test(String(e.message)); }
+ok(termTwice,'終了済みの契約は再び終了できない');
+let termNoReason=false; try{ G.terminateAgreement_(ag1.agreement_no,'','legal@example.com'); }catch(e){ termNoReason=/理由/.test(String(e.message)); }
+ok(termNoReason&&G.agreementActive_(ag1.agreement_no),'理由の無い終了は受け付けない');
+
+// 407. 別紙の HTML：正本（docs の別紙 v1.0）と同じ文言・作品は全件・当事者表記は固定
+const besshiMd=fs.readFileSync(path.join(__dirname,'..','docs','SPLL_別紙_許諾作品通知書_v1.0.md'),'utf8');
+const licMd=fs.readFileSync(path.join(__dirname,'..','docs','SPLL_利用許諾契約書_v5.0.md'),'utf8');
+ok(gv('BESSHI_CHECKS').every(c=>besshiMd.indexOf(c)>=0),'確認事項の文言は正本と同じ');
+ok(besshiMd.indexOf(gv('BESSHI_CLOSING'))>=0,'締めの文言は正本と同じ');
+ok(licMd.indexOf(gv('SPLL_PARTY_NAME'))>=0&&besshiMd.indexOf(gv('SPLL_PARTY_NAME'))>=0,'当事者表記は契約書・別紙と同じ: '+gv('SPLL_PARTY_NAME'));
+const st100=G.besshiSampleTerms_(100,'PREPAID'), html100=G.besshiHtml_(st100);
+ok((html100.match(/<td class="no">/g)||[]).length===100,'100作品でも全件が表に載る');
+ok(/前払い/.test(html100)&&/後払い/.test(G.besshiHtml_(G.besshiSampleTerms_(3,'POSTPAID'))),'支払方法を書き分ける');
+const xss=G.besshiSampleTerms_(1,'PREPAID'); xss.works[0].work_title='<script>alert(1)</script>';
+ok(G.besshiHtml_(xss).indexOf('<script>alert')<0,'作品名などは HTML エスケープする');
+const h1=G.besshiHash_(st100), st100b=G.besshiSampleTerms_(100,'PREPAID'); st100b.works[5].credit_text='改変';
+ok(/^[0-9a-f]{16}$/.test(h1)&&h1===G.besshiHash_(G.besshiSampleTerms_(100,'PREPAID'))&&h1!==G.besshiHash_(st100b),'照合コードは条件が同じなら同じ、1文字でも違えば変わる');
+ok(G.besshiPdfBlob_(st100).name==='SPLL別紙_SPLL-TEST-100.pdf','PDF の名前は SPLL番号');
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

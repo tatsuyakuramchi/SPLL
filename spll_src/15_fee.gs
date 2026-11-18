@@ -11,6 +11,21 @@ function feeRows_(){ return readRows_(ssMaster_(),'Fee_Schedule').filter(functio
 function feeRuleFor_(usageCategory){
   return feeRows_().find(function(r){ return String(r.usage_category) === String(usageCategory); }) || null;
 }
+/**
+ * 支払方法（利用許諾契約書 第6条第2項：利用区分ごとに料金表で定める）。PREPAID＝前払い／POSTPAID＝後払い。
+ * 料金表の payment_timing 列が空の行は、売上連動（RATE）なら後払い（利用報告で金額が決まるため）、
+ * それ以外は Config DEFAULT_PAYMENT_TIMING（既定 PREPAID）。
+ */
+const PAYMENT_TIMINGS = ['PREPAID','POSTPAID'];
+function paymentTimingOfRule_(r){
+  if(!r) return '';
+  const v = String(r.payment_timing || '').toUpperCase();
+  if(PAYMENT_TIMINGS.indexOf(v) >= 0) return v;
+  if(String(r.fee_model || '').toUpperCase() === 'RATE') return 'POSTPAID';
+  const d = String(getConfig_('DEFAULT_PAYMENT_TIMING', 'PREPAID') || 'PREPAID').toUpperCase();
+  return PAYMENT_TIMINGS.indexOf(d) >= 0 ? d : 'PREPAID';
+}
+function paymentTimingFor_(usageCategory){ return paymentTimingOfRule_(feeRuleFor_(usageCategory)); }
 /** 公開：利用目的の選択肢（申込フォーム用） */
 function api_getUsageOptions(){
   return feeRows_().map(function(r){ return { category:r.usage_category, fee_model:r.fee_model, fee_label:r.fee_label || '' }; });
@@ -49,6 +64,7 @@ function computeFeeTerms_(usageCategory, workCount){
     requires_usage_report: String(r.requires_usage_report) === 'true' || model === 'RATE',   // 構造化（V2-017）
     report_frequency: r.report_frequency || '', report_due_days: num_(r.report_due_days) || 0,
     report_due_base: r.report_due_base || 'PERIOD_END',
+    payment_timing: paymentTimingOfRule_(r),
     found: true
   };
 }

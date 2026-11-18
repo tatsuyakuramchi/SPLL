@@ -26,7 +26,7 @@ const SCHEMA_MASTER = {
   //   fee_model: RATE=売上連動 / FLAT=定額(契約単位) / PER_WORK=原作数比例
   //   fee_value: RATEは率(0.10=10%)、FLAT/PER_WORKは金額(円)
   // report_* 構造化列（V2-017）：報告要否・期限を文言でなく構造化値で保持
-  Fee_Schedule:    ['usage_category','fee_model','fee_value','fee_label','licensed_uses','payment_due','reporting_requirement','report_due','threshold_or_cap','reprint_rule','special_terms','active','requires_usage_report','report_frequency','report_due_days','report_due_base']
+  Fee_Schedule:    ['usage_category','fee_model','fee_value','fee_label','licensed_uses','payment_due','reporting_requirement','report_due','threshold_or_cap','reprint_rule','special_terms','active','requires_usage_report','report_frequency','report_due_days','report_due_base','payment_timing']
 };
 const SCHEMA_OPS = {
   // 申込：複数原作は中間テーブル Application_Works で管理（B経路固定・A/B分岐なし）
@@ -42,7 +42,7 @@ const SCHEMA_OPS = {
   Contract_Works:       ['contract_work_id','contract_id','work_id','work_name_snapshot','publisher_snapshot','credit_snapshot','partner_id_snapshot','partner_name_snapshot','invoice_reg_number_snapshot','allocation_scheme_snapshot','royalty_rate_snapshot','handling_fee_rate_snapshot'],
   // 用途別アクセストークン（SEC-06/§9.1）：SUBMISSION / BADGE_DOWNLOAD
   // license_id が正本。contract_id は移行期間の互換列。reference_id は用途に応じた参照（提出ID等・任意）
-  Access_Tokens:        ['token_id','contract_id','purpose','token_hash','status','expires_at','max_uses','used_count','last_used_at','issued_at','revoked_at','license_id','reference_id'],
+  Access_Tokens:        ['token_id','contract_id','purpose','token_hash','status','expires_at','max_uses','used_count','last_used_at','issued_at','revoked_at','license_id','reference_id','agreement_no'],
   // submission_method: UPLOAD（20MBまでの直接アップロード）/ DRIVE_FOLDER（大容量・専用Driveフォルダ受渡）
   Submissions:          ['submission_id','contract_id','title','status','submitted_at','submission_method','license_id'],
   // DRIVE_FOLDER の版は、フォルダ払出し（OPEN）→クリエーターが投入→提出完了（確定）で成立する
@@ -70,7 +70,7 @@ const SCHEMA_OPS = {
   X_Posts:              ['x_post_id','work_id','tweet_id','text','posted_by','posted_at'],
   // ---- SPLLライセンス台帳（分断・簡素化計画 SPLL-SYS-RP-001 §6）----
   // 主台帳：1案件（SPLL番号）1行。申込〜契約〜審査〜認証を1つの状態遷移として扱う
-  License_Cases:        ['license_id','application_ref','party_type','party_display_name','contact_email','usage_category','case_status','contract_status','cloudsign_document_id','signed_at','signed_pdf_file_id','signed_pdf_hash','review_status','certification_status','finance_handoff_status','created_at','updated_at'],
+  License_Cases:        ['license_id','application_ref','party_type','party_display_name','contact_email','usage_category','case_status','contract_status','cloudsign_document_id','signed_at','signed_pdf_file_id','signed_pdf_hash','review_status','certification_status','finance_handoff_status','created_at','updated_at','agreement_no','besshi_document_id','besshi_pdf_file_id','besshi_hash','besshi_sent_at','besshi_agreed_at','payment_timing','payment_status','payment_due','paid_at'],
   // 対象原作（1:N）：契約条件は申込時点でスナップショット（費用＝契約形態×原作構造で自動確定）
   License_Works:        ['license_work_id','license_id','work_id','work_name_snapshot','credit_snapshot','fee_model_snapshot','fee_value_snapshot','reporting_requirement_snapshot','active'],
   // 契約書履歴（1:N）：原本は締結済PDF＋ハッシュ（台帳に契約全文を再現しない）
@@ -88,6 +88,16 @@ const SCHEMA_OPS = {
   Badge_Jobs:           ['badge_job_id','contract_id','status','retry_count','last_error','created_at','finished_at','license_id','cert_id'],   // 検証URL・平文コードは持たない（実行時に再発行）
   // 認証状態変更の職務分離（V2-018）：申請→承認→適用
   Certificate_Change_Requests: ['request_id','cert_id','contract_id','requested_status','reason_code','reason_text','legal_case_id','requested_by','requested_at','approved_by','approved_at','status','emergency_override','license_id'],
+  // ---- 利用許諾契約 v5.0（クリエーター1人1本）と別紙（作品ごと）。改修計画 P1 ----
+  // 利用許諾契約：CloudSign の締結書類が正本。契約番号（C-YYYYMM-####）。住所は持たない
+  Agreements:           ['agreement_no','status','party_display_name','contact_email','intake_ref','cloudsign_document_id','template_version','signed_at','signed_pdf_file_id','signed_pdf_hash','partner_list_version','terminated_at','terminated_reason','created_at','updated_at'],
+  // 専用ページの申込（受付だけ記録し、採番・別紙作成・送信は定期実行）：QUEUED→PROCESSING→DONE／ERROR
+  Apply_Queue:          ['queue_id','agreement_no','token_id','work_ids_json','usage_category','dedupe_key','status','license_id','attempts','last_error','received_at','processed_at'],
+  // 入金CSVの取込（取込→照合→反映）。同じ行は row_hash で二重に反映しない
+  Payment_Imports:      ['import_id','file_name','file_hash','row_count','matched_count','unmatched_count','imported_by','imported_at'],
+  Payments:             ['payment_id','import_id','row_hash','paid_on','amount','payer_name','license_id','status','reason','applied_by','applied_at'],
+  // パートナー一覧の版（利用許諾契約書 第2条第8項：版と掲載期間を記録）
+  Partner_List_Versions:['version','partners_json','published_at','published_by','effective_from','effective_to'],
   Schema_Versions:      ['schema_name','version','applied_at','applied_by','checksum'],
   Migration_Runs:       ['migration_run_id','migration_name','started_at','finished_at','status','before_snapshot','after_snapshot','error_detail']
 };
@@ -243,7 +253,7 @@ function setup_seedSamples_(){
 }
 
 // ---- スキーマ移行（修正設計書v2 V2-003）----
-const SCHEMA_VERSION = 12;  // v12: Badge_Jobs.cert_id（バッジは認証からだけ作る）。v11: 業務テーブルへ license_id（RP-002：SPLL番号を主キーへ）。v10: 申込の契約書経路（template_route）。v9: 案内メールの自動送信（通知の送信状態）。v8: 連絡先メール。v7: 大容量提出
+const SCHEMA_VERSION = 13;  // v13: 利用許諾契約 v5.0（Agreements・Apply_Queue・Payments・Payment_Imports・Partner_List_Versions、License_Cases の別紙・支払い列、Fee_Schedule.payment_timing、Access_Tokens.agreement_no）。v12: v12: Badge_Jobs.cert_id（バッジは認証からだけ作る）。v11: 業務テーブルへ license_id（RP-002：SPLL番号を主キーへ）。v10: 申込の契約書経路（template_route）。v9: 案内メールの自動送信（通知の送信状態）。v8: 連絡先メール。v7: 大容量提出
 
 /**
  * 既存スプレッドシートへ不足シート・不足列を追加する（既存列の削除・並び替えはしない）。
