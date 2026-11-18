@@ -20,7 +20,6 @@ const path = require('path');
 const crypto = require('crypto');
 const ROOT = path.join(__dirname, '..', '..');
 const MA_SRC = path.join(ROOT, 'docs', 'SPLL_利用許諾契約書_v5.0.md');
-const IL_SRC = path.join(ROOT, 'docs', 'SPLL_別紙_許諾作品通知書_v1.0.md');
 const OUT = __dirname;
 
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, m => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[m]));
@@ -125,43 +124,29 @@ ${row('ライセンサー', esc(lic) + '（電子契約システム上で合意�
 }
 
 /* ---- 別紙（許諾作品通知書）：SPLL が台帳から生成して CloudSign API で送る ---- */
-function buildIndividual(t){
-  const md = fs.readFileSync(IL_SRC, 'utf8');
-  const hash = termsHash(t);
-  const lic = '下表に記載の各対象作品の権利者（パートナー）。代表：SPLL事業TRPG事務局代表法人株式会社アークライト';
-  const works = t.works.map((w, i) => `<tr><td class="no">${i + 1}</td><td>${esc(w.work_title)}</td><td>${esc(w.licensor_name)}</td><td>${esc(w.credit_text)}</td></tr>`).join('');
-  const checks = md.slice(md.indexOf('## 確認事項'), md.indexOf('## 対象作品')).split('\n').filter(l => /^\d+\. /.test(l)).map(l => `<li>${esc(l.replace(/^\d+\. /, ''))}</li>`).join('');
-  const lead = sentence(md, 'SPLL事業TRPG事務局代表法人株式会社アークライト（以下「事務局」といいます。）は、各ライセンサー').replace('`{{agreement_no}}`', t.agreement_no).replace('`{{applied_at}}`', t.applied_at);
-  return page('SPLL別紙 ' + t.license_id, `
-<h1 style="font-size:14pt;letter-spacing:.08em">SPLL利用許諾契約　別紙<br><span style="font-size:11pt">（許諾作品通知書）</span></h1>
-<p class="lead">${esc(lead)}</p>
-<h2>許諾の条件</h2>
-<table class="terms">
-${row('SPLL番号', esc(t.license_id))}
-${row('契約番号', esc(t.agreement_no))}
-${row('利用者氏名', esc(t.party_name) + (t.circle_name ? '（' + esc(t.circle_name) + '）' : ''))}
-${row('対象作品', `下表のとおり（全${t.works.length}作品）`)}
-${row('ライセンサー', esc(lic))}
-${row('利用区分', esc(t.usage_category))}
-${row('許諾期間', esc(t.license_term))}
-${row('利用地域', esc(t.territory))}
-${row('利用許諾料', esc(t.fee_amount_or_rate) + '（料金表 ' + esc(t.fee_schedule_version) + ' により算定）')}
-${row('支払方法', esc(t.payment_timing) + '（利用区分により料金表で定める）')}
-${row('支払期限', esc(t.payment_due) + '（振込先は本契約書第6条のとおり）')}
-${row('利用報告', esc(t.reporting_terms))}
-${row('権利表記', '下表のとおり（本契約書第7条第1項）')}
-${row('特約', esc(t.special_terms || '該当なし'))}
-</table>
-<p class="note">空欄又は「該当なし」と記載された項目は、当該項目について追加の条件を設定するものではありません。</p>
-<h2>確認事項</h2><ol>${checks}</ol>
-<h2>対象作品</h2>
-<div class="sum"><span>SPLL番号 ${esc(t.license_id)}</span><span>全${t.works.length}作品</span></div>
-<table class="works"><thead><tr><th>No.</th><th>対象作品</th><th>権利者（ライセンサー）</th><th>権利表記</th></tr></thead><tbody>${works}</tbody></table>
-<p class="closing">${esc(sentence(md, '本別紙への同意を証するため'))}</p>
-<p class="end" style="margin-top:4mm">作成日：${esc(t.issued_at)}　作成者：SPLL事業TRPG事務局代表法人株式会社アークライト</p>
-<p class="end">以上</p>
-<p class="note">条件照合コード：${hash}（本別紙の条件及び対象作品が、SPLLの台帳に記録した内容と一致することの照合に用います）</p>`);
+/**
+ * 別紙＋請求書は GAS の 48_besshi.gs（本番と同じコード）で組み立てる。文面の二重管理をしない。
+ * 請求書の発行者情報はサンプル値（本番は ScriptProperties）。
+ */
+const vm = require('vm');
+function gasBesshi(){
+  const sb = { JSON, String, Number, Math, Date, Array, Object, RegExp,
+    Utilities: { computeDigest: (a, v) => Array.from(crypto.createHash('sha256').update(Buffer.from(String(v), 'utf8')).digest()),
+      DigestAlgorithm: { SHA_256: 1 }, Charset: { UTF_8: 'UTF-8' } },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: () => '' }) } };
+  sb.prop_ = () => '';
+  vm.createContext(sb);
+  vm.runInContext(fs.readFileSync(path.join(ROOT, 'spll_src', '48_besshi.gs'), 'utf8'), sb);
+  return sb;
 }
+const SAMPLE_INVOICE_CFG = { reg: 'T0000000000000（サンプル）', address: '東京都千代田区〇〇（サンプル）',
+  bank: '〇〇銀行 〇〇支店 普通預金 0000000 カ）アークライト（サンプル）' };
+function buildIndividual(t){
+  const g = gasBesshi();
+  g.__t = t; g.__cfg = SAMPLE_INVOICE_CFG;
+  return vm.runInContext('besshiHtml_(__t, __cfg)', g);
+}
+function besshiCode(t){ const g = gasBesshi(); g.__t = t; return vm.runInContext('besshiHash_(__t)', g); }
 
 const headFoot = (left, right) => ({
   header: `<div style="font-size:7pt;color:#777;width:100%;padding:0 18mm;display:flex;justify-content:space-between;font-family:IPAGothic,sans-serif"><span>${left}</span><span>${right}</span></div>`,
@@ -171,24 +156,12 @@ const headFoot = (left, right) => ({
 /* ---- サンプル（架空の作品・権利者・利用者） ---- */
 const PARTY = { agreement_no: 'C-2026-00042', party_name: '山田 太郎', circle_name: '星屑工房',
   party_address: '東京都千代田区神田小川町1-2-3 サンプルビル4階', email: 'creator@example.com' };
-const LICENSORS = ['株式会社サンプルゲームズ','ギルドワークス合同会社','アルヴァ制作委員会','月影書房','有限会社テーブルトーク企画'];
-const TITLES = ['星喰いの迷宮','黄昏ギルド戦記','深淵図書館RPG','蒸気都市アルヴァ','月影の神話TRPG','辺境開拓記','夢見る機械の国','砂海のキャラバン','七つ鐘の聖堂','霧の港町奇譚','銀翼の騎士団','百鬼夜行録','氷原の探索者','星図なき航海','虹色魔法学園','黒鉄の帝国','風読みの谷','時計塔の秘密結社','竜骨山脈紀行','灯火の巡礼者','碧の庭園RPG','双子月の王国','忘れられた神々','路地裏怪異譚','終末の図書館'];
-/* 3作品＝商品販売（定額・前払い）、25作品＝電子配信（売上連動・後払い）。支払方法は利用区分で決まる */
-const USAGE = {
-  prepaid:  { usage_category: '商品販売（同人誌・物販）', fee_amount_or_rate: '16,500円（税込）。対象作品が複数の場合も同額', payment_timing: '前払い',
-              payment_due: '本別紙が本契約に追加された日から3か月以内（入金確認で許諾が有効）', reporting_terms: '定額のため利用報告は不要' },
-  postpaid: { usage_category: '電子配信（ダウンロード販売）', fee_amount_or_rate: '販売額（税抜）の10%', payment_timing: '後払い',
-              payment_due: '各四半期の末日から30日以内（利用報告に基づき算定）', reporting_terms: '四半期ごとに販売数・販売額を報告（四半期末から15日以内）' },
-};
+/* 3作品＝商品販売（定額・前払い・請求書つき）、25作品＝電子書籍（後払い・配信会社の入金と相殺）。GAS のサンプル条件を使う */
 function sampleIndividual(id, n, mode){
-  return Object.assign({}, PARTY, USAGE[mode], {
-    license_id: id, license_term: '本別紙が本契約に追加された日から1年間（本契約の有効期間内に限る）', territory: '日本国内',
-    fee_schedule_version: '2026-10版', applied_at: '2026年11月17日 10時12分', issued_at: '2026年11月17日', special_terms: '',
-    works: Array.from({ length: n }, (_, i) => {
-      const lic = LICENSORS[i % LICENSORS.length], title = TITLES[i % TITLES.length];
-      return { work_id: 'W' + String(i + 1).padStart(3, '0'), work_title: title, licensor_name: lic, credit_text: '©' + lic + '／「' + title + '」' };
-    })
-  });
+  const g = gasBesshi();
+  const t = vm.runInContext(`besshiSampleTerms_(${n}, '${mode === 'postpaid' ? 'POSTPAID' : 'PREPAID'}')`, g);
+  return Object.assign(t, PARTY, { license_id: id, invoice_no: mode === 'postpaid' ? '' : 'INV-202611-0001',
+    applied_at: '2026年11月18日 10時12分', issued_at: '2026年11月18日' });
 }
 
 async function main(){
@@ -196,10 +169,10 @@ async function main(){
   const jobs = [];
   jobs.push({ name: 'SPLL_利用許諾契約書サンプル_v5.0', html: buildMaster(PARTY),
     hf: headFoot('SPLL-LIC-001 / v5.0', 'SPLL利用許諾契約書'), code: '契約番号 ' + PARTY.agreement_no });
-  [['3作品_前払い', 3, 'SPLL-2026-0131', 'prepaid'], ['25作品_後払い', 25, 'SPLL-2026-0129', 'postpaid']].forEach(([label, n, id, mode]) => {
+  [['3作品_前払い_請求書つき', 3, 'SPLL-2026-0131', 'prepaid'], ['25作品_後払い_電子書籍', 25, 'SPLL-2026-0129', 'postpaid']].forEach(([label, n, id, mode]) => {
     const t = sampleIndividual(id, n, mode);
     jobs.push({ name: `SPLL_別紙サンプル_v1.0_${label}`, html: buildIndividual(t),
-      hf: headFoot('SPLL-LIC-001-A / v1.0', 'SPLL利用許諾契約 別紙'), code: `${t.license_id}　契約番号 ${t.agreement_no}　条件照合コード ${termsHash(t)}` });
+      hf: headFoot('SPLL-LIC-001-A / v1.0', 'SPLL利用許諾契約 別紙'), code: `${t.license_id}　契約番号 ${t.agreement_no}　条件照合コード ${besshiCode(t)}` });
   });
   let browser = null;
   for(const j of jobs){

@@ -44,6 +44,9 @@
 | P0-7 | 料金表に利用区分ごとの前払い／後払いを決める | 事務局 | — | 料金表の確定 |
 | P0-8 | GAS 3プロジェクトのデプロイ用アカウントを分ける（同時実行の枠を分けるため） | 管理者 | S | 3アカウント |
 | P0-9 | AWS アカウント・ドメイン・証明書の用意 | 管理者 | S | — |
+| P0-10 | 請求書の税務確認：アークライトの売上として発行することとパートナーシップ契約（各パートナーが当事者）との整合、同意前に作る請求書の取引年月日の書き方、端数処理 | 税理士・経理 | — | 確認結果 |
+| P0-11 | 請求書の発行者情報を ScriptProperties に登録（`INVOICE_REG_NUMBER`・`INVOICE_ISSUER_ADDRESS`・`INVOICE_BANK_ACCOUNT`） | 管理者 | S | 登録済み |
+| P0-12 | 電子書籍（後払い）の精算方式の確定：配信会社からの入金と利用許諾料の相殺、精算書の形 | 経理・事務局 | — | 精算の流れと精算書の様式 |
 
 ### P1 データと状態遷移
 
@@ -88,7 +91,7 @@
 | # | 作業 | 主なファイル | 規模 |
 |---|---|---|---|
 | P4-1 | 受付表の処理（定期実行・1回50秒まで）：SPLL番号の採番 → 条件の確定（`License_Works` のスナップショット、料金表の版、支払方法）→ 照合コード | 新規 `48_besshi.gs`・`00_core.gs`（`createLicenseCase_`） | M |
-| P4-2 | 別紙PDFの作成（P0-5 で決めた方式）。組み立ては `docs/contract/build_contract.js` の処理を GAS へ移す | `48_besshi.gs` | M |
+| P4-2 | 別紙PDFの作成（P0-5 で決めた方式）。前払いは同じPDFの後ろに請求書（請求書番号 INV-YYYYMM-#### を採番、PDF と番号を台帳に記録）。請求書の設定がそろわないときは送信しない（`invoiceConfigReady_`） | `48_besshi.gs` | M |
 | P4-3 | CloudSign API で送信（`cs_createDocument_` → `cs_attachFile_` → `cs_addParticipant_` → `cs_sendDocument_`）→ `CLOUDSIGN_SENT` | `48_besshi.gs`・`30_cloudsign.gs` | S |
 | P4-4 | 別紙の同意 Webhook：照合コードの確認 → `CLOUDSIGN_SIGNED`（不一致は `HOLD`）→ 前払いは入金待ち、後払いは提出待ち＋支払期限 | `35_webhooks.gs` | M |
 | P4-5 | 期限の日次バッチ：同意待ち（送信から3か月）・入金待ち（追加から3か月）を `APPLICATION_EXPIRED` で取消。同意待ちは CloudSign の書類も取り消す | `47_batches.gs` | S |
@@ -198,3 +201,4 @@ P0（確認）──┬─ P1（データ・状態遷移）── P2（入口・
 | 2026-11-18 | P1-4 | 利用許諾契約：`13_agreement_state.gs`（締結書類から契約番号 C-YYYYMM-#### を発行・冪等）、`54_admin_agreement.gs`（終了と別紙への波及） |
 | 2026-11-18 | P0-5（試作） | 別紙の HTML/PDF：`48_besshi.gs`（文言は正本と一致をテストで確認）。**GAS 上の見た目の確認は未了**：GASエディタ（管理プロジェクト）で `setup_testBesshiPdf()` を実行し、出力された3つの PDF を確認する |
 | 2026-11-18 | テスト | `tests/harness.js` に P1 の検証を追加（50件）。全テスト通過 |
+| 2026-11-18 | 文書 | 前払いの別紙に請求書を付ける（同じPDF・発行者は株式会社アークライト）。利用許諾契約書 第6条を改定（アークライトが請求・収受、振込先は契約書と請求書だけ）。`48_besshi.gs` に請求書を追加し、`docs/contract/build_contract.js` は GAS と同じコードでサンプルを作るようにした。テスト10件追加 |

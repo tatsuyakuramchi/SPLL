@@ -2308,5 +2308,24 @@ const h1=G.besshiHash_(st100), st100b=G.besshiSampleTerms_(100,'PREPAID'); st100
 ok(/^[0-9a-f]{16}$/.test(h1)&&h1===G.besshiHash_(G.besshiSampleTerms_(100,'PREPAID'))&&h1!==G.besshiHash_(st100b),'照合コードは条件が同じなら同じ、1文字でも違えば変わる');
 ok(G.besshiPdfBlob_(st100).name==='SPLL別紙_SPLL-TEST-100.pdf','PDF の名前は SPLL番号');
 
+// 408. 請求書：前払いの別紙だけ同じPDFの後ろに付ける。発行者はアークライト（適格請求書の記載事項）
+const ia=G.invoiceAmounts_(16500), ib=G.invoiceAmounts_(1000), ic=G.invoiceAmounts_(11000);
+ok(ia.excl===15000&&ia.tax===1500&&ia.total===16500,'16,500円（税込）＝税抜15,000円＋消費税1,500円');
+ok(ib.tax===90&&ib.excl===910&&ic.tax===1000,'消費税は税込×10/110 の1円未満切り捨て');
+const invCfg={ reg:'T1234567890123', address:'東京都千代田区テスト1-1', bank:'テスト銀行 本店 普通 1234567 カ）アークライト' };
+const preT=G.besshiSampleTerms_(3,'PREPAID'), preHtml=G.besshiHtml_(preT,invCfg), postHtml=G.besshiHtml_(G.besshiSampleTerms_(3,'POSTPAID'),invCfg);
+ok(/<h1>請求書<\/h1>/.test(preHtml)&&!/<h1>請求書<\/h1>/.test(postHtml),'請求書は前払いの別紙にだけ付く（後払いには付かない）');
+ok(preHtml.indexOf('page-break-before:always')>=0&&preHtml.indexOf('<h1>請求書')>preHtml.indexOf('条件照合コード：'),'請求書は別紙の後ろの新しいページから');
+ok(['株式会社アークライト','T1234567890123','東京都千代田区テスト1-1','INV-TEST-3','15,000円','1,500円','16,500円','10%','テスト銀行 本店 普通 1234567'].every(x=>preHtml.indexOf(x)>=0),
+  '請求書に発行者・登録番号・番号・税抜・消費税・税込・税率・振込先が載る');
+ok(preHtml.indexOf('山田 太郎（サンプル）')>=0&&preHtml.indexOf('（例：'+preT.license_id.slice(-4)+' ヤマダタロウ）')>=0,'宛名と振込名義の案内（SPLL番号の下4桁）が載る');
+ok(G.invoiceConfigReady_(invCfg)&&!G.invoiceConfigReady_({reg:'T123',address:'x',bank:'y'})&&!G.invoiceConfigReady_({reg:'T1234567890123',address:'',bank:'y'}),
+  '登録番号（T＋13桁）・住所・振込先がそろわないと請求書を作れない');
+ok(/（未設定）/.test(G.besshiHtml_(preT,{reg:'',address:'',bank:''})),'設定が無いときは（未設定）と出る（試作用。本番の送信は invoiceConfigReady_ で止める）');
+const xinv=G.besshiSampleTerms_(1,'PREPAID'); xinv.party_name='<img src=x onerror=alert(1)>';
+ok(G.besshiHtml_(xinv,invCfg).indexOf('<img src=x')<0,'請求書の宛名もエスケープする');
+ok(besshiMd.indexOf('# 請求書（前払いの別紙に付ける')>=0&&/INVOICE_BANK_ACCOUNT/.test(besshiMd)&&licMd.indexOf('株式会社アークライトが利用者に請求し、収受します')>=0,
+  '正本に請求書の定めがある（別紙・利用許諾契約書 第6条第3項）');
+
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);
