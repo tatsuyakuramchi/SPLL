@@ -92,7 +92,7 @@
 
 | # | 作業 | 主なファイル | 規模 |
 |---|---|---|---|
-| P4-1 | 受付表の処理（定期実行・1回50秒まで）：SPLL番号の採番 → 条件の確定（`License_Works` のスナップショット、料金表の版、支払方法）→ 照合コード | 新規 `48_besshi.gs`・`00_core.gs`（`createLicenseCase_`） | M |
+| P4-1 | 受付表の処理（定期実行。`runQueueWorker_` で空ならすぐ終了・1回45秒・1日の上限つき）：有効な契約か・権利者が決まっていない原作が無いか（`unresolvedWorksOf_`）を確かめ、あれば個別確認へ。SPLL番号の採番 → 条件の確定（`License_Works` のスナップショット、料金表の版、支払方法）→ 照合コード | 新規 `48_besshi.gs`・`00_core.gs`（`createLicenseCase_`） | M |
 | P4-2 | 別紙PDFの作成（P0-5 で決めた方式）。前払いは同じPDFの後ろに請求書（請求書番号 INV-YYYYMM-#### を採番、PDF と番号を台帳に記録）。請求書の設定がそろわないときは送信しない（`invoiceConfigReady_`） | `48_besshi.gs` | M |
 | P4-3 | CloudSign API で送信（`cs_createDocument_` → `cs_attachFile_` → `cs_addParticipant_` → `cs_sendDocument_`）→ `CLOUDSIGN_SENT` | `48_besshi.gs`・`30_cloudsign.gs` | S |
 | P4-4 | 別紙の同意 Webhook：照合コードの確認 → `CLOUDSIGN_SIGNED`（不一致は `HOLD`）→ 前払いは入金待ち、後払いは提出待ち＋支払期限 | `35_webhooks.gs` | M |
@@ -107,7 +107,7 @@
 |---|---|---|---|
 | P5-1 | 入金CSVの取込：取込 → 照合結果の確認 → 反映 の3段。照合は振込名義の SPLL番号の数字10桁（末尾4桁は毎月振り直すため）と金額。同じ行の二重反映を防ぐ（行のハッシュ） | 新規 `49_payments.gs`・管理画面 | M |
 | P5-2 | 反映：前払いは `PAYMENT_CONFIRMED`（入金待ち → 提出待ち）、後払いは入金の記録 | `49_payments.gs` | S |
-| P5-3 | 未照合の入金を要対応に残し、手で案件にひも付けられるようにする | `49_payments.gs`・管理画面 | S |
+| P5-3 | 未照合の入金を要対応に残し、手で案件にひも付けられるようにする。期限切れで取り消した案件への入金は「返金待ち」として出し、返金したら分配を取り消す（`reverseDistribution_`） | `49_payments.gs`・管理画面 | S |
 | P5-4 | 後払いの支払期限超過を日次で `OVERDUE` にし、要対応に出す（止めるのは S4） | `47_batches.gs` | S |
 | P5-5 | 利用許諾料の分配：入金の反映時（前払い）・電子書籍の精算時に、対象原作の数で等分して原作ごとの分配額を `Distributions` に記録（入金ごとに1回）。パートナー別の期間合計を四半期の精算（`Secretariat_Settlements`）へ渡す。事務局手数料（既定50%）・税抜／税込・端数は Config（`DISTRIBUTION_FEE_PERCENT`・`DISTRIBUTION_BASE`・`DISTRIBUTION_REMAINDER`）。管理画面からの取得・保存（`admin_getDistributionConfig`／`admin_saveDistributionConfig`）は実装済み | `49_distribution.gs`（計算と記録は実装済み）・`52_admin_partnership.gs` | S |
 
@@ -211,3 +211,4 @@ P0（確認）──┬─ P1（データ・状態遷移）── P2（入口・
 | 2026-11-23 | 分配 | 請求は二次創作物1つにつき1回（原作の数で増えない）と利用許諾契約書 第6条第1項に明記。分配の計算 `49_distribution.gs`（原作の数で等分・端数と税抜／税込と手数料は設定・入金ごとに1回だけ記録・パートナー別の期間合計）。申込時に原作ごとの権利者を `License_Works` に固定（`resolveWorkPartner_` を `00_core.gs` へ移動）。スキーマ v15（`Distributions`）。テスト12件追加 |
 | 2026-11-23 | 分配 | 後払いも同じ分配ルール。売上連動の料率も二次創作物ごとに1つで、得た利用許諾料を原作の数で均等に分配（利用許諾契約書 第6条第1項に料率も含むと明記）。料金表の原作数比例（PER_WORK）を廃止（保存時に拒否、旧データは定額として扱う） |
 | 2026-11-23 | 分配 | 事務局手数料の既定を50%（分配前に差し引く）。管理画面から変更できる入口（`admin_getDistributionConfig`／`admin_saveDistributionConfig`、法務・システム管理のみ、0〜100%、変更は Events に記録、以後の入金から適用）。事務局の取り分も分配の記録に1行残し、行の合計が分ける前の金額と一致するようにした。テスト7件追加 |
+| 2026-11-23 | 見直し | ロジックの見直し11点を反映：許諾期間は効力発生日起算（前払いは入金確認日）・定額は期間の定めなし（期間満了でも存続）・相殺という支払方法（利用許諾契約書 第6条第11項・第12条）。定期実行の共通部品 `runQueueWorker_`（空ならすぐ終了・1日の上限）とロック待ちの BUSY 応答。原作の共同権利（`rights_shares`）と未解決の原作の検出。分配の取消。利用許諾契約の重複・受付番号の使い回しは確認待ち（REVIEW）。契約終了でリンク失効・受付取消。料金表の版。スキーマ v16。テスト23件追加 |

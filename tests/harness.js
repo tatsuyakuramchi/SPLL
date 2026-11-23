@@ -122,7 +122,7 @@ const PropertiesService={ getScriptProperties:()=>({
 })};
 const _cache={};
 const CacheService={ getScriptCache:()=>({ get:k=>(k in _cache?_cache[k]:null), put:(k,v)=>{_cache[k]=String(v);} }) };
-const LockService={ getScriptLock:()=>({ waitLock:()=>{}, releaseLock:()=>{} }) };
+const LockService={ getScriptLock:()=>({ waitLock:()=>{}, tryLock:()=>true, releaseLock:()=>{} }) };
 const SlidesApp={ create:function(n){ const id='PRES'+Math.random().toString(36).slice(2,7); return { getId:()=>id, getSlides:()=>[{ getObjectId:()=>'p1', getBackground:()=>({setSolidFill:()=>{}}), insertTextBox:()=>({ getText:()=>({ getTextStyle:()=>({ setForegroundColor:function(){return this;}, setBold:function(){return this;}, setFontSize:function(){return this;} }) }) }) }], saveAndClose:()=>{} }; }, openById:function(id){ return { getSlides:()=>[{ getObjectId:()=>'p1' }], replaceAllText:()=>{}, saveAndClose:()=>{}, getId:()=>id }; } };
 const ScriptApp={ getService:()=>({ getUrl:()=>'https://script.example/exec' }), getOAuthToken:()=>'oauth-tok',
   _triggers:[], getProjectTriggers:function(){ return this._triggers.slice(); },
@@ -2083,7 +2083,7 @@ const pfCerts=()=>rows(OPS,'Certificates').filter(c=>c.license_id===pfApp.licens
 // ロックの取得・解放を数える（GAS の ScriptLock は同一実行内で再入できる。newId_ の採番ロックが内側で取られる）
 let lockWaits=0, lockHeld=0, lockMaxHeld=0;
 const lockOrig=G.LockService.getScriptLock;
-G.LockService.getScriptLock=function(){ return { waitLock:function(){ lockWaits++; lockHeld++; lockMaxHeld=Math.max(lockMaxHeld,lockHeld); }, releaseLock:function(){ lockHeld--; } }; };
+G.LockService.getScriptLock=function(){ const take=function(){ lockWaits++; lockHeld++; lockMaxHeld=Math.max(lockMaxHeld,lockHeld); return true; }; return { waitLock:take, tryLock:take, releaseLock:function(){ lockHeld--; } }; };
 // 人手審査 CLEARED の直前に台帳が取消（CANCELLED）へ変わっていた、という食い違いを模す
 G.appendRow_(OPS,'Human_Reviews',{ human_review_id:'HRV-PF-1', submission_id:pfSub.submission_id, version_id:G.latestVersionId_(pfSub.submission_id), reviewer:'x', result:'CLEARED', comments:'', reviewed_at:new Date().toISOString() });
 G.updateLicenseCaseRaw_(pfApp.license_id,{ case_status:'CANCELLED', review_status:'CLEARED' });
@@ -2198,7 +2198,7 @@ const gv=n=>vm.runInContext(n,sandbox);   // GAS の const はサンドボック
 ['Agreements','Apply_Queue','Payment_Imports','Payments','Partner_List_Versions'].forEach(function(n){ ok(!!G.sheet_(OPS,n),'v13 の表がある: '+n); });
 const lcHead=G.sheet_(OPS,'License_Cases').getRange(1,1,1,G.sheet_(OPS,'License_Cases').getLastColumn()).getValues()[0];
 ['agreement_no','besshi_document_id','besshi_hash','payment_timing','payment_status','payment_due','paid_at','creation_title'].forEach(function(c){ ok(lcHead.indexOf(c)>=0,'License_Cases に列がある: '+c); });
-ok(gv('SCHEMA_VERSION')===15,'SCHEMA_VERSION は 15');
+ok(gv('SCHEMA_VERSION')===16,'SCHEMA_VERSION は 16');
 ok(!!G.sheet_(OPS,'Distributions'),'v15 の表がある: Distributions');
 ok(!!G.sheet_(OPS,'Link_Requests'),'v14 の表がある: Link_Requests');
 G.migrateSchema_();
@@ -2358,14 +2358,18 @@ ok(dist_px.shares===2&&dist_px.amount===10000&&dist_dSame.per_partner.find(p=>p.
 let dist_dEmpty=false; try{ G.computeDistribution_(16500,[],dist_dCfg); }catch(e){ dist_dEmpty=/対象原作/.test(String(e.message)); }
 ok(dist_dEmpty,'対象原作が無いと分配しない');
 // 423. 申込時に原作ごとの権利者を固定し、入金ごとに1回だけ分配を記録する
-const dist_dApp=mkAppV4(['WRK-ARK00012','WRK-BKK00019'],'書籍');
+// 共同権利の原作（どらこにあん／アークライト）は持ち分を登録してから使う。権利者が未登録の原作（冒険企画局）は分配できない
+G.updateRow_(MAS,'Works_Master','work_id','WRK-ARK00045',{ rights_shares: JSON.stringify([{partner_id:'PRT-DRACO',share:1},{partner_id:'PRT-ARK',share:1}]) });
+const dist_dApp=mkAppV4(['WRK-ARK00012','WRK-ARK00045'],'書籍');
 const dist_lw=rows(OPS,'License_Works').filter(w=>w.license_id===dist_dApp.license_id);
-ok(dist_lw.length===2&&dist_lw.every(w=>w.partner_id_snapshot),'申込時に原作ごとの権利者を License_Works に固定: '+dist_lw.map(w=>w.partner_id_snapshot).join(','));
+ok(dist_lw.length===2&&dist_lw.every(w=>w.partner_id_snapshot&&w.partner_id_snapshot!=='UNRESOLVED')&&dist_lw.some(w=>w.partner_id_snapshot==='SHARED'),'申込時に原作ごとの権利者を License_Works に固定: '+dist_lw.map(w=>w.partner_id_snapshot).join(','));
 const dist_rec1=G.recordDistribution_(dist_dApp.license_id,'PAY-TEST-1',16500,'PREPAID','2026-Q4');
 const dist_rec2=G.recordDistribution_(dist_dApp.license_id,'PAY-TEST-1',16500,'PREPAID','2026-Q4');
 const dist_drows=rows(OPS,'Distributions').filter(d=>d.payment_id==='PAY-TEST-1');
 const dist_pRows=dist_drows.filter(d=>d.partner_id!=='SECRETARIAT'), dist_sRow=dist_drows.find(d=>d.partner_id==='SECRETARIAT');
-ok(dist_rec1.created&&!dist_rec2.created&&dist_pRows.length===2&&dist_pRows.every(d=>Number(d.amount)===3750)&&dist_sRow&&Number(dist_sRow.amount)===7500,'既定（事務局手数料50%）：税抜15,000円から手数料7,500円を引き、残り7,500円を3,750円ずつ。入金1件につき1回だけ');
+const dist_shared=dist_pRows.filter(d=>d.work_id==='WRK-ARK00045');
+ok(dist_shared.length===2&&dist_shared.every(d=>Number(d.amount)===1875),'共同権利の原作は、その原作の取り分（3,750円）を持ち分1:1で 1,875円ずつ');
+ok(dist_rec1.created&&!dist_rec2.created&&dist_pRows.filter(d=>d.work_id==='WRK-ARK00012').every(d=>Number(d.amount)===3750)&&dist_sRow&&Number(dist_sRow.amount)===7500,'既定（事務局手数料50%）：税抜15,000円から手数料7,500円を引き、残り7,500円を3,750円ずつ。入金1件につき1回だけ');
 ok(dist_drows.reduce((a,d)=>a+Number(d.amount),0)===15000,'事務局の行も残すので、行の合計は分ける前の金額（税抜15,000円）と一致');
 const dist_sumQ=G.distributionSummary_('2026-Q4');
 ok(dist_sumQ.reduce((a,p)=>a+p.amount,0)===15000&&dist_sumQ.every(p=>p.partner_id)&&dist_sumQ.some(p=>p.partner_id==='SECRETARIAT'),'期間ごとにパートナー別（事務局を含む）の合計を出せる（四半期の精算に使う）');
@@ -2373,11 +2377,11 @@ ok(dist_sumQ.reduce((a,p)=>a+p.amount,0)===15000&&dist_sumQ.every(p=>p.partner_i
 // 424. 後払い（電子書籍の精算）も同じ分配。売上連動の料率は原作の数で増えない
 const rateUsage=rows(MAS,'Fee_Schedule').find(r=>String(r.fee_model).toUpperCase()==='RATE').usage_category;
 ok(G.computeFeeTerms_(rateUsage,3).rate===G.computeFeeTerms_(rateUsage,1).rate&&/3原作でも同率/.test(G.computeFeeTerms_(rateUsage,3).fee_amount_or_rate),'売上連動の料率は原作が3つでも同じ（同率と明記）');
-const ebookApp=mkAppV4(['WRK-ARK00012','WRK-BKK00019'],rateUsage);
+const ebookApp=mkAppV4(['WRK-ARK00012','WRK-ARK00045'],rateUsage);
 G.recordDistribution_(ebookApp.license_id,'EBOOK-2026Q4-1',11000,'EBOOK_SETTLEMENT','2026-Q4');
 const ebRows=rows(OPS,'Distributions').filter(d=>d.payment_id==='EBOOK-2026Q4-1');
 const ebP=ebRows.filter(d=>d.partner_id!=='SECRETARIAT');
-ok(ebP.length===2&&ebP.every(d=>Number(d.amount)===2500&&d.source==='EBOOK_SETTLEMENT'),'電子書籍の精算（利用許諾料11,000円・税込）も同じ：税抜10,000円から手数料50%を引き、5,000円を2,500円ずつ');
+ok(ebP.length===3&&ebP.filter(d=>d.work_id==='WRK-ARK00012').every(d=>Number(d.amount)===2500)&&ebP.filter(d=>d.work_id==='WRK-ARK00045').reduce((a,d)=>a+Number(d.amount),0)===2500&&ebP.every(d=>d.source==='EBOOK_SETTLEMENT'),'電子書籍の精算（利用許諾料11,000円・税込）も同じ：税抜10,000円から手数料50%を引き、5,000円を2,500円ずつ');
 // 425. 原作数比例（PER_WORK）は廃止：保存は拒否、旧データは定額として扱う
 let perWorkErr=false; try{ G.admin_saveFeeRow({ usage_category:'テスト区分', fee_model:'PER_WORK', fee_value:'16500' }); }catch(e){ perWorkErr=/PER_WORK/.test(String(e.message)); }
 ok(perWorkErr,'料金表に原作数比例（PER_WORK）は保存できない');
@@ -2397,6 +2401,73 @@ const dAfter=G.computeDistribution_(16500,[{work_id:'A',partner_id:'P-A'},{work_
 ok(dAfter.fee_amount===4500&&dAfter.per_work[0].amount===5250,'変更後の入金から新しい手数料で計算（15,000円−4,500円＝10,500円を5,250円ずつ）');
 G.admin_saveDistributionConfig({ fee_percent:50 });
 ok(G.distributionConfig_().feePercent===50,'50%に戻せる');
+
+// 430. 権利者が決まっていない原作：申込時に「未解決」で固定し、分配しない（別紙を作る前に個別確認へ回す）
+const unApp=mkAppV4(['WRK-ARK00012','WRK-BKK00019'],'書籍');
+const unLw=rows(OPS,'License_Works').filter(w=>w.license_id===unApp.license_id&&w.work_id==='WRK-BKK00019')[0];
+ok(unLw.partner_id_snapshot==='UNRESOLVED'&&/登録されていません/.test(unLw.partner_name_snapshot),'権利者が未登録の原作は UNRESOLVED で固定');
+ok(G.unresolvedWorksOf_(unApp.license_id).length===1,'別紙を作る前に、権利者が決まっていない原作を見つけられる');
+let unDist=false; try{ G.recordDistribution_(unApp.license_id,'PAY-UN-1',16500,'PREPAID','2026-Q4'); }catch(e){ unDist=/権利者が決まっていない/.test(String(e.message)); }
+ok(unDist&&!rows(OPS,'Distributions').some(d=>d.payment_id==='PAY-UN-1'),'権利者が決まっていない原作を含む案件は分配を記録しない');
+const multiHit=G.resolveWorkRights_({ publisher:'どらこにあん／アークライト' }, rows(OPS,'Partners'));
+ok(!multiHit.resolved&&/複数のパートナー/.test(multiHit.reason),'出版社名が複数のパートナーに一致する原作は、持ち分の登録を求める（1社に全額を渡さない）');
+const badShare=G.resolveWorkRights_({ rights_shares:'[{"partner_id":"PRT-NONE","share":1}]' }, rows(OPS,'Partners'));
+ok(!badShare.resolved,'持ち分に未登録のパートナーがあれば未解決');
+
+// 431. 分配の取消：元の行は残し、打ち消す行（マイナス）を1回だけ足す
+const rv1=G.reverseDistribution_('PAY-TEST-1','返金のため','legal@example.com'), rv2=G.reverseDistribution_('PAY-TEST-1','二度目','legal@example.com');
+const rvRows=rows(OPS,'Distributions').filter(d=>d.payment_id==='PAY-TEST-1');
+ok(rv1.created&&!rv2.created&&rvRows.reduce((a,d)=>a+Number(d.amount),0)===0&&rvRows.some(d=>d.status==='REVERSAL'),'取消で合計が0になり、取消は1回だけ');
+let rvNoReason=false; try{ G.reverseDistribution_('EBOOK-2026Q4-1',''); }catch(e){ rvNoReason=/理由/.test(String(e.message)); }
+ok(rvNoReason,'理由の無い取消はしない');
+
+// 432. 同じメールアドレスの有効な契約がある・受付番号の使い回し → 確認待ち（REVIEW）。確認後に有効化
+const agDup=G.createAgreementFromSigned_({ cloudsign_document_id:'CSDOC-AG-DUP', party_display_name:'山田 太郎', contact_email:'Creator@Example.com', intake_ref:'IN-new' },'cloudsign');
+ok(agDup.created&&agDup.status==='REVIEW'&&/同じメールアドレス/.test(agDup.review_reason)&&agDup.duplicate_of===ag1.agreement_no,'同じメールアドレスの有効な契約があれば確認待ち: '+agDup.review_reason);
+ok(!G.agreementActive_(agDup.agreement_no),'確認待ちの間は有効ではない（専用ページのリンクを送らない）');
+const agReuse=G.createAgreementFromSigned_({ cloudsign_document_id:'CSDOC-AG-REUSE', contact_email:'other@example.com', intake_ref:'IN-abc' },'cloudsign');
+ok(agReuse.status==='REVIEW'&&/受付番号/.test(agReuse.review_reason),'受付番号が別の契約で使用済みなら確認待ち');
+G.activateReviewedAgreement_(agReuse.agreement_no,'本人確認済み・別人の受付番号の取り違え','legal@example.com');
+ok(G.agreementActive_(agReuse.agreement_no),'事務局が確認したら有効にできる');
+
+// 433. 契約の終了で、専用ページのリンクを失効させ、受付中の申込を止める
+G.appendRow_(OPS,'Access_Tokens',{ token_id:'TK-MY-1', contract_id:'', purpose:'MY_PAGE', token_hash:'h', status:'OPEN', agreement_no:agReuse.agreement_no });
+G.appendRow_(OPS,'Apply_Queue',{ queue_id:'Q-1', agreement_no:agReuse.agreement_no, status:'QUEUED', received_at:'2026-11-23' });
+G.terminateAgreement_(agReuse.agreement_no,'テスト','legal@example.com');
+ok(rows(OPS,'Access_Tokens').find(t=>t.token_id==='TK-MY-1').status==='REVOKED'&&rows(OPS,'Apply_Queue').find(q=>q.queue_id==='Q-1').status==='CANCELLED','契約の終了でリンクは失効、受付中の申込は取消');
+
+// 434. 料金表を保存するたびに版を作り、案件は申込時の版を持つ
+G.admin_saveFeeRow({ usage_category:flatRow.usage_category, fee_model:'FLAT', fee_value:'16500' });
+const fsv=G.currentFeeScheduleVersion_();
+ok(/^\d{4}-\d{2}-\d{2}\.\d+$/.test(fsv)&&rows(OPS,'Fee_Schedule_Versions').some(v=>v.version===fsv&&v.rows_hash),'料金表の版ができる: '+fsv);
+const fsApp=mkAppV4(['WRK-ARK00012'],flatRow.usage_category);
+ok(rows(OPS,'License_Cases').find(k=>k.license_id===fsApp.license_id).fee_schedule_version===fsv,'案件は申込時の料金表の版を持つ');
+
+// 435. 定期実行の共通部品：仕事が無ければすぐ終わる。1日の上限を超えたら打ち切る。1件の失敗で止まらない
+const qItems=[1,2,3]; let qDone=0;
+const qr1=G.runQueueWorker_('test',()=>qItems.shift()||null,x=>{ if(x===2) throw new Error('x'); qDone++; });
+ok(qr1.processed===2&&qr1.failed===1&&qr1.stopped==='EMPTY','空になるまで処理し、失敗した1件で止まらない');
+const qr2=G.runQueueWorker_('test',()=>null,x=>{});
+ok(qr2.processed===0&&qr2.stopped==='EMPTY','仕事が無ければすぐ終わる');
+G.setConfig_('QUEUE_DAILY_BUDGET_SEC','0');
+const qr3=G.runQueueWorker_('test',()=>1,x=>{});
+ok(qr3.stopped==='DAILY_BUDGET'&&qr3.processed===0,'その日の上限を超えていたら動かない');
+G.setConfig_('QUEUE_DAILY_BUDGET_SEC','10800');
+
+// 436. ロックが取れないときは「混み合っています」と返す
+const lockSave=G.LockService.getScriptLock;
+G.LockService.getScriptLock=function(){ return { tryLock:()=>false, waitLock:()=>{}, releaseLock:()=>{} }; };
+let busy=''; try{ G.withLicenseLock_(()=>1); }catch(e){ busy=String(e.message); }
+G.LockService.getScriptLock=lockSave;
+ok(/^BUSY: 処理が混み合っています/.test(busy),'ロックが取れなければ BUSY（画面は再実行を促す）');
+
+// 437. 許諾期間：定額は期間の定めなし（入金確認日から）、売上連動は本契約の有効期間中。相殺という支払方法
+ok(/入金を確認した日から、期間の定めなし/.test(G.besshiSampleTerms_(3,'PREPAID').license_term)&&/有効期間中/.test(G.besshiSampleTerms_(3,'OFFSET').license_term),'別紙の許諾期間の書き方');
+ok(/相殺/.test(G.besshiHtml_(G.besshiSampleTerms_(3,'OFFSET'),invCfg))&&!/<h1>請求書<\/h1>/.test(G.besshiHtml_(G.besshiSampleTerms_(3,'OFFSET'),invCfg)),'相殺の別紙には請求書を付けない');
+ok(/期間の定めのないもの/.test(licMd)&&/期間満了.*により終了した場合、定額の利用許諾料による別紙に基づき既に効力を生じている許諾は存続/.test(licMd)&&/11\. 相殺の別紙/.test(licMd),'契約書：定額は期間の定めなし・期間満了後も存続、相殺の定め');
+const offT=G.besshiSampleTerms_(1,'OFFSET'); const offCase=mkAppV4(['WRK-ARK00012'],'書籍');
+G.updateLicenseCaseInfo_(offCase.license_id,{ payment_timing:'OFFSET' }); G.transitionLicenseCase_(offCase.license_id,'CLOUDSIGN_SIGNED',{actor:'test'});
+ok(rows(OPS,'License_Cases').find(k=>k.license_id===offCase.license_id).case_status==='AWAITING_SUBMISSION','相殺は同意の時点で許諾が有効（提出待ち）');
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

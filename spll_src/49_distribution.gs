@@ -33,15 +33,20 @@ function distributionConfig_(){
 /**
  * 分配の計算（純粋関数）。
  *   totalInclTax … 受け取った利用許諾料（税込）
- *   works        … 別紙の対象原作（別紙の並び順）[{ work_id, partner_id, partner_name }]
+ *   works        … 別紙の対象原作（別紙の並び順）。権利者は次のどちらかで渡す
+ *                   { work_id, partner_id, partner_name }                         … 権利者が1社
+ *                   { work_id, holders:[{ partner_id, name, weight }] }           … 共同権利（持ち分で分ける）
+ *                   { work_id, unresolved:true, reason }                          … 権利者が決まっていない → 計算しない
  *   cfg          … distributionConfig_() と同じ形
- * 戻り値：{ base_kind, base_amount, fee_amount, distributable, unit, remainder, per_work:[...], per_partner:[...] }
- * 合計は必ず distributable と一致する（端数は設定に従って寄せる）。
+ * 原作の数で等分し、共同権利の原作はその原作の取り分を持ち分で分ける。端数は設定に従って寄せ、合計は必ず一致する。
+ * 戻り値：{ base_kind, base_amount, fee_amount, distributable, unit, remainder, per_work:[{work_id, partner_id, ...}], per_partner:[...] }
  */
 function computeDistribution_(totalInclTax, works, cfg){
   cfg = cfg || distributionConfig_();
   const list = (works || []).filter(function(w){ return w && w.work_id; });
   if(!list.length) throw new Error('VALIDATION_ERROR: 分配先の対象原作がありません');
+  const bad = list.filter(function(w){ return w.unresolved; });
+  if(bad.length) throw new Error('VALIDATION_ERROR: 権利者が決まっていない対象原作があります（' + bad.map(function(w){ return w.work_id + '：' + (w.reason || ''); }).join('、') + '）');
   const a = invoiceAmounts_(totalInclTax);
   const base = cfg.base === 'INCL_TAX' ? a.total : a.excl;
   const fee = Math.floor(base * (cfg.feePercent || 0) / 100);
@@ -49,15 +54,25 @@ function computeDistribution_(totalInclTax, works, cfg){
   const n = list.length;
   const unit = Math.floor(distributable / n);
   const remainder = distributable - unit * n;
-  const perWork = list.map(function(w, i){
-    const adj = (i === 0 && cfg.remainder === 'FIRST_WORK') ? remainder : 0;
-    return { work_id: String(w.work_id), partner_id: String(w.partner_id || 'UNKNOWN'), partner_name: String(w.partner_name || ''),
-      share_count: 1, share_total: n, amount: unit + adj, rounding_adjust: adj };
+  const perWork = [];
+  list.forEach(function(w, i){
+    const workAmount = unit + ((i === 0 && cfg.remainder === 'FIRST_WORK') ? remainder : 0);
+    const holders = (w.holders && w.holders.length) ? w.holders
+      : [{ partner_id: String(w.partner_id || 'UNKNOWN'), name: String(w.partner_name || ''), weight: 1 }];
+    const wsum = holders.reduce(function(s2, h){ return s2 + (Number(h.weight) || 0); }, 0) || 1;
+    let given = 0;
+    holders.forEach(function(h, k){
+      const amt = k === holders.length - 1 ? workAmount - given : Math.floor(workAmount * (Number(h.weight) || 0) / wsum);
+      given += amt;
+      perWork.push({ work_id: String(w.work_id), partner_id: String(h.partner_id), partner_name: String(h.name || ''),
+        share_count: 1, share_total: n, holder_weight: Number(h.weight) || 0, holder_weight_total: wsum,
+        amount: amt, rounding_adjust: (i === 0 && cfg.remainder === 'FIRST_WORK' && k === 0) ? remainder : 0 });
+    });
   });
   const byPartner = {};
   perWork.forEach(function(r){
     const p = byPartner[r.partner_id] || (byPartner[r.partner_id] = { partner_id: r.partner_id, partner_name: r.partner_name, shares: 0, amount: 0 });
-    p.shares += 1; p.amount += r.amount;
+    p.shares += r.holder_weight / (r.holder_weight_total || 1); p.amount += r.amount;
   });
   return { base_kind: cfg.base, base_amount: base, fee_amount: fee, distributable: distributable, unit: unit,
     remainder: remainder, remainder_to: cfg.remainder,
@@ -69,7 +84,18 @@ function computeDistribution_(totalInclTax, works, cfg){
 function distributionWorksOf_(licenseId){
   return readRows_(ssOps_(), 'License_Works')
     .filter(function(w){ return w.license_id === String(licenseId) && String(w.active) !== 'false'; })
-    .map(function(w){ return { work_id: w.work_id, partner_id: w.partner_id_snapshot || 'UNKNOWN', partner_name: w.partner_name_snapshot || '' }; });
+    .map(function(w){
+      let r = null;
+      try{ r = w.rights_shares_snapshot ? JSON.parse(w.rights_shares_snapshot) : null; }catch(e){ r = null; }
+      if(r && r.resolved === false) return { work_id: w.work_id, unresolved: true, reason: r.reason || '' };
+      if(r && r.holders && r.holders.length) return { work_id: w.work_id, holders: r.holders };
+      if(w.partner_id_snapshot === 'UNRESOLVED') return { work_id: w.work_id, unresolved: true, reason: w.partner_name_snapshot || '' };
+      return { work_id: w.work_id, partner_id: w.partner_id_snapshot || 'UNKNOWN', partner_name: w.partner_name_snapshot || '' };
+    });
+}
+/** 案件の対象原作のうち、権利者が決まっていないもの（別紙を作る前に確かめる。あれば個別確認へ） */
+function unresolvedWorksOf_(licenseId){
+  return distributionWorksOf_(licenseId).filter(function(w){ return w.unresolved; });
 }
 
 /**
@@ -147,5 +173,25 @@ function admin_saveDistributionConfig(c){ const actor = requireRole_(['LEGAL_ADM
   const after = distributionConfig_();
   logEvent_('config', 'DISTRIBUTION', (actor && actor.email) || actor_(), before, after);
   return admin_getDistributionConfig();
+}
+
+/**
+ * 分配の取消（返金・別紙の取消など）。元の入金の分配を打ち消す行（金額をマイナスにした行）を足す。
+ * 元の行は消さない（いつ・なぜ取り消したかを残す）。同じ入金の取消は1回だけ。
+ */
+function reverseDistribution_(paymentId, reason, actor){
+  const why = String(reason || '').trim();
+  if(!why) throw new Error('VALIDATION_ERROR: 取消の理由を入力してください');
+  const rows = readRows_(ssOps_(), 'Distributions').filter(function(d){ return d.payment_id === String(paymentId); });
+  if(!rows.length) throw new Error('DATA_NOT_FOUND: この入金の分配がありません: ' + paymentId);
+  if(rows.some(function(d){ return d.status === 'REVERSAL'; })) return { created: false, rows: 0 };
+  const now = new Date().toISOString();
+  rows.filter(function(d){ return d.status === 'RECORDED'; }).forEach(function(d){
+    appendRow_(ssOps_(), 'Distributions', Object.assign({}, d, {
+      distribution_id: Utilities.getUuid(), amount: -Number(d.amount || 0), rounding_adjust: -Number(d.rounding_adjust || 0),
+      status: 'REVERSAL', source: String(d.source || '') + ':取消', created_at: now }));
+  });
+  logEvent_('distribution', String(paymentId), actor || 'system', { status: 'RECORDED' }, { status: 'REVERSED', reason: why });
+  return { created: true, rows: rows.length };
 }
 

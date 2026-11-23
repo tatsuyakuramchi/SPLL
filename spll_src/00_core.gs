@@ -502,6 +502,7 @@ function createLicenseCase_(appId, applicationRef, usageCategory, workIds, party
     cloudsign_document_id: '', signed_at: '', signed_pdf_file_id: '', signed_pdf_hash: '',
     review_status: 'NOT_STARTED', certification_status: 'NOT_ISSUED',
     finance_handoff_status: 'NOT_REQUIRED', created_at: now, updated_at: now,
+    fee_schedule_version: (typeof currentFeeScheduleVersion_ === 'function') ? currentFeeScheduleVersion_() : '',
   });
   logEvent_('license_case', licenseId, 'portal', { transition_event:'APPLICATION_CREATED' },
     { transition_event:'APPLICATION_CREATED', case_status:'APPLICATION_RECEIVED', contract_status:'NOT_STARTED',
@@ -512,7 +513,7 @@ function createLicenseCase_(appId, applicationRef, usageCategory, workIds, party
   const rule = (typeof feeRuleFor_ === 'function') ? feeRuleFor_(usageCategory) : null;
   (workIds || []).forEach(function(wid){
     const w = master.find(function(x){ return x.work_id === wid; }) || {};
-    const partner = resolveWorkPartner_(w, partners);
+    const rights = resolveWorkRights_(w, partners);
     appendRow_(ssOps_(), 'License_Works', {
       license_work_id: Utilities.getUuid(), license_id: licenseId, work_id: wid,
       work_name_snapshot: sanitizeCell_(String(w.work_name || wid)),
@@ -521,12 +522,51 @@ function createLicenseCase_(appId, applicationRef, usageCategory, workIds, party
       fee_value_snapshot: rule ? String(rule.fee_value || '') : '',
       reporting_requirement_snapshot: rule ? String(rule.requires_usage_report || '') : '',
       active: 'true',
-      partner_id_snapshot: String(partner.partner_id || ''),
-      partner_name_snapshot: sanitizeCell_(String(partner.name || '')),
+      partner_id_snapshot: rights.resolved ? (rights.holders.length === 1 ? rights.holders[0].partner_id : 'SHARED') : 'UNRESOLVED',
+      partner_name_snapshot: sanitizeCell_(rights.holders.map(function(h){ return h.name; }).join('／') || rights.reason),
+      rights_shares_snapshot: JSON.stringify(rights),
     });
   });
   return licenseId;
 }
+/**
+ * 原作の権利者（分配先）と持ち分の解決。申込時に License_Works.rights_shares_snapshot へ固定する（49_distribution）。
+ *   1. Works_Master.rights_shares（JSON：[{"partner_id":"PRT-A","share":1},{"partner_id":"PRT-B","share":1}]）… 共同権利の原作
+ *   2. Works_Master.partner_id … 権利者が1社
+ *   3. 出版社名がパートナー1社とだけ一致 … 権利者が1社
+ * 出版社名が複数のパートナーに一致する（共同権利の可能性）・どれにも一致しない・登録の誤り は「未解決」。
+ * 未解決の原作を含む申込は別紙を作らず個別確認に回す（分配先が決まらないため）。
+ * 戻り値：{ resolved, reason, holders:[{ partner_id, name, weight }] }
+ */
+function resolveWorkRights_(work, partners){
+  partners = partners || [];
+  const byId = function(id){ return partners.find(function(x){ return String(x.partner_id) === String(id); }); };
+  const raw = String(work.rights_shares || '').trim();
+  if(raw){
+    let list = null;
+    try{ list = JSON.parse(raw); }catch(e){ list = null; }
+    if(!Array.isArray(list) || !list.length) return { resolved:false, reason:'持ち分（rights_shares）の書き方が正しくありません', holders:[] };
+    const holders = [];
+    for(let i = 0; i < list.length; i++){
+      const p = byId(list[i].partner_id), w = Number(list[i].share);
+      if(!p) return { resolved:false, reason:'持ち分に未登録のパートナーがあります: ' + list[i].partner_id, holders:[] };
+      if(!(w > 0)) return { resolved:false, reason:'持ち分（share）は正の数で指定してください: ' + list[i].partner_id, holders:[] };
+      holders.push({ partner_id: String(p.partner_id), name: String(p.name || ''), weight: w });
+    }
+    return { resolved:true, reason:'', holders:holders };
+  }
+  if(work.partner_id){
+    const p = byId(work.partner_id);
+    if(p) return { resolved:true, reason:'', holders:[{ partner_id: String(p.partner_id), name: String(p.name || ''), weight: 1 }] };
+    return { resolved:false, reason:'原作の権利者（partner_id）が未登録です: ' + work.partner_id, holders:[] };
+  }
+  const pub = String(work.publisher || '');
+  const hits = pub ? partners.filter(function(x){ return x.name && (pub.indexOf(x.name) >= 0 || String(x.name).indexOf(pub) >= 0); }) : [];
+  if(hits.length === 1) return { resolved:true, reason:'', holders:[{ partner_id: String(hits[0].partner_id), name: String(hits[0].name || ''), weight: 1 }] };
+  if(hits.length > 1) return { resolved:false, reason:'出版社名が複数のパートナーに一致します（共同権利なら持ち分を登録してください）: ' + pub, holders:[] };
+  return { resolved:false, reason:'原作の権利者がパートナーに登録されていません' + (pub ? ': ' + pub : ''), holders:[] };
+}
+
 /** 原作→権利者の解決（partner_id優先→出版社名の部分一致→未割当）。契約時スナップショットで使用。 */
 function resolveWorkPartner_(work, partners){
   partners = partners || [];

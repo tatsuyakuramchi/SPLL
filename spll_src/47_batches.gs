@@ -124,3 +124,41 @@ function setup_workflowAll(){
   if(report.warnings.length) Logger.log('未設定（本番までに）: ' + report.warnings.join(', '));
   return report;
 }
+
+/**
+ * 受付・受信の処理を進める定期実行の共通部品（設計書 §10、改修計画 P2・P4）。
+ * GAS の定期実行は1日の合計時間に上限（Workspace で6時間・3つのGASと既存の5分ごとの処理の合計）がある。
+ * 1分ごとに50秒ずつ動かすと1日20時間になり上限を超えるため、
+ *   ・仕事が無ければすぐ終わる（1回1秒程度 → 1日約30分）
+ *   ・1回の上限時間（既定45秒）と、その日の合計の上限（Config QUEUE_DAILY_BUDGET_SEC、既定 3時間）を超えたら打ち切る
+ *   ・1件ごとにロックを取り直す（長くロックを持たない。画面の操作を待たせない）
+ *   name  … 処理の名前（合計時間の集計に使う）
+ *   next  … 次の1件を返す関数（無ければ null）
+ *   step  … 1件を処理する関数（例外は1件の失敗として数え、次へ進む）
+ * 戻り値：{ processed, failed, stopped: 'EMPTY'|'TIME'|'DAILY_BUDGET', used_ms }
+ */
+function runQueueWorker_(name, next, step, opts){
+  opts = opts || {};
+  const t0 = Date.now();
+  const perRunMs = (opts.perRunSec || 45) * 1000;
+  const budgetRaw = getConfig_('QUEUE_DAILY_BUDGET_SEC', '10800');
+  const budgetSec = (budgetRaw === '' || budgetRaw === null || isNaN(Number(budgetRaw))) ? 10800 : Number(budgetRaw);   // 0 は「動かさない」
+  const budgetMs = budgetSec * 1000;
+  const key = 'qbudget:' + Utilities.formatDate(new Date(), 'JST', 'yyyyMMdd');
+  const props = PropertiesService.getScriptProperties();
+  const usedToday = Number(props.getProperty(key) || 0);
+  const out = { processed: 0, failed: 0, stopped: 'EMPTY', used_ms: 0 };
+  if(usedToday >= budgetMs){ out.stopped = 'DAILY_BUDGET'; return out; }
+  while(true){
+    if(Date.now() - t0 >= perRunMs){ out.stopped = 'TIME'; break; }
+    if(usedToday + (Date.now() - t0) >= budgetMs){ out.stopped = 'DAILY_BUDGET'; break; }
+    const item = next();
+    if(!item){ out.stopped = 'EMPTY'; break; }
+    try{ step(item); out.processed++; }
+    catch(e){ out.failed++; logError_('PROCESSING_ERROR', 'queue:' + name, e, {}); }
+  }
+  out.used_ms = Date.now() - t0;
+  props.setProperty(key, String(usedToday + out.used_ms));
+  return out;
+}
+

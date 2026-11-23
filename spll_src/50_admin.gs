@@ -363,7 +363,8 @@ function admin_saveFeeRow(row){ requireRole_(['LEGAL_ADMIN']);
   if(!updateRow_(ssMaster_(),'Fee_Schedule','usage_category', r.usage_category, r)){
     appendRow_(ssMaster_(),'Fee_Schedule', r);
   }
-  logEvent_('config','FEE_SCHEDULE',actor_(),null,{ usage_category:r.usage_category, fee_model:r.fee_model });
+  const version = publishFeeScheduleVersion_(actor_());   // 保存のたびに料金表の版を作る（案件は申込時の版を持つ）
+  logEvent_('config','FEE_SCHEDULE',actor_(),null,{ usage_category:r.usage_category, fee_model:r.fee_model, version:version });
   return true;
 }
 

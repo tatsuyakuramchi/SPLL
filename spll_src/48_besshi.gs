@@ -26,7 +26,7 @@ const BESSHI_CHECKS = [
   '本契約が終了した場合、本別紙に基づく許諾も同時に終了します（本契約書第12条第3項）。'
 ];
 const BESSHI_CLOSING = '本別紙への同意を証するため、本別紙の電磁的記録を作成し、利用者及び事務局が電子契約システム上で合意の措置を講じ、各自その電磁的記録を保管します。';
-const PAYMENT_TIMING_LABEL = { PREPAID: '前払い', POSTPAID: '後払い' };
+const PAYMENT_TIMING_LABEL = { PREPAID: '前払い', POSTPAID: '後払い', OFFSET: '相殺' };
 /** 請求書の発行者（事務局運営会社。各ライセンサーを代理してアークライト名義で一括発行） */
 const INVOICE_ISSUER = '株式会社アークライト';
 const INVOICE_TAX_RATE_PERCENT = 10;
@@ -70,7 +70,7 @@ function invoiceHtml_(t, cfg){
     '<table class="terms">' + row('請求書番号', e(t.invoice_no)) + row('発行日', e(t.issued_at)) +
     row('件名', 'SPLL利用許諾料（SPLL番号 ' + e(t.license_id) + '・二次創作物「' + e(t.creation_title) + '」）') +
     row('ご請求金額（税込）', '<b>' + yenFmt_(a.total) + '</b>') +
-    row('取引年月日', '本請求書を付した別紙が本契約に追加された日（許諾期間の開始日）') +
+    row('取引年月日', '許諾の効力が生じた日（前払いのため、入金を確認した日。許諾期間の起算日）') +
     row('お支払期限', '別紙が本契約に追加された日から3か月以内') + '</table>' +
     '<h2>明細</h2><table class="works"><thead><tr><th>品目</th><th>数量</th><th>税率</th><th>金額（税抜）</th></tr></thead><tbody>' +
     '<tr><td>SPLL利用許諾料（SPLL番号 ' + e(t.license_id) + '・対象原作 ' + (t.works || []).length + '件・' + e(t.usage_category) + '）</td><td class="num">1</td><td class="num">' + INVOICE_TAX_RATE_PERCENT + '%</td><td class="num">' + yenFmt_(a.excl) + '</td></tr>' +
@@ -185,14 +185,15 @@ function besshiSampleTerms_(n, timing){
     const l = lic[i % lic.length], ti = titles[i % titles.length] + (i >= titles.length ? ' 第' + (Math.floor(i / titles.length) + 1) + '版' : '');
     works.push({ work_id: 'W' + (i + 1), work_title: ti, licensor_name: l, credit_text: '©' + l + '／「' + ti + '」' });
   }
-  const pre = timing !== 'POSTPAID';
+  const pre = timing !== 'POSTPAID' && timing !== 'OFFSET';
+  const offset = timing === 'OFFSET';
   return { license_id: 'SPLL-209911-' + ('000' + n).slice(-4), agreement_no: 'C-209911-0001', party_name: '山田 太郎（サンプル）', circle_name: '星屑工房',
     creation_title: pre ? 'シナリオ集『迷宮の夜明け』（サンプル）' : 'リプレイ本『月下の宴』電子版（サンプル）',
     usage_category: pre ? '商品販売（同人誌・物販）' : '電子書籍',
-    license_term: '本別紙が本契約に追加された日から1年間（本契約の有効期間内に限る）', territory: '日本国内',
+    license_term: pre ? '入金を確認した日から、期間の定めなし（定額）' : '本別紙が本契約に追加された日から、本契約の有効期間中（売上連動）', territory: '日本国内',
     fee_amount_or_rate: pre ? '16,500円（税込）。対象原作が複数の場合も同額' : '電子書籍の販売額（税抜）の10%。対象原作が複数の場合も同率', fee_schedule_version: '2026-10版',
     fee_amount_incl_tax: pre ? 16500 : null, invoice_no: pre ? 'INV-TEST-' + n : '',
-    payment_timing: pre ? 'PREPAID' : 'POSTPAID',
+    payment_timing: pre ? 'PREPAID' : (offset ? 'OFFSET' : 'POSTPAID'),
     payment_due: pre ? '本別紙が本契約に追加された日から3か月以内（入金確認で許諾が有効）' : '電子書籍配信会社からの入金と相殺し、残額をお支払いします（四半期ごとに精算書でお知らせ）',
     reporting_terms: pre ? '定額のため利用報告は不要' : '配信会社の販売報告によるため、利用者からの報告は不要',
     special_terms: '', applied_at: '2026年11月18日 10時00分', issued_at: '2026年11月18日', works: works };

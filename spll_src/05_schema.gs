@@ -19,7 +19,7 @@ function setup_setInitialAdmin(email, role){
 //     各IDを ScriptProperties へ登録、既定設定とサンプルを投入する。冪等。
 // ============================================================
 const SCHEMA_MASTER = {
-  Works_Master:    ['work_id','work_name','publisher','category','publish_status','review_timing','review_policy','fee_label','media','ok_elements','no_elements','credit_text','allocation_scheme_id','royalty_rate','partner_id','billing_type'],
+  Works_Master:    ['work_id','work_name','publisher','category','publish_status','review_timing','review_policy','fee_label','media','ok_elements','no_elements','credit_text','allocation_scheme_id','royalty_rate','partner_id','billing_type','rights_shares'],
   Review_Rules:    ['rule_id','work_id','category','rule_text','severity','effective_from','effective_to'],
   Reference_Assets:['asset_id','work_id','asset_type','drive_file_id','allowed_flag'],
   // 利用料条件（別紙2）の一律ルール。利用目的(usage_category)ごとに計算方式を持つ（事務局が編集）。
@@ -70,9 +70,9 @@ const SCHEMA_OPS = {
   X_Posts:              ['x_post_id','work_id','tweet_id','text','posted_by','posted_at'],
   // ---- SPLLライセンス台帳（分断・簡素化計画 SPLL-SYS-RP-001 §6）----
   // 主台帳：1案件（SPLL番号）1行。申込〜契約〜審査〜認証を1つの状態遷移として扱う
-  License_Cases:        ['license_id','application_ref','party_type','party_display_name','contact_email','usage_category','case_status','contract_status','cloudsign_document_id','signed_at','signed_pdf_file_id','signed_pdf_hash','review_status','certification_status','finance_handoff_status','created_at','updated_at','agreement_no','besshi_document_id','besshi_pdf_file_id','besshi_hash','besshi_sent_at','besshi_agreed_at','payment_timing','payment_status','payment_due','paid_at','creation_title'],
+  License_Cases:        ['license_id','application_ref','party_type','party_display_name','contact_email','usage_category','case_status','contract_status','cloudsign_document_id','signed_at','signed_pdf_file_id','signed_pdf_hash','review_status','certification_status','finance_handoff_status','created_at','updated_at','agreement_no','besshi_document_id','besshi_pdf_file_id','besshi_hash','besshi_sent_at','besshi_agreed_at','payment_timing','payment_status','payment_due','paid_at','creation_title','license_effective_at','fee_schedule_version'],
   // 対象原作（1:N）：契約条件は申込時点でスナップショット（費用＝契約形態×原作構造で自動確定）
-  License_Works:        ['license_work_id','license_id','work_id','work_name_snapshot','credit_snapshot','fee_model_snapshot','fee_value_snapshot','reporting_requirement_snapshot','active','partner_id_snapshot','partner_name_snapshot'],
+  License_Works:        ['license_work_id','license_id','work_id','work_name_snapshot','credit_snapshot','fee_model_snapshot','fee_value_snapshot','reporting_requirement_snapshot','active','partner_id_snapshot','partner_name_snapshot','rights_shares_snapshot'],
   // 契約書履歴（1:N）：原本は締結済PDF＋ハッシュ（台帳に契約全文を再現しない）
   Contract_Documents:   ['contract_document_id','license_id','document_type','version','cloudsign_document_id','status','signed_at','file_id','file_hash','created_at'],
   // License→Finance引渡（§10）：契約成立とFinance処理の境界。READY→ACCEPTED（冪等キー license_id+handoff_version）
@@ -90,7 +90,7 @@ const SCHEMA_OPS = {
   Certificate_Change_Requests: ['request_id','cert_id','contract_id','requested_status','reason_code','reason_text','legal_case_id','requested_by','requested_at','approved_by','approved_at','status','emergency_override','license_id'],
   // ---- 利用許諾契約 v5.0（クリエーター1人1本）と別紙（作品ごと）。改修計画 P1 ----
   // 利用許諾契約：CloudSign の締結書類が正本。契約番号（C-YYYYMM-####）。住所は持たない
-  Agreements:           ['agreement_no','status','party_display_name','contact_email','intake_ref','cloudsign_document_id','template_version','signed_at','signed_pdf_file_id','signed_pdf_hash','partner_list_version','terminated_at','terminated_reason','created_at','updated_at'],
+  Agreements:           ['agreement_no','status','party_display_name','contact_email','intake_ref','cloudsign_document_id','template_version','signed_at','signed_pdf_file_id','signed_pdf_hash','partner_list_version','terminated_at','terminated_reason','created_at','updated_at','duplicate_of','review_reason'],
   // 専用ページの申込（受付だけ記録し、採番・別紙作成・送信は定期実行）：QUEUED→PROCESSING→DONE／ERROR
   Apply_Queue:          ['queue_id','agreement_no','token_id','work_ids_json','usage_category','dedupe_key','status','license_id','attempts','last_error','received_at','processed_at','creation_title'],
   // 入金CSVの取込（取込→照合→反映）。同じ行は row_hash で二重に反映しない
@@ -102,6 +102,8 @@ const SCHEMA_OPS = {
   // 利用許諾料の分配（入金ごと・対象原作ごと）。1つの二次創作物に対象原作が複数あれば原作の数で等分する。
   // 入金（payment_id）ごとに1回だけ作る。四半期の精算（Secretariat_Settlements）はパートナーごとの合計を使う
   Distributions:        ['distribution_id','license_id','payment_id','source','work_id','partner_id','partner_name','share_count','share_total','base_kind','base_amount','amount','rounding_adjust','period_label','status','created_at'],
+  // 料金表の版（料金表を保存するたびに版を作り、その時点の全行を固定する。案件は申込時の版を持つ）
+  Fee_Schedule_Versions:['version','rows_json','rows_hash','published_at','published_by'],
   // パートナー一覧の版（利用許諾契約書 第2条第8項：版と掲載期間を記録）
   Partner_List_Versions:['version','partners_json','published_at','published_by','effective_from','effective_to'],
   Schema_Versions:      ['schema_name','version','applied_at','applied_by','checksum'],
@@ -259,7 +261,7 @@ function setup_seedSamples_(){
 }
 
 // ---- スキーマ移行（修正設計書v2 V2-003）----
-const SCHEMA_VERSION = 15;  // v15: 利用許諾料の分配（Distributions、License_Works の権利者スナップショット）。v14: v14: 二次創作物の名称（License_Cases・Apply_Queue の creation_title）、専用ページのリンクの再送（Link_Requests）。v13: v13: 利用許諾契約 v5.0（Agreements・Apply_Queue・Payments・Payment_Imports・Partner_List_Versions、License_Cases の別紙・支払い列、Fee_Schedule.payment_timing、Access_Tokens.agreement_no）。v12: v12: Badge_Jobs.cert_id（バッジは認証からだけ作る）。v11: 業務テーブルへ license_id（RP-002：SPLL番号を主キーへ）。v10: 申込の契約書経路（template_route）。v9: 案内メールの自動送信（通知の送信状態）。v8: 連絡先メール。v7: 大容量提出
+const SCHEMA_VERSION = 16;  // v16: 原作の共同権利（Works_Master.rights_shares）と分配の取消、利用許諾契約の確認待ち（Agreements.duplicate_of・review_reason）、料金表の版（Fee_Schedule_Versions）、許諾の効力発生日（License_Cases.license_effective_at）。v15: v15: 利用許諾料の分配（Distributions、License_Works の権利者スナップショット）。v14: v14: 二次創作物の名称（License_Cases・Apply_Queue の creation_title）、専用ページのリンクの再送（Link_Requests）。v13: v13: 利用許諾契約 v5.0（Agreements・Apply_Queue・Payments・Payment_Imports・Partner_List_Versions、License_Cases の別紙・支払い列、Fee_Schedule.payment_timing、Access_Tokens.agreement_no）。v12: v12: Badge_Jobs.cert_id（バッジは認証からだけ作る）。v11: 業務テーブルへ license_id（RP-002：SPLL番号を主キーへ）。v10: 申込の契約書経路（template_route）。v9: 案内メールの自動送信（通知の送信状態）。v8: 連絡先メール。v7: 大容量提出
 
 /**
  * 既存スプレッドシートへ不足シート・不足列を追加する（既存列の削除・並び替えはしない）。

@@ -12,11 +12,11 @@ function feeRuleFor_(usageCategory){
   return feeRows_().find(function(r){ return String(r.usage_category) === String(usageCategory); }) || null;
 }
 /**
- * 支払方法（利用許諾契約書 第6条第2項：利用区分ごとに料金表で定める）。PREPAID＝前払い／POSTPAID＝後払い。
+ * 支払方法（利用許諾契約書 第6条第2項：利用区分ごとに料金表で定める）。PREPAID＝前払い／POSTPAID＝後払い／OFFSET＝相殺。
  * 料金表の payment_timing 列が空の行は、売上連動（RATE）なら後払い（利用報告で金額が決まるため）、
  * それ以外は Config DEFAULT_PAYMENT_TIMING（既定 PREPAID）。
  */
-const PAYMENT_TIMINGS = ['PREPAID','POSTPAID'];
+const PAYMENT_TIMINGS = ['PREPAID','POSTPAID','OFFSET'];   // OFFSET＝相殺（電子書籍：配信会社からの入金と相殺して残額を支払う。期限超過の判定はしない）
 function paymentTimingOfRule_(r){
   if(!r) return '';
   const v = String(r.payment_timing || '').toUpperCase();
@@ -70,3 +70,22 @@ function computeFeeTerms_(usageCategory, workCount){
 }
 /** 公開：別紙2プレビュー（申込フォームで利用目的選択時に表示） */
 function api_previewFeeTerms(usageCategory, workCount){ return computeFeeTerms_(usageCategory, workCount); }
+
+/**
+ * 料金表の版。料金表を保存するたびに、その時点の全行を Fee_Schedule_Versions に固定し、Config FEE_SCHEDULE_VERSION を更新する。
+ * 案件（License_Cases.fee_schedule_version）は申込時の版を持ち、別紙の「料金表 ○○版により算定」はこの版名を書く。
+ * 版名：YYYY-MM-DD.n（同じ日の n 回目）
+ */
+function currentFeeScheduleVersion_(){ return String(getConfig_('FEE_SCHEDULE_VERSION', '') || ''); }
+function publishFeeScheduleVersion_(actor){
+  const rows = readRows_(ssMaster_(), 'Fee_Schedule');
+  const json = JSON.stringify(rows);
+  const day = Utilities.formatDate(new Date(), 'JST', 'yyyy-MM-dd');
+  const same = readRows_(ssOps_(), 'Fee_Schedule_Versions').filter(function(v){ return String(v.version).indexOf(day + '.') === 0; }).length;
+  const version = day + '.' + (same + 1);
+  appendRow_(ssOps_(), 'Fee_Schedule_Versions', { version: version, rows_json: sanitizeCell_(json.slice(0, 45000)), rows_hash: hash_(json),
+    published_at: new Date().toISOString(), published_by: actor || 'system' });
+  setConfig_('FEE_SCHEDULE_VERSION', version);
+  return version;
+}
+

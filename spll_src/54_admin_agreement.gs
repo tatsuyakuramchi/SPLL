@@ -16,13 +16,21 @@ function terminateAgreement_(no, reason, actorEmail){
   withLicenseLock_(function(){
     const a = agreementByNo_(no);
     if(!a) throw new Error('DATA_NOT_FOUND: 利用許諾契約がありません: ' + no);
-    if(a.status !== 'ACTIVE') throw new Error('STATE_ERROR: 有効な利用許諾契約ではありません（status=' + a.status + '）');
+    if(a.status !== 'ACTIVE' && a.status !== 'REVIEW') throw new Error('STATE_ERROR: 有効な利用許諾契約ではありません（status=' + a.status + '）');
     const now = new Date().toISOString();
     updateRow_(ssOps_(), 'Agreements', 'agreement_no', a.agreement_no,
       { status: 'TERMINATED', terminated_at: now, terminated_reason: sanitizeCell_(why.slice(0, 500)), updated_at: now });
     logEvent_('agreement', a.agreement_no, actor, { status: 'ACTIVE' }, { status: 'TERMINATED', reason: why });
   });
   const out = { agreement_no: String(no), terminated: [], cancelled: [], skipped: [], signing_documents: [] };
+  // 専用ページのリンクを失効させ、受付中の申込を止める（終了した契約から別紙が作られないように）
+  readRows_(ssOps_(), 'Access_Tokens').forEach(function(t){
+    if(t.agreement_no === String(no) && t.status === 'OPEN') updateRow_(ssOps_(), 'Access_Tokens', 'token_id', t.token_id, { status: 'REVOKED' });
+  });
+  readRows_(ssOps_(), 'Apply_Queue').forEach(function(q){
+    if(q.agreement_no === String(no) && (q.status === 'QUEUED' || q.status === 'ERROR'))
+      updateRow_(ssOps_(), 'Apply_Queue', 'queue_id', q.queue_id, { status: 'CANCELLED', last_error: '利用許諾契約の終了' });
+  });
   agreementCases_(no).forEach(function(k){
     const status = normalizeCaseStatus_(k.case_status);
     if(status === 'TERMINATED' || status === 'CANCELLED'){ out.skipped.push(k.license_id); return; }
@@ -41,3 +49,21 @@ function terminateAgreement_(no, reason, actorEmail){
   });
   return out;
 }
+
+/**
+ * 確認待ち（REVIEW）の利用許諾契約を有効にする（事務局が重複や受付番号の使い回しを確認した後）。
+ * 有効にしたら、専用ページのリンクの送付（P2 の締結処理と同じ）に進める。重複だった場合は terminateAgreement_ で終了させる。
+ */
+function activateReviewedAgreement_(no, note, actorEmail){
+  const why = String(note || '').trim();
+  if(!why) throw new Error('VALIDATION_ERROR: 確認の内容を入力してください');
+  return withLicenseLock_(function(){
+    const a = agreementByNo_(no);
+    if(!a) throw new Error('DATA_NOT_FOUND: 利用許諾契約がありません: ' + no);
+    if(a.status !== 'REVIEW') throw new Error('STATE_ERROR: 確認待ちの利用許諾契約ではありません（status=' + a.status + '）');
+    updateRow_(ssOps_(), 'Agreements', 'agreement_no', a.agreement_no, { status: 'ACTIVE', updated_at: new Date().toISOString() });
+    logEvent_('agreement', a.agreement_no, actorEmail || 'system', { status: 'REVIEW' }, { status: 'ACTIVE', note: why });
+    return true;
+  });
+}
+

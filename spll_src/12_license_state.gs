@@ -256,7 +256,8 @@ function validateLicenseTransition_(licenseId, event, ctx){
  */
 function withLicenseLock_(fn){
   const lock = LockService.getScriptLock();
-  lock.waitLock(20000);
+  // 定期実行と画面の操作が同じロックを使う。取れなければ利用者に分かる言葉で返す（画面は「もう一度」を促す）
+  if(!lock.tryLock(20000)) throw new Error('BUSY: 処理が混み合っています。少し待ってからもう一度実行してください');
   try{ return fn(); }
   finally{ lock.releaseLock(); }
 }
