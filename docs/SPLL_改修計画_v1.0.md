@@ -109,7 +109,7 @@
 | P5-2 | 反映：前払いは `PAYMENT_CONFIRMED`（入金待ち → 提出待ち）、後払いは入金の記録 | `49_payments.gs` | S |
 | P5-3 | 未照合の入金を要対応に残し、手で案件にひも付けられるようにする | `49_payments.gs`・管理画面 | S |
 | P5-4 | 後払いの支払期限超過を日次で `OVERDUE` にし、要対応に出す（止めるのは S4） | `47_batches.gs` | S |
-| P5-5 | 利用許諾料の分配：入金の反映時（前払い）・電子書籍の精算時に、対象原作の数で等分して原作ごとの分配額を `Distributions` に記録（入金ごとに1回）。パートナー別の期間合計を四半期の精算（`Secretariat_Settlements`）へ渡す。端数・税抜／税込・事務局手数料は Config（`DISTRIBUTION_BASE`・`DISTRIBUTION_REMAINDER`・`DISTRIBUTION_FEE_PERCENT`） | `49_distribution.gs`（計算と記録は実装済み）・`52_admin_partnership.gs` | S |
+| P5-5 | 利用許諾料の分配：入金の反映時（前払い）・電子書籍の精算時に、対象原作の数で等分して原作ごとの分配額を `Distributions` に記録（入金ごとに1回）。パートナー別の期間合計を四半期の精算（`Secretariat_Settlements`）へ渡す。事務局手数料（既定50%）・税抜／税込・端数は Config（`DISTRIBUTION_FEE_PERCENT`・`DISTRIBUTION_BASE`・`DISTRIBUTION_REMAINDER`）。管理画面からの取得・保存（`admin_getDistributionConfig`／`admin_saveDistributionConfig`）は実装済み | `49_distribution.gs`（計算と記録は実装済み）・`52_admin_partnership.gs` | S |
 
 テスト：CSV の文字コード・数式インジェクション（`sanitizeCell_`）、金額違い・名義なし・二重取込・入金待ちでない案件。
 
@@ -119,7 +119,7 @@
 |---|---|---|---|
 | P6-1 | `admin_getCaseBoard` / `admin_getCasePanel` / `admin_applySwitch`（SPLL番号で受け、既存関数へ振り分け。事前検証の結果をそのまま返す） | `50_admin.gs`（または新規 `53_admin_board.gs`） | L |
 | P6-2 | 案件ボードの画面（モックを本物の呼び出しにつなぐ）：状態ボード、一覧（契・別・入・審・認）、詳細、スイッチ S1〜S11、入金CSV | 新規 `admin_board.html` | L |
-| P6-3 | 設定と事務局運営を別パネルへ。運用ルール `FEE_HOLD_TWO_PERSON`（入金未確認の停止を2名承認に切り替え） | `admin_board.html`・`50_admin.gs` | M |
+| P6-3 | 設定と事務局運営を別パネルへ。分配の設定（事務局手数料%・税抜／税込・端数）の欄を置く。運用ルール `FEE_HOLD_TWO_PERSON`（入金未確認の停止を2名承認に切り替え） | `admin_board.html`・`50_admin.gs` | M |
 | P6-4 | 旧画面と並べて置き（`?view=board`）、運用で問題が無ければ既定を切り替える | `apps/admin/entry.gs` | S |
 
 テスト：スイッチの「押せる／押せない」と実際に押した結果が一致すること（全スイッチ × 全現在地）、ロールと職務分離、2名体制の切替。
@@ -210,3 +210,4 @@ P0（確認）──┬─ P1（データ・状態遷移）── P2（入口・
 | 2026-11-23 | 文書 | 請求書はアークライト（事務局運営会社）名義で、各ライセンサーを代理して一括発行。収受した利用許諾料はパートナーシップ契約に従い利用許諾料の分配としてパートナーへ配分（利用許諾契約書 第6条第3項・第10項、別紙の請求書、`48_besshi.gs`） |
 | 2026-11-23 | 分配 | 請求は二次創作物1つにつき1回（原作の数で増えない）と利用許諾契約書 第6条第1項に明記。分配の計算 `49_distribution.gs`（原作の数で等分・端数と税抜／税込と手数料は設定・入金ごとに1回だけ記録・パートナー別の期間合計）。申込時に原作ごとの権利者を `License_Works` に固定（`resolveWorkPartner_` を `00_core.gs` へ移動）。スキーマ v15（`Distributions`）。テスト12件追加 |
 | 2026-11-23 | 分配 | 後払いも同じ分配ルール。売上連動の料率も二次創作物ごとに1つで、得た利用許諾料を原作の数で均等に分配（利用許諾契約書 第6条第1項に料率も含むと明記）。料金表の原作数比例（PER_WORK）を廃止（保存時に拒否、旧データは定額として扱う） |
+| 2026-11-23 | 分配 | 事務局手数料の既定を50%（分配前に差し引く）。管理画面から変更できる入口（`admin_getDistributionConfig`／`admin_saveDistributionConfig`、法務・システム管理のみ、0〜100%、変更は Events に記録、以後の入金から適用）。事務局の取り分も分配の記録に1行残し、行の合計が分ける前の金額と一致するようにした。テスト7件追加 |

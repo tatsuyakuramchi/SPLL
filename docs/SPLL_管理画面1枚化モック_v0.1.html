@@ -354,7 +354,7 @@ const IMPORTED = new Set();
 const expiryOf = c => c.cs==='SIGNING' ? addMonths(c.sent,3) : (c.cs==='PAYMENT_PENDING' ? addMonths(c.agreed,3) : '');
 
 /* ===== 画面状態 ===== */
-const S = {filter:'action',q:'',sel:'SPLL-202611-0131',actor:'tanaka',feeHoldTwoPerson:false,settingsTab:'settings'};
+const S = {filter:'action',q:'',sel:'SPLL-202611-0131',actor:'tanaka',feeHoldTwoPerson:false,settingsTab:'settings',feePct:50};
 const $ = s => document.querySelector(s);
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const actor = () => USERS.find(u=>u.id===S.actor);
@@ -762,6 +762,13 @@ function openSettings(){
       <div class="setrow"><span>入金未確認による停止・復帰に、別の担当者の承認を要する（2名体制）</span>
         <button class="toggle" role="switch" id="twoPerson" aria-checked="${S.feeHoldTwoPerson}" aria-label="2名体制"></button>
         <small>オフ：担当者1名のスイッチ（現行）。オン：申請 → 別の担当者が承認（移行予定）。試すとスイッチの形が変わります。</small></div></div>
+    <div class="card"><h4>利用許諾料の分配</h4>
+      <div class="setrow"><span>事務局手数料（分配の前に差し引く）</span>
+        <span style="display:flex;gap:6px;align-items:center"><input id="feePct" type="number" min="0" max="100" step="1" value="${S.feePct}" style="width:72px;border:1px solid var(--line);border-radius:8px;padding:4px 8px;background:var(--sunk)" aria-label="事務局手数料（%）">%
+        <button class="btn" type="button" id="feePctSave">保存</button></span>
+        <small>既定50%。例：16,500円（税込）→ 税抜15,000円 → 手数料${S.feePct}%＝${Math.floor(15000*S.feePct/100).toLocaleString()}円 → 残り${(15000-Math.floor(15000*S.feePct/100)).toLocaleString()}円を原作の数で等分（2作品なら${Math.floor((15000-Math.floor(15000*S.feePct/100))/2).toLocaleString()}円ずつ）。変更は以後の入金から効く</small></div>
+      <div class="setrow"><span>分ける金額</span><span class="muted">税抜</span><small>税込にも変えられる</small></div>
+      <div class="setrow"><span>割り切れない端数</span><span class="muted">先頭の原作へ</span><small>事務局に残す設定にもできる</small></div></div>
     <div class="card"><h4>契約書と支払い</h4>
       <div class="setrow"><span>利用許諾契約書</span><span class="muted">v5.0・formrun → CloudSign</span><small>クラウドサインのテンプレートに登録する固定文面。差込は当事者欄だけ。当事者表記は「SPLL事業TRPG事務局代表法人株式会社アークライト」（各パートナーを代表）</small></div>
       <div class="setrow"><span>別紙（許諾作品通知書）</span><span class="muted">v1.0・CloudSign API</span><small>専用ページの申込みから台帳で生成し、CloudSign API で送信。同意で本契約に追加。対象原作の表は作品数に応じて行が増えます</small></div>
@@ -789,6 +796,12 @@ function openSettings(){
       <button class="btn" type="button" data-close="1" style="margin-left:auto">閉じる</button></div>
     <div class="dbody">${tab==='settings'?settings:office}</div></div>`;
   L.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{ S.settingsTab=b.dataset.tab; openSettings(); });
+  const fs = $('#feePctSave'); if(fs) fs.onclick = () => {
+    if(!can('LEGAL_ADMIN')){ toast('事務局手数料の変更には法務の権限が必要です'); return; }
+    const v = Number($('#feePct').value);
+    if(!(v>=0 && v<=100)){ toast('0〜100 の数で指定してください'); return; }
+    S.feePct = v; openSettings(); toast('事務局手数料を '+v+'% にしました（以後の入金から適用）');
+  };
   const tp = $('#twoPerson'); if(tp) tp.onclick = () => { S.feeHoldTwoPerson=!S.feeHoldTwoPerson; tp.setAttribute('aria-checked',S.feeHoldTwoPerson); render(); toast(S.feeHoldTwoPerson?'2名体制に切り替えました':'担当者1名のスイッチに戻しました'); };
 }
 

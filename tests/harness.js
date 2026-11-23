@@ -2364,9 +2364,11 @@ ok(dist_lw.length===2&&dist_lw.every(w=>w.partner_id_snapshot),'申込時に原�
 const dist_rec1=G.recordDistribution_(dist_dApp.license_id,'PAY-TEST-1',16500,'PREPAID','2026-Q4');
 const dist_rec2=G.recordDistribution_(dist_dApp.license_id,'PAY-TEST-1',16500,'PREPAID','2026-Q4');
 const dist_drows=rows(OPS,'Distributions').filter(d=>d.payment_id==='PAY-TEST-1');
-ok(dist_rec1.created&&!dist_rec2.created&&dist_drows.length===2&&dist_drows.reduce((a,d)=>a+Number(d.amount),0)===15000,'入金1件につき分配は1回だけ（同じ入金で二重に作らない）');
+const dist_pRows=dist_drows.filter(d=>d.partner_id!=='SECRETARIAT'), dist_sRow=dist_drows.find(d=>d.partner_id==='SECRETARIAT');
+ok(dist_rec1.created&&!dist_rec2.created&&dist_pRows.length===2&&dist_pRows.every(d=>Number(d.amount)===3750)&&dist_sRow&&Number(dist_sRow.amount)===7500,'既定（事務局手数料50%）：税抜15,000円から手数料7,500円を引き、残り7,500円を3,750円ずつ。入金1件につき1回だけ');
+ok(dist_drows.reduce((a,d)=>a+Number(d.amount),0)===15000,'事務局の行も残すので、行の合計は分ける前の金額（税抜15,000円）と一致');
 const dist_sumQ=G.distributionSummary_('2026-Q4');
-ok(dist_sumQ.reduce((a,p)=>a+p.amount,0)===15000&&dist_sumQ.every(p=>p.partner_id),'期間ごとにパートナー別の合計を出せる（四半期の精算に使う）');
+ok(dist_sumQ.reduce((a,p)=>a+p.amount,0)===15000&&dist_sumQ.every(p=>p.partner_id)&&dist_sumQ.some(p=>p.partner_id==='SECRETARIAT'),'期間ごとにパートナー別（事務局を含む）の合計を出せる（四半期の精算に使う）');
 
 // 424. 後払い（電子書籍の精算）も同じ分配。売上連動の料率は原作の数で増えない
 const rateUsage=rows(MAS,'Fee_Schedule').find(r=>String(r.fee_model).toUpperCase()==='RATE').usage_category;
@@ -2374,12 +2376,27 @@ ok(G.computeFeeTerms_(rateUsage,3).rate===G.computeFeeTerms_(rateUsage,1).rate&&
 const ebookApp=mkAppV4(['WRK-ARK00012','WRK-BKK00019'],rateUsage);
 G.recordDistribution_(ebookApp.license_id,'EBOOK-2026Q4-1',11000,'EBOOK_SETTLEMENT','2026-Q4');
 const ebRows=rows(OPS,'Distributions').filter(d=>d.payment_id==='EBOOK-2026Q4-1');
-ok(ebRows.length===2&&ebRows.every(d=>Number(d.amount)===5000&&d.source==='EBOOK_SETTLEMENT'),'電子書籍の精算（利用許諾料11,000円・税込）も原作の数で等分（税抜10,000円を5,000円ずつ）');
+const ebP=ebRows.filter(d=>d.partner_id!=='SECRETARIAT');
+ok(ebP.length===2&&ebP.every(d=>Number(d.amount)===2500&&d.source==='EBOOK_SETTLEMENT'),'電子書籍の精算（利用許諾料11,000円・税込）も同じ：税抜10,000円から手数料50%を引き、5,000円を2,500円ずつ');
 // 425. 原作数比例（PER_WORK）は廃止：保存は拒否、旧データは定額として扱う
 let perWorkErr=false; try{ G.admin_saveFeeRow({ usage_category:'テスト区分', fee_model:'PER_WORK', fee_value:'16500' }); }catch(e){ perWorkErr=/PER_WORK/.test(String(e.message)); }
 ok(perWorkErr,'料金表に原作数比例（PER_WORK）は保存できない');
 G.appendRow_(MAS,'Fee_Schedule',{ usage_category:'旧データ区分', fee_model:'PER_WORK', fee_value:'16500', active:'true' });
 ok(G.computeFeeTerms_('旧データ区分',3).amount===16500,'旧データに PER_WORK が残っていても、原作の数を掛けずに定額として扱う');
+
+// 426. 事務局手数料は既定50%。管理画面（設定）から変えられ、変更は Events に残る
+const dcfg0=G.admin_getDistributionConfig();
+ok(dcfg0.fee_percent===50&&dcfg0.fee_default===50&&dcfg0.base==='EXCL_TAX'&&dcfg0.remainder==='FIRST_WORK','既定：手数料50%・税抜・端数は先頭の原作');
+const dcfg1=G.admin_saveDistributionConfig({ fee_percent:30 });
+ok(dcfg1.fee_percent===30&&G.distributionConfig_().feePercent===30,'管理画面から手数料を30%に変更できる');
+ok(rows(OPS,'Events').some(e=>e.entity_type==='config'&&e.entity_id==='DISTRIBUTION'),'設定の変更は Events に前後の値が残る');
+let dcBad1=false; try{ G.admin_saveDistributionConfig({ fee_percent:120 }); }catch(e){ dcBad1=/0〜100/.test(String(e.message)); }
+let dcBad2=false; try{ G.admin_saveDistributionConfig({ base:'GROSS' }); }catch(e){ dcBad2=/EXCL_TAX/.test(String(e.message)); }
+ok(dcBad1&&dcBad2&&G.distributionConfig_().feePercent===30,'範囲外・不正な値は保存しない');
+const dAfter=G.computeDistribution_(16500,[{work_id:'A',partner_id:'P-A'},{work_id:'B',partner_id:'P-B'}]);
+ok(dAfter.fee_amount===4500&&dAfter.per_work[0].amount===5250,'変更後の入金から新しい手数料で計算（15,000円−4,500円＝10,500円を5,250円ずつ）');
+G.admin_saveDistributionConfig({ fee_percent:50 });
+ok(G.distributionConfig_().feePercent===50,'50%に戻せる');
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

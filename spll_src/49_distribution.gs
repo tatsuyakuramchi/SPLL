@@ -12,15 +12,19 @@
  * 計算の設定（Config）
  *   DISTRIBUTION_BASE      … EXCL_TAX（既定・税抜額を分ける）／INCL_TAX（税込額を分ける）
  *   DISTRIBUTION_REMAINDER … FIRST_WORK（既定・割り切れない端数は別紙の先頭の原作へ）／SECRETARIAT（事務局に残す）
- *   DISTRIBUTION_FEE_PERCENT … 分配前に差し引く事務局手数料（%。既定 0）
+ *   DISTRIBUTION_FEE_PERCENT … 分配前に差し引く事務局手数料（%。既定 50）。管理画面（設定）から変更できる
+ *     （admin_getDistributionConfig / admin_saveDistributionConfig。変更は Events に前後の値を残す）
  */
 const DISTRIBUTION_BASES = ['EXCL_TAX','INCL_TAX'];
 const DISTRIBUTION_REMAINDERS = ['FIRST_WORK','SECRETARIAT'];
+/** 事務局手数料の既定値（%）。分配前に差し引き、残りを原作の数で等分する */
+const DISTRIBUTION_FEE_PERCENT_DEFAULT = 50;
 
 function distributionConfig_(){
   const base = String(getConfig_('DISTRIBUTION_BASE', 'EXCL_TAX') || 'EXCL_TAX').toUpperCase();
   const rem = String(getConfig_('DISTRIBUTION_REMAINDER', 'FIRST_WORK') || 'FIRST_WORK').toUpperCase();
-  const fee = Number(getConfig_('DISTRIBUTION_FEE_PERCENT', '0')) || 0;
+  const feeRaw = getConfig_('DISTRIBUTION_FEE_PERCENT', String(DISTRIBUTION_FEE_PERCENT_DEFAULT));
+  const fee = (feeRaw === '' || feeRaw === null || isNaN(Number(feeRaw))) ? DISTRIBUTION_FEE_PERCENT_DEFAULT : Number(feeRaw);
   return { base: DISTRIBUTION_BASES.indexOf(base) >= 0 ? base : 'EXCL_TAX',
     remainder: DISTRIBUTION_REMAINDERS.indexOf(rem) >= 0 ? rem : 'FIRST_WORK',
     feePercent: Math.max(0, Math.min(100, fee)) };
@@ -79,6 +83,15 @@ function recordDistribution_(licenseId, paymentId, totalInclTax, source, period)
   if(existing.length) return { created: false, rows: existing.length };
   const r = computeDistribution_(totalInclTax, distributionWorksOf_(licenseId));
   const now = new Date().toISOString();
+  // 事務局の取り分（手数料＋事務局に残す端数）も1行で残し、行の合計が分ける前の金額と一致するようにする
+  if(r.secretariat_amount > 0){
+    appendRow_(ssOps_(), 'Distributions', {
+      distribution_id: Utilities.getUuid(), license_id: String(licenseId), payment_id: String(paymentId), source: String(source || ''),
+      work_id: '', partner_id: 'SECRETARIAT', partner_name: '事務局（手数料' + distributionConfig_().feePercent + '%' + (r.remainder_to === 'SECRETARIAT' && r.remainder ? '・端数' : '') + '）',
+      share_count: 0, share_total: r.per_work.length, base_kind: r.base_kind, base_amount: r.base_amount,
+      amount: r.secretariat_amount, rounding_adjust: r.remainder_to === 'SECRETARIAT' ? r.remainder : 0,
+      period_label: String(period || ''), status: 'RECORDED', created_at: now });
+  }
   r.per_work.forEach(function(w){
     appendRow_(ssOps_(), 'Distributions', {
       distribution_id: Utilities.getUuid(), license_id: String(licenseId), payment_id: String(paymentId), source: String(source || ''),
@@ -101,3 +114,38 @@ function distributionSummary_(period){
   });
   return Object.keys(sum).map(function(k){ return sum[k]; }).sort(function(a, b){ return b.amount - a.amount; });
 }
+
+/** 【管理画面・設定】分配の設定を読む */
+function admin_getDistributionConfig(){ requireRole_([]);
+  const c = distributionConfig_();
+  return { base: c.base, remainder: c.remainder, fee_percent: c.feePercent,
+    bases: DISTRIBUTION_BASES, remainders: DISTRIBUTION_REMAINDERS, fee_default: DISTRIBUTION_FEE_PERCENT_DEFAULT };
+}
+/**
+ * 【管理画面・設定】分配の設定を変える（法務・システム管理のみ）。変更は以後の入金から効く（記録済みの分配は変えない）。
+ *   c … { base: 'EXCL_TAX'|'INCL_TAX', remainder: 'FIRST_WORK'|'SECRETARIAT', fee_percent: 0〜100 }
+ */
+function admin_saveDistributionConfig(c){ const actor = requireRole_(['LEGAL_ADMIN','SYSTEM_ADMIN']);
+  c = c || {};
+  const before = distributionConfig_();
+  if(c.base !== undefined){
+    const v = String(c.base).toUpperCase();
+    if(DISTRIBUTION_BASES.indexOf(v) < 0) throw new Error('VALIDATION_ERROR: 分ける金額は EXCL_TAX（税抜）か INCL_TAX（税込）です');
+    setConfig_('DISTRIBUTION_BASE', v);
+  }
+  if(c.remainder !== undefined){
+    const v = String(c.remainder).toUpperCase();
+    if(DISTRIBUTION_REMAINDERS.indexOf(v) < 0) throw new Error('VALIDATION_ERROR: 端数の寄せ先は FIRST_WORK（先頭の原作）か SECRETARIAT（事務局）です');
+    setConfig_('DISTRIBUTION_REMAINDER', v);
+  }
+  if(c.fee_percent !== undefined){
+    const n = Number(c.fee_percent);
+    if(String(c.fee_percent).trim() === '' || isNaN(n) || n < 0 || n > 100)
+      throw new Error('VALIDATION_ERROR: 事務局手数料は 0〜100 の数（%）で指定してください（指定値: ' + c.fee_percent + '）');
+    setConfig_('DISTRIBUTION_FEE_PERCENT', String(n));
+  }
+  const after = distributionConfig_();
+  logEvent_('config', 'DISTRIBUTION', (actor && actor.email) || actor_(), before, after);
+  return admin_getDistributionConfig();
+}
+
