@@ -169,7 +169,7 @@ async function main(){
   const jobs = [];
   jobs.push({ name: 'SPLL_利用許諾契約書サンプル_v5.0', html: buildMaster(PARTY),
     hf: headFoot('SPLL-LIC-001 / v5.0', 'SPLL利用許諾契約書'), code: '契約番号 ' + PARTY.agreement_no });
-  [['3作品_前払い_請求書つき', 3, 'SPLL-2026-0131', 'prepaid'], ['25作品_後払い_電子書籍', 25, 'SPLL-2026-0129', 'postpaid']].forEach(([label, n, id, mode]) => {
+  [['3作品_前払い_請求書つき', 3, 'SPLL-202611-0131', 'prepaid'], ['25作品_後払い_電子書籍', 25, 'SPLL-202611-0129', 'postpaid']].forEach(([label, n, id, mode]) => {
     const t = sampleIndividual(id, n, mode);
     jobs.push({ name: `SPLL_別紙サンプル_v1.0_${label}`, html: buildIndividual(t),
       hf: headFoot('SPLL-LIC-001-A / v1.0', 'SPLL利用許諾契約 別紙'), code: `${t.license_id}　契約番号 ${t.agreement_no}　条件照合コード ${besshiCode(t)}` });

@@ -58,7 +58,7 @@ function invoiceHtml_(t, cfg){
   const a = invoiceAmounts_(t.fee_amount_incl_tax);
   const missing = '（未設定）';
   const row = function(k, v){ return '<tr><th>' + k + '</th><td>' + v + '</td></tr>'; };
-  const last4 = String(t.license_id || '').slice(-4);
+  const payerCode = String(t.license_id || '').replace(/\D/g, '');   // SPLL-202611-0131 → 2026110131（末尾4桁は毎月振り直すので10桁を使う）
   return '<div class="invoice">' +
     '<div class="meta">請求書番号 ' + e(t.invoice_no) + '　SPLL番号 ' + e(t.license_id) + '　契約番号 ' + e(t.agreement_no) + '</div>' +
     '<h1>請求書</h1>' +
@@ -67,18 +67,18 @@ function invoiceHtml_(t, cfg){
     e(cfg.address || missing) + '<br>登録番号：' + e(cfg.reg || missing) + '</td></tr></table>' +
     '<p>下記のとおりご請求申し上げます。</p>' +
     '<table class="terms">' + row('請求書番号', e(t.invoice_no)) + row('発行日', e(t.issued_at)) +
-    row('件名', 'SPLL利用許諾料（SPLL番号 ' + e(t.license_id) + '）') +
+    row('件名', 'SPLL利用許諾料（SPLL番号 ' + e(t.license_id) + '・二次創作物「' + e(t.creation_title) + '」）') +
     row('ご請求金額（税込）', '<b>' + yenFmt_(a.total) + '</b>') +
     row('取引年月日', '本請求書を付した別紙が本契約に追加された日（許諾期間の開始日）') +
     row('お支払期限', '別紙が本契約に追加された日から3か月以内') + '</table>' +
     '<h2>明細</h2><table class="works"><thead><tr><th>品目</th><th>数量</th><th>税率</th><th>金額（税抜）</th></tr></thead><tbody>' +
-    '<tr><td>SPLL利用許諾料（SPLL番号 ' + e(t.license_id) + '・対象作品 ' + (t.works || []).length + '件・' + e(t.usage_category) + '）</td><td class="num">1</td><td class="num">' + INVOICE_TAX_RATE_PERCENT + '%</td><td class="num">' + yenFmt_(a.excl) + '</td></tr>' +
+    '<tr><td>SPLL利用許諾料（SPLL番号 ' + e(t.license_id) + '・対象原作 ' + (t.works || []).length + '件・' + e(t.usage_category) + '）</td><td class="num">1</td><td class="num">' + INVOICE_TAX_RATE_PERCENT + '%</td><td class="num">' + yenFmt_(a.excl) + '</td></tr>' +
     '</tbody></table>' +
     '<table class="sum-table"><tr><th>' + INVOICE_TAX_RATE_PERCENT + '%対象（税抜）</th><td class="num">' + yenFmt_(a.excl) + '</td></tr>' +
     '<tr><th>消費税（' + INVOICE_TAX_RATE_PERCENT + '%）</th><td class="num">' + yenFmt_(a.tax) + '</td></tr>' +
     '<tr><th>合計（税込）</th><td class="num"><b>' + yenFmt_(a.total) + '</b></td></tr></table>' +
     '<h2>お振込先</h2><table class="terms">' + row('振込先', e(cfg.bank || missing)) +
-    row('振込名義', 'SPLL番号の下4桁＋お名前（例：' + e(last4) + ' ヤマダタロウ）。入金の照合に使います') +
+    row('振込名義', 'SPLL番号の数字10桁＋お名前（例：' + e(payerCode) + ' ヤマダタロウ）。入金の照合に使います') +
     row('振込手数料', 'ご負担ください') + '</table>' +
     '<p class="note">本請求は、本請求書を付した別紙への同意により、当該別紙が本契約に追加されたことをもって効力を生じます。同意がない場合、本請求書は効力を生じません。' +
     '振込先は本請求書及び利用許諾契約書にのみ記載し、電子メールでお知らせすることはありません。</p>' +
@@ -110,7 +110,7 @@ function besshiHtml_(t, cfg){
   const row = function(k, v){ return '<tr><th>' + k + '</th><td>' + v + '</td></tr>'; };
   const lead = e(SPLL_PARTY_NAME) + '（以下「事務局」といいます。）は、各ライセンサーを代表して、契約番号 ' + e(t.agreement_no) +
     ' の SPLL利用許諾契約（以下「本契約」といいます。）第3条に基づき、' + e(t.applied_at) +
-    ' に受け付けた利用者の申込みについて、次の対象作品及び条件による許諾を本契約に追加することを提案します。' +
+    ' に受け付けた利用者の申込みについて、次の対象原作及び条件による許諾を本契約に追加することを提案します。' +
     '利用者が電子契約システム上で本別紙に同意した時点で、本別紙は本契約に追加されます。本別紙に定めのない事項は本契約及びガイドラインによります。';
   const css = [
     '@page{size:A4;margin:18mm 16mm 16mm}',
@@ -147,10 +147,11 @@ function besshiHtml_(t, cfg){
     '<h1>SPLL利用許諾契約　別紙</h1><div class="sub">（許諾作品通知書）</div>' +
     '<p>' + lead + '</p>' +
     '<h2>許諾の条件</h2><table class="terms">' +
-    row('SPLL番号', e(t.license_id)) + row('契約番号', e(t.agreement_no)) +
+    row('SPLL番号', e(t.license_id) + '（二次創作物ごとの番号）') + row('契約番号', e(t.agreement_no)) +
+    row('二次創作物の名称（予定）', e(t.creation_title)) +
     row('利用者氏名', e(t.party_name) + (t.circle_name ? '（' + e(t.circle_name) + '）' : '')) +
-    row('対象作品', '下表のとおり（全' + works.length + '作品）') +
-    row('ライセンサー', '下表に記載の各対象作品の権利者（パートナー）。代表：' + e(SPLL_PARTY_NAME)) +
+    row('対象原作', '下表のとおり（全' + works.length + '件）') +
+    row('ライセンサー', '下表に記載の各対象原作の権利者（パートナー）。代表：' + e(SPLL_PARTY_NAME)) +
     row('利用区分', e(t.usage_category)) + row('許諾期間', e(t.license_term)) + row('利用地域', e(t.territory)) +
     row('利用許諾料', e(t.fee_amount_or_rate) + '（料金表 ' + e(t.fee_schedule_version) + ' により算定）') +
     row('支払方法', e(PAYMENT_TIMING_LABEL[t.payment_timing] || t.payment_timing) + '（利用区分により料金表で定める）') +
@@ -159,11 +160,11 @@ function besshiHtml_(t, cfg){
     row('特約', e(t.special_terms || '該当なし')) + '</table>' +
     '<p class="note">空欄又は「該当なし」と記載された項目は、当該項目について追加の条件を設定するものではありません。</p>' +
     '<h2>確認事項</h2><ol>' + BESSHI_CHECKS.map(function(c){ return '<li>' + e(c) + '</li>'; }).join('') + '</ol>' +
-    '<h2>対象作品</h2><table class="works"><thead><tr><th class="no">No.</th><th>対象作品</th><th>権利者（ライセンサー）</th><th>権利表記</th></tr></thead><tbody>' +
+    '<h2>対象原作</h2><table class="works"><thead><tr><th class="no">No.</th><th>対象原作</th><th>権利者（ライセンサー）</th><th>権利表記</th></tr></thead><tbody>' +
     workRows + '</tbody></table>' +
     '<p>' + e(BESSHI_CLOSING) + '</p>' +
     '<p class="end">作成日：' + e(t.issued_at) + '　作成者：' + e(SPLL_PARTY_NAME) + '</p><p class="end">以上</p>' +
-    '<p class="code">条件照合コード：' + code + '（本別紙の条件及び対象作品が、SPLLの台帳に記録した内容と一致することの照合に用います）</p>' +
+    '<p class="code">条件照合コード：' + code + '（本別紙の条件及び対象原作が、SPLLの台帳に記録した内容と一致することの照合に用います）</p>' +
     (t.payment_timing === 'PREPAID' ? invoiceHtml_(t, cfg) : '') +
     '</body></html>';
 }
@@ -184,10 +185,11 @@ function besshiSampleTerms_(n, timing){
     works.push({ work_id: 'W' + (i + 1), work_title: ti, licensor_name: l, credit_text: '©' + l + '／「' + ti + '」' });
   }
   const pre = timing !== 'POSTPAID';
-  return { license_id: 'SPLL-TEST-' + n, agreement_no: 'C-TEST-0001', party_name: '山田 太郎（サンプル）', circle_name: '星屑工房',
+  return { license_id: 'SPLL-209911-' + ('000' + n).slice(-4), agreement_no: 'C-209911-0001', party_name: '山田 太郎（サンプル）', circle_name: '星屑工房',
+    creation_title: pre ? 'シナリオ集『迷宮の夜明け』（サンプル）' : 'リプレイ本『月下の宴』電子版（サンプル）',
     usage_category: pre ? '商品販売（同人誌・物販）' : '電子書籍',
     license_term: '本別紙が本契約に追加された日から1年間（本契約の有効期間内に限る）', territory: '日本国内',
-    fee_amount_or_rate: pre ? '16,500円（税込）。対象作品が複数の場合も同額' : '電子書籍の販売額（税抜）の10%', fee_schedule_version: '2026-10版',
+    fee_amount_or_rate: pre ? '16,500円（税込）。対象原作が複数の場合も同額' : '電子書籍の販売額（税抜）の10%', fee_schedule_version: '2026-10版',
     fee_amount_incl_tax: pre ? 16500 : null, invoice_no: pre ? 'INV-TEST-' + n : '',
     payment_timing: pre ? 'PREPAID' : 'POSTPAID',
     payment_due: pre ? '本別紙が本契約に追加された日から3か月以内（入金確認で許諾が有効）' : '電子書籍配信会社からの入金と相殺し、残額をお支払いします（四半期ごとに精算書でお知らせ）',

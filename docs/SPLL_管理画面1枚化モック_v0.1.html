@@ -326,7 +326,7 @@ const TODAY = '2026-11-17';
 const addDays = (d,n) => { const x=new Date(d+'T00:00:00Z'); x.setUTCDate(x.getUTCDate()+n); return x.toISOString().slice(0,10); };
 const addMonths = (d,n) => { const x=new Date(d+'T00:00:00Z'); x.setUTCMonth(x.getUTCMonth()+n); return x.toISOString().slice(0,10); };
 const mk = (n,party,circle,cs,ct,rv,ce,works,extra) => { const usage=(extra&&extra.usage)||'商品販売'; const u=USAGE[usage]; return Object.assign({
-  id:'SPLL-2026-'+String(n).padStart(4,'0'),party,circle,cs,ct,rv,ce,works,reason:'',usage,route:u.route,fee:u.fee,pay:u.pay,amount:u.amount,
+  id:'SPLL-202611-'+String(n).padStart(4,'0'),party,circle,cs,ct,rv,ce,works,reason:'',usage,route:u.route,fee:u.fee,pay:u.pay,amount:u.amount,
   email:'creator'+n+'@example.com',pid:PID[n],sub:null,req:null,updated:'11/16 18:20',
   sent:ct==='NOT_STARTED'?'':'2026-10-15', agreed:['SIGNED','TERMINATED'].includes(ct)?'2026-10-20':'',
   ps:['SIGNED','TERMINATED'].includes(ct)?'PAID':'NOT_REQUIRED', due:'', paidAt:['SIGNED','TERMINATED'].includes(ct)?'2026-10-24':'',
@@ -354,7 +354,7 @@ const IMPORTED = new Set();
 const expiryOf = c => c.cs==='SIGNING' ? addMonths(c.sent,3) : (c.cs==='PAYMENT_PENDING' ? addMonths(c.agreed,3) : '');
 
 /* ===== 画面状態 ===== */
-const S = {filter:'action',q:'',sel:'SPLL-2026-0131',actor:'tanaka',feeHoldTwoPerson:false,settingsTab:'settings'};
+const S = {filter:'action',q:'',sel:'SPLL-202611-0131',actor:'tanaka',feeHoldTwoPerson:false,settingsTab:'settings'};
 const $ = s => document.querySelector(s);
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const actor = () => USERS.find(u=>u.id===S.actor);
@@ -376,7 +376,7 @@ function switches(c){
   else if(c.ct==='SIGNED') sendWhy = '別紙は本契約に追加済みです';
   else if(!['APPLICATION_RECEIVED','MANUAL_REVIEW'].includes(c.cs)) sendWhy = `現在地「${CS[c.cs].l}」からは送信できません`;
   else if(ag!=='ACTIVE') sendWhy = '利用許諾契約が有効ではありません';
-  L.push({key:'send',grp:'contract',t:'別紙を作成して CloudSign で送る',d:'台帳の条件から別紙（契約番号入り・対象作品を全件）を作り、CloudSign API で送信する。通常は申込の直後に自動で送る。同意で本契約に追加される',kind:'button',role:'OPERATIONS',
+  L.push({key:'send',grp:'contract',t:'別紙を作成して CloudSign で送る',d:'台帳の条件から別紙（契約番号入り・対象原作を全件）を作り、CloudSign API で送信する。通常は申込の直後に自動で送る。同意で本契約に追加される',kind:'button',role:'OPERATIONS',
     why: sendWhy, extra:'preview'});
   // S2 条件確認
   L.push({key:'confirm',grp:'contract',t:'条件を確認して別紙を有効にする',d:'同意された別紙と台帳の食い違いを法務が確認した後に使う。支払方法に応じて入金待ち／提出待ちへ進む',kind:'button',role:'LEGAL_ADMIN',
@@ -455,7 +455,7 @@ function renderList(){
   const v = visible();
   $('#listTitle').textContent = (titles[S.filter] || CS[S.filter].l) + '（' + v.length + '件）';
   let h = `<div class="r h"><span>SPLL番号</span><span>契約者</span><span>対象原作</span><span>現在地</span><span>契 別 入 審 認</span><span style="text-align:right">更新</span></div>`;
-  if(S.filter==='mail') h += `<div class="empty">締結直後のご案内（SPLL-2026-0125）が3回失敗しました。宛先：creator125@example.com<br>→ モックでは一覧のみ。本番は「送信済みにする」「再送」を置く</div>`;
+  if(S.filter==='mail') h += `<div class="empty">締結直後のご案内（SPLL-202611-0125）が3回失敗しました。宛先：creator125@example.com<br>→ モックでは一覧のみ。本番は「送信済みにする」「再送」を置く</div>`;
   else if(S.filter==='unmatched') h += UNMATCHED.length ? UNMATCHED.map(u=>`<div class="r" style="cursor:default"><span class="mono">${esc(u.date)}</span><span class="who2"><b>${esc(u.name)}</b><span>${esc(u.why)}</span></span><span class="wk mono">${u.amount.toLocaleString()}円</span><span></span><span></span><span></span></div>`).join('') : `<div class="empty">未照合の入金はありません。入金CSVを取り込むと、照合できなかった行がここに残ります</div>`;
   else if(!v.length) h += `<div class="empty">該当する案件はありません</div>`;
   v.forEach(c=>{
@@ -525,7 +525,7 @@ function renderDetail(){
     <button class="btn" type="button" data-op="code" ${certLive(c.ce)?'':'disabled'}>照合コードを再発行</button>
     <button class="btn" type="button" data-preview="${c.id}">別紙を表示</button></div></div>
   <div class="sec"><h3>利用許諾契約</h3><dl class="kv"><dt>契約番号</dt><dd class="mono">${c.pid}</dd><dt>状態</dt><dd>${pill(AG[PARTS[c.pid].st][0],AG[PARTS[c.pid].st][1])} ${PARTS[c.pid].at?'締結 '+PARTS[c.pid].at:''}</dd>
-    <dt>この契約の別紙（SPLL番号）</dt><dd>${CASES.filter(x=>x.pid===c.pid).map(x=>x.id===c.id?`<b class="mono">${x.id.slice(10)}</b>`:`<button type="button" class="btn" style="padding:0 8px;font-size:12px" data-id="${x.id}">${x.id.slice(10)}</button>`).join(' ')}</dd></dl></div>
+    <dt>この契約の別紙（SPLL番号）</dt><dd>${CASES.filter(x=>x.pid===c.pid).map(x=>x.id===c.id?`<b class="mono">${x.id.slice(-4)}</b>`:`<button type="button" class="btn" style="padding:0 8px;font-size:12px" data-id="${x.id}">${x.id.slice(-4)}</button>`).join(' ')}</dd></dl></div>
   <div class="sec"><h3>別紙（許諾作品通知書）</h3><dl class="kv">
     <dt>CloudSign 送信</dt><dd class="mono">${c.sent||'—'}</dd><dt>同意（本契約に追加）</dt><dd class="mono">${c.agreed||'—'}</dd>
     <dt>支払方法</dt><dd>${PAY_LABEL[c.pay]}（利用区分「${esc(c.usage)}」）</dd>
@@ -656,16 +656,16 @@ function openPreview(c,opt){
     const wrow = (w,i) => `<tr><td>${i+1}</td><td>${esc(w.name)}</td><td>${esc(w.lic)}</td><td>${esc(w.credit)}</td></tr>`;
     const thead = `<tr><th>No.</th><th>対象原作</th><th>権利者（ライセンサー）</th><th>権利表記</th></tr>`;
     let pages = `<div class="sheet"><h1>SPLL利用許諾契約　別紙（許諾作品通知書）</h1>
-      <p>SPLL事業TRPG事務局代表法人株式会社アークライトは、各ライセンサーを代表して、契約番号 ${c.pid} の SPLL利用許諾契約（本契約）第3条に基づき、利用者の申込みについて、次の対象作品及び条件による許諾を本契約に追加することを提案します。利用者が電子契約システム上で同意した時点で、本別紙は本契約に追加されます。</p>
+      <p>SPLL事業TRPG事務局代表法人株式会社アークライトは、各ライセンサーを代表して、契約番号 ${c.pid} の SPLL利用許諾契約（本契約）第3条に基づき、利用者の申込みについて、次の対象原作及び条件による許諾を本契約に追加することを提案します。利用者が電子契約システム上で同意した時点で、本別紙は本契約に追加されます。</p>
       <h2>許諾の条件</h2><table>
       <tr><th>SPLL番号</th><td>${c.id}</td></tr><tr><th>契約番号</th><td>${c.pid}</td></tr><tr><th>利用者</th><td>${esc(c.party)}${c.circle?'（'+esc(c.circle)+'）':''}</td></tr>
-      <tr><th>対象作品</th><td>下表のとおり（全${ws.length}作品）</td></tr><tr><th>利用区分</th><td>${esc(c.usage)}</td></tr>
+      <tr><th>二次創作物の名称（予定）</th><td>${esc(c.sub?c.sub.title:'（申込時に入力）')}</td></tr><tr><th>対象原作</th><td>下表のとおり（全${ws.length}件）</td></tr><tr><th>利用区分</th><td>${esc(c.usage)}</td></tr>
       <tr><th>利用許諾料</th><td>${esc(c.fee)}</td></tr><tr><th>支払方法</th><td>${PAY_LABEL[c.pay]}（利用区分により料金表で定める）</td></tr><tr><th>支払期限</th><td>${c.pay==='PREPAID'?'本別紙の追加から3か月以内（入金確認で許諾が有効）':'各四半期の末日から30日以内（利用報告に基づき算定）'}。振込先は利用許諾契約書第6条</td></tr></table>
-      <h2>対象作品</h2><table class="wt">${thead}${ws.slice(0,FIRST_ROWS).map(wrow).join('')}</table>
+      <h2>対象原作</h2><table class="wt">${thead}${ws.slice(0,FIRST_ROWS).map(wrow).join('')}</table>
       ${ws.length>FIRST_ROWS?`<p style="margin-top:4px">（次ページへ続く）</p>`:''}${foot(1)}</div>`;
     let p = 2;
     for(let i=FIRST_ROWS;i<ws.length;i+=NEXT_ROWS){
-      pages += `<div class="sheet"><h2>対象作品（続き）</h2><table class="wt">${thead}${ws.slice(i,i+NEXT_ROWS).map((w,k)=>wrow(w,i+k)).join('')}</table>${foot(p++)}</div>`;
+      pages += `<div class="sheet"><h2>対象原作（続き）</h2><table class="wt">${thead}${ws.slice(i,i+NEXT_ROWS).map((w,k)=>wrow(w,i+k)).join('')}</table>${foot(p++)}</div>`;
     }
     pages += `<div class="sheet"><h2>確認事項</h2><p>1. 本別紙は、利用者が電子契約システム上で同意した時点で本契約に追加されます。送信から3か月以内に同意がない場合、本別紙は効力を失います（利用許諾契約書第3条）。</p>
       <p>2. 前払いの場合、許諾は入金確認の時点で効力を生じます。追加から3か月以内に入金がなければ本別紙は効力を失います。後払いの場合、許諾は追加の時点で効力を生じます（同第6条）。</p>
@@ -704,15 +704,15 @@ function openPreview(c,opt){
 function sampleCsv(){
   const open = CASES.filter(c=>['UNPAID','OVERDUE'].includes(c.ps) && c.cs!=='HOLD').sort((x,y)=>(y.cs==='PAYMENT_PENDING')-(x.cs==='PAYMENT_PENDING'));
   const rows = ['日付,金額,振込名義'];
-  open.slice(0,3).forEach((c,i)=>rows.push(`2026-11-1${i+4},${c.amount},${c.id.slice(10)} ${c.party.replace(' ','')}`));
+  open.slice(0,3).forEach((c,i)=>rows.push(`2026-11-1${i+4},${c.amount},${c.id.replace(/\D/g,'')} ${c.party.replace(' ','')}`));
   rows.push('2026-11-16,16500,ﾔﾏﾓﾄ ﾀﾛｳ');
-  if(open[0]) rows.push(`2026-11-16,${open[0].amount+1000},${open[0].id.slice(10)} ${open[0].party.replace(' ','')}`);
+  if(open[0]) rows.push(`2026-11-16,${open[0].amount+1000},${open[0].id.replace(/\D/g,'')} ${open[0].party.replace(' ','')}`);
   return rows.join('\n');
 }
 function matchCsv(text){
   return text.trim().split(/\r?\n/).slice(1).filter(Boolean).map(line=>{
     const [date,amt,name] = line.split(','); const amount = +amt; const key = hash(line);
-    const m = String(name||'').match(/^(\d{4})/); const c = m ? CASES.find(x=>x.id.slice(10)===m[1]) : null;
+    const m = String(name||'').match(/^(\d{10})/); const c = m ? CASES.find(x=>x.id.replace(/\D/g,'')===m[1]) : null;
     let st='ok', why='';
     if(IMPORTED.has(key)){ st='dup'; why='取込済みの行（二重反映しない）'; }
     else if(!c){ st='ng'; why='振込名義に SPLL番号がない'; }
@@ -730,7 +730,7 @@ function openCsv(){
     <div class="dtop"><h2 id="csvT">入金CSVを取り込む</h2><button class="btn" type="button" data-close="1" style="margin-left:auto">閉じる</button></div>
     <div class="dbody">
       <div class="card"><h4>1. CSVを貼り付ける（モックではサンプルを入れてあります）</h4>
-        <label for="csvText" class="muted" style="font-size:12px">列：日付,金額,振込名義（振込名義の先頭に SPLL番号の下4桁）</label>
+        <label for="csvText" class="muted" style="font-size:12px">列：日付,金額,振込名義（振込名義の先頭に SPLL番号の数字10桁。例：2026110131）</label>
         <textarea id="csvText" style="width:100%;min-height:130px;border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--sunk);font-family:var(--f-mono);font-size:12.5px">${esc(sampleCsv())}</textarea>
         <div style="margin-top:8px"><button class="btn primary" type="button" id="csvMatch">照合する</button></div></div>
       <div class="card" id="csvResult"><h4>2. 照合結果</h4><div class="muted" style="font-size:13px">「照合する」を押すと、ここに行ごとの結果が出ます。</div></div>
@@ -764,7 +764,7 @@ function openSettings(){
         <small>オフ：担当者1名のスイッチ（現行）。オン：申請 → 別の担当者が承認（移行予定）。試すとスイッチの形が変わります。</small></div></div>
     <div class="card"><h4>契約書と支払い</h4>
       <div class="setrow"><span>利用許諾契約書</span><span class="muted">v5.0・formrun → CloudSign</span><small>クラウドサインのテンプレートに登録する固定文面。差込は当事者欄だけ。当事者表記は「SPLL事業TRPG事務局代表法人株式会社アークライト」（各パートナーを代表）</small></div>
-      <div class="setrow"><span>別紙（許諾作品通知書）</span><span class="muted">v1.0・CloudSign API</span><small>専用ページの申込みから台帳で生成し、CloudSign API で送信。同意で本契約に追加。対象作品の表は作品数に応じて行が増えます</small></div>
+      <div class="setrow"><span>別紙（許諾作品通知書）</span><span class="muted">v1.0・CloudSign API</span><small>専用ページの申込みから台帳で生成し、CloudSign API で送信。同意で本契約に追加。対象原作の表は作品数に応じて行が増えます</small></div>
       <div class="setrow"><span>支払方法（利用区分ごと）</span><span class="muted">商品販売＝前払い／電子配信＝後払い</span><small>料金表の列で決める。前払いは入金確認で許諾が有効、後払いは同意の時点で有効</small></div>
       <div class="setrow"><span>期限</span><span class="muted">同意待ち・入金待ち 3か月</span><small>過ぎたら日次バッチで取消（同意待ちは CloudSign の書類も取り消す）</small></div>
       <div class="setrow"><span>入金CSV</span><span class="muted">日付・金額・振込名義</span><small>振込名義の先頭の SPLL番号と金額で照合。照合できない行は「未照合の入金」に残す</small></div>

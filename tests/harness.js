@@ -2197,8 +2197,9 @@ const gv=n=>vm.runInContext(n,sandbox);   // GAS の const はサンドボック
 // 400. スキーマ v13：新しい表と列がある（setup_migrate は足りないものだけ追加する）
 ['Agreements','Apply_Queue','Payment_Imports','Payments','Partner_List_Versions'].forEach(function(n){ ok(!!G.sheet_(OPS,n),'v13 の表がある: '+n); });
 const lcHead=G.sheet_(OPS,'License_Cases').getRange(1,1,1,G.sheet_(OPS,'License_Cases').getLastColumn()).getValues()[0];
-['agreement_no','besshi_document_id','besshi_hash','payment_timing','payment_status','payment_due','paid_at'].forEach(function(c){ ok(lcHead.indexOf(c)>=0,'License_Cases に列がある: '+c); });
-ok(gv('SCHEMA_VERSION')===13,'SCHEMA_VERSION は 13');
+['agreement_no','besshi_document_id','besshi_hash','payment_timing','payment_status','payment_due','paid_at','creation_title'].forEach(function(c){ ok(lcHead.indexOf(c)>=0,'License_Cases に列がある: '+c); });
+ok(gv('SCHEMA_VERSION')===14,'SCHEMA_VERSION は 14');
+ok(!!G.sheet_(OPS,'Link_Requests'),'v14 の表がある: Link_Requests');
 G.migrateSchema_();
 ok(G.sheet_(OPS,'Agreements').getLastRow()===1,'移行は冪等（行は増えない）');
 
@@ -2306,7 +2307,7 @@ const xss=G.besshiSampleTerms_(1,'PREPAID'); xss.works[0].work_title='<script>al
 ok(G.besshiHtml_(xss).indexOf('<script>alert')<0,'作品名などは HTML エスケープする');
 const h1=G.besshiHash_(st100), st100b=G.besshiSampleTerms_(100,'PREPAID'); st100b.works[5].credit_text='改変';
 ok(/^[0-9a-f]{16}$/.test(h1)&&h1===G.besshiHash_(G.besshiSampleTerms_(100,'PREPAID'))&&h1!==G.besshiHash_(st100b),'照合コードは条件が同じなら同じ、1文字でも違えば変わる');
-ok(G.besshiPdfBlob_(st100).name==='SPLL別紙_SPLL-TEST-100.pdf','PDF の名前は SPLL番号');
+ok(G.besshiPdfBlob_(st100).name==='SPLL別紙_SPLL-209911-0100.pdf','PDF の名前は SPLL番号');
 
 // 408. 請求書：前払いの別紙だけ同じPDFの後ろに付ける。発行者はアークライト（適格請求書の記載事項）
 const ia=G.invoiceAmounts_(16500), ib=G.invoiceAmounts_(1000), ic=G.invoiceAmounts_(11000);
@@ -2318,12 +2319,17 @@ ok(/<h1>請求書<\/h1>/.test(preHtml)&&!/<h1>請求書<\/h1>/.test(postHtml),'�
 ok(preHtml.indexOf('page-break-before:always')>=0&&preHtml.indexOf('<h1>請求書')>preHtml.indexOf('条件照合コード：'),'請求書は別紙の後ろの新しいページから');
 ok(['株式会社アークライト','T1234567890123','東京都千代田区テスト1-1','INV-TEST-3','15,000円','1,500円','16,500円','10%','テスト銀行 本店 普通 1234567'].every(x=>preHtml.indexOf(x)>=0),
   '請求書に発行者・登録番号・番号・税抜・消費税・税込・税率・振込先が載る');
-ok(preHtml.indexOf('山田 太郎（サンプル）')>=0&&preHtml.indexOf('（例：'+preT.license_id.slice(-4)+' ヤマダタロウ）')>=0,'宛名と振込名義の案内（SPLL番号の下4桁）が載る');
+ok(preHtml.indexOf('山田 太郎（サンプル）')>=0&&preHtml.indexOf('（例：2099110003 ヤマダタロウ）')>=0,'宛名と振込名義の案内（SPLL番号の数字10桁。末尾4桁は毎月振り直すため）が載る');
 ok(G.invoiceConfigReady_(invCfg)&&!G.invoiceConfigReady_({reg:'T123',address:'x',bank:'y'})&&!G.invoiceConfigReady_({reg:'T1234567890123',address:'',bank:'y'}),
   '登録番号（T＋13桁）・住所・振込先がそろわないと請求書を作れない');
 ok(/（未設定）/.test(G.besshiHtml_(preT,{reg:'',address:'',bank:''})),'設定が無いときは（未設定）と出る（試作用。本番の送信は invoiceConfigReady_ で止める）');
 const xinv=G.besshiSampleTerms_(1,'PREPAID'); xinv.party_name='<img src=x onerror=alert(1)>';
 ok(G.besshiHtml_(xinv,invCfg).indexOf('<img src=x')<0,'請求書の宛名もエスケープする');
+// 409. 用語：原作は「対象原作」、利用者の作品は「二次創作物」。SPLL番号は二次創作物ごと
+ok(licMd.indexOf('対象作品')<0&&besshiMd.indexOf('対象作品')<0,'契約書・別紙に「対象作品」が残っていない（対象原作に統一）');
+ok(/「二次創作物」とは/.test(licMd)&&/二次創作物ごとに付与する識別番号/.test(licMd),'契約書で二次創作物と SPLL番号（二次創作物ごと）を定義');
+ok(preHtml.indexOf('二次創作物の名称（予定）')>=0&&preHtml.indexOf(preT.creation_title)>=0&&preHtml.indexOf('二次創作物「')>=0,'別紙と請求書の件名に二次創作物の名称が載る');
+ok(/契約番号及び登録した電子メールアドレスを入力して、リンクの再送/.test(licMd),'契約書に専用ページのリンクの再送（契約番号＋登録メール）の定めがある');
 ok(besshiMd.indexOf('# 請求書（前払いの別紙に付ける')>=0&&/INVOICE_BANK_ACCOUNT/.test(besshiMd)&&licMd.indexOf('株式会社アークライトが利用者に請求し、収受します')>=0,
   '正本に請求書の定めがある（別紙・利用許諾契約書 第6条第3項）');
 
