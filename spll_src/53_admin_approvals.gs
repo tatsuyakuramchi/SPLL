@@ -11,7 +11,18 @@
  * 承認待ち（APPROVAL_PENDING）の案件に、担当者Aが申請を出す（1件につき未決の申請は1つだけ）。
  * 担当者B（A以外）が承認すると、申請の内容が実行される。却下すると申請だけが閉じ、案件は承認待ちのまま。
  * 申請者本人は承認も却下もできない（取り下げはできる）。
+ *
+ * 承認の体制は Config の APPROVAL_MODE で切り替える（コードの書き換えなし）：
+ *   SINGLE（既定・ワンオペ）… 1人で申請から承認まで通して行える。申請の記録は残し、Events に mode を残す
+ *   TWO_PERSON              … 申請した本人は承認・却下できない（別紙の承認、認証の停止・失効・再有効化・別紙の取消し、入金未確認での停止）
  */
+const APPROVAL_MODES = ['SINGLE','TWO_PERSON'];
+function approvalMode_(){
+  const v = String(getConfig_('APPROVAL_MODE', 'SINGLE') || '').trim().toUpperCase();
+  return v === 'TWO_PERSON' ? 'TWO_PERSON' : 'SINGLE';
+}
+function isTwoPerson_(){ return approvalMode_() === 'TWO_PERSON'; }
+function sameActor_(a, b){ return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase(); }
 const APPROVAL_KINDS = {
   BESSHI_APPROVE: { label: '申込を承認して別紙を送る', event: 'APPLICATION_APPROVED', from: ['APPROVAL_PENDING','MANUAL_REVIEW'] },
   BESSHI_REJECT:  { label: '申込を承認しない', event: 'APPLICATION_REJECTED', from: ['APPROVAL_PENDING','MANUAL_REVIEW','APPROVED'], needReason: true }
@@ -52,7 +63,8 @@ function decideApproval_(requestId, approve, note, actorEmail){
     const r = readRows_(ssOps_(), 'Approval_Requests').find(function(x){ return x.request_id === String(requestId); });
     if(!r) throw new Error('DATA_NOT_FOUND: 申請がありません: ' + requestId);
     if(r.status !== 'REQUESTED') throw new Error('DATA_CONFLICT: この申請は処理済みです（' + r.status + '）');
-    if(String(r.requested_by).toLowerCase() === String(actorEmail || '').toLowerCase())
+    const mode = approvalMode_();
+    if(mode === 'TWO_PERSON' && sameActor_(r.requested_by, actorEmail))
       throw new Error('AUTHORIZATION_ERROR: 申請した本人は承認・却下できません。別の担当者が行ってください');
     const def = APPROVAL_KINDS[r.kind];
     const now = new Date().toISOString();
@@ -63,7 +75,7 @@ function decideApproval_(requestId, approve, note, actorEmail){
       status: approve ? 'APPROVED' : 'REJECTED', decided_by: String(actorEmail || ''), decided_at: now,
       decision_note: sanitizeCell_(String(note || '').slice(0, 1000)) });
     logEvent_('approval_request', r.request_id, actorEmail || 'system', { status: 'REQUESTED' },
-      { status: approve ? 'APPROVED' : 'REJECTED', kind: r.kind, license_id: r.license_id });
+      { status: approve ? 'APPROVED' : 'REJECTED', kind: r.kind, license_id: r.license_id, mode: mode, self: sameActor_(r.requested_by, actorEmail) });
     return { status: approve ? 'APPROVED' : 'REJECTED', kind: r.kind, license_id: r.license_id };
   });
 }
@@ -79,4 +91,45 @@ function withdrawApproval_(requestId, actorEmail){
     logEvent_('approval_request', r.request_id, actorEmail, { status: 'REQUESTED' }, { status: 'WITHDRAWN' });
     return true;
   });
+}
+
+/**
+ * 画面のスイッチから呼ぶ入口。ワンオペなら申請してそのまま承認まで通す。2人体制なら申請だけ作って承認待ちにする。
+ */
+function submitApproval_(kind, licenseId, note, actorEmail){
+  const req = requestApproval_(kind, licenseId, note, actorEmail);
+  if(isTwoPerson_()) return { request_id: req.request_id, status: 'REQUESTED', mode: 'TWO_PERSON' };
+  const d = decideApproval_(req.request_id, true, 'ワンオペ（申請者が承認）', actorEmail);
+  return { request_id: req.request_id, status: d.status, mode: 'SINGLE' };
+}
+
+// ---- 画面（google.script.run）から呼ぶ関数 ----
+function admin_submitApproval(kind, licenseId, note){
+  const actor = requireRole_(['OPERATIONS','LEGAL_ADMIN']);
+  return submitApproval_(kind, licenseId, note, actor.email);
+}
+function admin_decideApproval(requestId, approve, note){
+  const actor = requireRole_(['OPERATIONS','LEGAL_ADMIN']);
+  return decideApproval_(requestId, approve !== false, note, actor.email);
+}
+function admin_withdrawApproval(requestId){
+  const actor = requireRole_(['OPERATIONS','LEGAL_ADMIN']);
+  return withdrawApproval_(requestId, actor.email);
+}
+function admin_listApprovals(){
+  requireRole_([]);
+  return readRows_(ssOps_(), 'Approval_Requests').filter(function(r){ return r.status === 'REQUESTED'; })
+    .map(function(r){ return { request_id: r.request_id, license_id: r.license_id, kind: r.kind, label: (APPROVAL_KINDS[r.kind] || {}).label || r.kind,
+      note: r.note, requested_by: r.requested_by, requested_at: String(r.requested_at || '').slice(0, 16) }; });
+}
+/** 承認の体制（ワンオペ／2人体制）。切り替えは法務・システム管理だけ。変更は Events に残る */
+function admin_getApprovalMode(){ requireRole_([]); return { mode: approvalMode_(), modes: APPROVAL_MODES }; }
+function admin_setApprovalMode(mode){
+  const actor = requireRole_(['LEGAL_ADMIN']);
+  const m = String(mode || '').trim().toUpperCase();
+  if(APPROVAL_MODES.indexOf(m) < 0) throw new Error('VALIDATION_ERROR: 承認の体制は SINGLE か TWO_PERSON です');
+  const before = approvalMode_();
+  setConfig_('APPROVAL_MODE', m);
+  logEvent_('config', 'APPROVAL_MODE', actor.email, { value: before }, { value: m });
+  return { mode: m };
 }

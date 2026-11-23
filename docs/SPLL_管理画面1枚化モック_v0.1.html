@@ -356,7 +356,7 @@ const IMPORTED = new Set();
 const expiryOf = c => c.cs==='SIGNING' ? addMonths(c.sent,3) : (c.cs==='PAYMENT_PENDING' ? addMonths(c.agreed,3) : '');
 
 /* ===== 画面状態 ===== */
-const S = {filter:'action',q:'',sel:'SPLL-202611-0131',actor:'tanaka',feeHoldTwoPerson:false,settingsTab:'settings',feePct:50};
+const S = {filter:'action',q:'',sel:'SPLL-202611-0131',actor:'tanaka',twoPerson:false,settingsTab:'settings',feePct:50};
 const $ = s => document.querySelector(s);
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const actor = () => USERS.find(u=>u.id===S.actor);
@@ -379,9 +379,9 @@ function switches(c){
   else if(!['APPROVAL_PENDING','MANUAL_REVIEW'].includes(c.cs)) sendWhy = `現在地「${CS[c.cs].l}」では承認できません`;
   else if(ag!=='ACTIVE') sendWhy = '利用許諾契約が有効ではありません';
   else if(c.req) sendWhy = '申請中です（下の「承認待ちの申請」を別の担当者が承認・却下します）';
-  L.push({key:'send',grp:'contract',t:'申込を承認して別紙を送る',d:'担当者Aが別紙＋請求書のプレビューで申込の内容（二次創作物・原作・利用区分・金額）を確かめて申請し、A以外の担当者Bが承認したときだけ別紙を作って CloudSign で送る（自動では作らない）',kind:'button',role:'OPERATIONS',appr:true,
+  L.push({key:'send',grp:'contract',t:'申込を承認して別紙を送る',d: S.twoPerson ? '2人体制：担当者Aが別紙＋請求書のプレビューで申込の内容を確かめて申請し、A以外の担当者Bが承認したときだけ別紙を作って CloudSign で送る（自動では作らない）' : 'ワンオペ：別紙＋請求書のプレビューで申込の内容（二次創作物・原作・利用区分・金額）を確かめて承認すると、別紙を作って CloudSign で送る（自動では作らない）',kind:'button',role:'OPERATIONS',appr:S.twoPerson,
     why: sendWhy, extra:'preview'});
-  L.push({key:'reject',grp:'contract',t:'承認しない（差し戻し）',d:'担当者Aが理由をつけて申請し、別の担当者Bが承認すると、理由を添えてクリエーターへ知らせ、申込を取り消す',kind:'button',role:'OPERATIONS',danger:true,appr:true,
+  L.push({key:'reject',grp:'contract',t:'承認しない（差し戻し）',d: S.twoPerson ? '2人体制：担当者Aが理由をつけて申請し、別の担当者Bが承認すると、理由を添えてクリエーターへ知らせ、申込を取り消す' : '理由を添えてクリエーターへ知らせ、申込を取り消す',kind:'button',role:'OPERATIONS',danger:true,appr:S.twoPerson,
     why: !['APPROVAL_PENDING','MANUAL_REVIEW','APPROVED'].includes(c.cs) ? '承認待ちの申込だけが対象です' : (c.req ? '申請中です' : '')});
   // S2 条件確認
   L.push({key:'confirm',grp:'contract',t:'条件を確認して別紙を有効にする',d:'同意された別紙と台帳の食い違いを法務が確認した後に使う。支払方法に応じて入金待ち／提出待ちへ進む',kind:'button',role:'LEGAL_ADMIN',
@@ -393,12 +393,12 @@ function switches(c){
   else if(!rvFrom.includes(c.cs)) rvWhy = `現在地「${CS[c.cs].l}」では判定できません`;
   else if(!['IN_REVIEW','PENDING','ESCALATED'].includes(c.rv)) rvWhy = `判定済みです（${RV[c.rv][0]}）。新しい版が提出されると再び判定できます`;
   L.push({key:'review',grp:'review',t:'審査判定',d:'承認すると認証を発行し、バッジ生成ジョブを登録する',kind:'seg',role:'REVIEWER',why:rvWhy});
-  // S4 入金未確認で停止（担当者1名／設定で2名承認へ）
+  // S4 入金未確認で停止（ワンオペ／設定で2人体制）
   const feeOn = c.ce==='SUSPENDED' && c.reason==='FEE_PAYMENT_UNCONFIRMED';
   let feeWhy = '';
   if(!(c.ce==='ACTIVE' || feeOn)) feeWhy = c.ce==='SUSPENDED' ? '別の理由で停止中です（下の「一時停止・復帰」で扱う）' : '有効な認証がありません';
-  L.push({key:'fee',grp:'cert',t:'入金未確認で停止',d: (c.ps==='OVERDUE'?'後払いの支払期限を過ぎて未入金。':'') + (S.feeHoldTwoPerson ? '2名体制：申請 → 別の担当者が承認して切り替わる' : '担当者1名で切り替えられる（今後、2名承認へ移行予定）'),
-    kind: S.feeHoldTwoPerson ? 'request' : 'toggle', on:feeOn, role:'OPERATIONS', why:feeWhy, appr:S.feeHoldTwoPerson, future:!S.feeHoldTwoPerson});
+  L.push({key:'fee',grp:'cert',t:'入金未確認で停止',d: (c.ps==='OVERDUE'?'後払いの支払期限を過ぎて未入金。':'') + (S.twoPerson ? '2人体制：申請 → 別の担当者が承認して切り替わる' : 'ワンオペ：担当者1人で切り替えられる'),
+    kind: S.twoPerson ? 'request' : 'toggle', on:feeOn, role:'OPERATIONS', why:feeWhy, appr:S.twoPerson});
   // S5 一時停止（その他）・復帰
   let stWhy='', stMode='';
   if(c.ce==='ACTIVE'){ stMode='suspend'; }
@@ -477,7 +477,7 @@ function renderList(){
 function swRow(s,c){
   const locked = !can(s.role);
   const off = locked || !!s.why;
-  const tags = (s.appr?`<span class="tag appr">承認制</span>`:'') + (s.future?`<span class="tag future">2名承認へ移行予定</span>`:'') + `<span class="tag">${ROLE_LABEL[s.role]}</span>`;
+  const tags = (s.appr&&S.twoPerson?`<span class="tag appr">2人で承認</span>`:'') + (s.future?`<span class="tag future">2名承認へ移行予定</span>`:'') + `<span class="tag">${ROLE_LABEL[s.role]}</span>`;
   let ctl = '';
   if(s.kind==='toggle') ctl = `<button class="toggle" role="switch" aria-checked="${s.on}" aria-label="${esc(s.t)}" data-sw="${s.key}" ${off?'disabled':''}></button>`;
   else if(s.kind==='seg') ctl = `<div class="seg" role="group" aria-label="審査判定"><button type="button" data-sw="review" data-v="CLEARED" ${off?'disabled':''}>承認</button><button type="button" data-sw="review" data-v="CORRECTION_REQUIRED" ${off?'disabled':''}>是正</button><button type="button" data-sw="review" data-v="ESCALATED" ${off?'disabled':''}>上申</button></div>`;
@@ -485,7 +485,7 @@ function swRow(s,c){
     const label = s.key==='fee' ? (s.on?'復帰を申請':'停止を申請') : '申請する';
     ctl = `<button type="button" class="btn" data-sw="${s.key}" ${off||c.req?'disabled':''}>${label}</button>`;
   }
-  else ctl = `<button type="button" class="btn${s.danger?' danger':(s.key==='send'?' primary':'')}" data-sw="${s.key}" ${off?'disabled':''}>${s.key==='send'?'承認を申請':(s.key==='reject'?'承認しないを申請':'実行')}</button>`;
+  else ctl = `<button type="button" class="btn${s.danger?' danger':(s.key==='send'?' primary':'')}" data-sw="${s.key}" ${off?'disabled':''}>${s.key==='send'?(S.twoPerson?'承認を申請':'承認して送信'):(s.key==='reject'?(S.twoPerson?'承認しないを申請':'承認しない'):'実行')}</button>`;
   const why = locked ? `<div class="why">${ROLE_LABEL[s.role]}の権限が必要です</div>` : (s.why ? `<div class="why">${esc(s.why)}</div>` : '');
   const pv = s.extra==='preview' ? `<div class="d"><button type="button" class="btn" data-preview="${c.id}" style="padding:3px 10px;font-size:12px">別紙プレビュー</button></div>` : '';
   return `<div class="sw${off?' off':''}${locked?' locked':''}"><div class="t">${esc(s.t)}${tags}</div>${ctl}<div class="d">${esc(s.d)}</div>${why}${pv}</div>`;
@@ -494,7 +494,7 @@ function pendingBlock(c){
   if(!c.req) return '';
   const r = c.req, by = USERS.find(u=>u.id===r.by);
   const kinds = {revoke:'認証の失効',suspend:'一時停止',restore:'再有効化',terminate:'別紙の取消し',endmaster:'利用許諾契約の終了（全別紙）',fee_on:'入金未確認で停止',fee_off:'入金確認による復帰',besshi_approve:'申込を承認して別紙を送る',besshi_reject:'申込を承認しない'};
-  const self = r.by===S.actor, canAppr = can('LEGAL_ADMIN') || ((r.kind.startsWith('fee')||r.kind.startsWith('besshi')) && can('OPERATIONS'));
+  const self = S.twoPerson && r.by===S.actor, canAppr = can('LEGAL_ADMIN') || ((r.kind.startsWith('fee')||r.kind.startsWith('besshi')) && can('OPERATIONS'));
   let acts = '';
   if(self) acts = `<span class="muted">申請者本人は承認できません。別の担当者に切り替えて確認してください（右上「操作者」）</span><button class="btn" type="button" data-req="withdraw">取り下げ</button>`;
   else if(canAppr) acts = `<button class="btn primary" type="button" data-req="approve">承認</button><button class="btn" type="button" data-req="reject">却下</button>`;
@@ -600,7 +600,7 @@ function applyRequest(c){
     });
   }
   else if(r.kind==='fee_on'){ c.ce='SUSPENDED'; c.reason='FEE_PAYMENT_UNCONFIRMED'; if(c.cs==='CERTIFIED') c.cs='SUSPENDED'; log(c,`入金未確認で停止（承認：${ap}）`); }
-  else if(r.kind==='besshi_approve'){ APPLY.send(c); log(c,`（申請：${USERS.find(u=>u.id===r.by).name}／承認：${ap}）`); }
+  else if(r.kind==='besshi_approve'){ APPLY.send(c); log(c,`（申請：${USERS.find(u=>u.id===r.by).name}／承認：${ap}${S.twoPerson?'':'・ワンオペ'}）`); }
   else if(r.kind==='besshi_reject'){ APPLY.reject(c,{text:r.text}); log(c,`（申請：${USERS.find(u=>u.id===r.by).name}／承認：${ap}）`); }
   else if(r.kind==='fee_off'){ c.ce='ACTIVE'; c.reason=''; returnFromCert(c); log(c,`入金確認で復帰（承認：${ap}）`); }
   c.req = null;
@@ -624,12 +624,19 @@ function dialog(o){
   };
 }
 
+/** 申請を出す。ワンオペ（既定）なら同じ担当者がそのまま承認まで通す。2人体制なら別の担当者の承認を待つ */
+function submitReq(c,req,label){
+  c.req = Object.assign({by:S.actor,at:now()},req);
+  log(c,'申請：'+label);
+  if(!S.twoPerson){ applyRequest(c); render(); toast('実行しました（ワンオペ：申請と承認を同じ担当者が記録）'); return; }
+  render(); toast('申請しました。別の担当者の承認待ちです');
+}
 function onSwitch(key,val){
   const c = CASES.find(x=>x.id===S.sel); const s = switches(c).find(x=>x.key===key);
   if(!s || s.why || !can(s.role)) return;
   const run = f => { const m = APPLY[key](c,Object.assign({v:val},f)); render(); toast(m); };
   if(key==='send') return openPreview(c,{send:true});
-  if(key==='reject') return dialog({title:'「承認しない」を申請する',body:`${c.id} の申込を承認せず取り消すことを申請します。別の担当者が承認した時点で取り消し、理由をクリエーターへメールで知らせます。`,input:'承認しない理由',required:true,ok:'申請する',danger:true,done:f=>{ c.req={kind:'besshi_reject',reason:'',text:f.text,by:S.actor,at:now()}; log(c,'申請：承認しない — '+f.text); render(); toast('申請しました。別の担当者の承認待ちです'); }});
+  if(key==='reject') return dialog({title: S.twoPerson?'「承認しない」を申請する':'承認しない（差し戻し）',body: S.twoPerson?`${c.id} の申込を承認せず取り消すことを申請します。別の担当者が承認した時点で取り消し、理由をクリエーターへメールで知らせます。`:`${c.id} の申込を承認せず、取り消します。理由はクリエーターへメールで知らせます。`,input:'承認しない理由',required:true,ok:S.twoPerson?'申請する':'承認しない',danger:true,done:f=>submitReq(c,{kind:'besshi_reject',reason:'',text:f.text},'承認しない — '+f.text)});
   if(key==='confirm') return dialog({title:'条件を確認して別紙を有効にする',body:`${c.id} を${c.pay==='PREPAID'?'入金待ち':'提出待ち'}へ進めます。確認した内容を残してください。`,input:'確認メモ',required:true,ok:'有効にする',done:run});
   if(key==='review'){
     if(val==='CLEARED') return dialog({title:'審査を承認する',body:'承認すると認証を発行し、バッジ生成ジョブを登録します。審査完了のメールが送られます。',input:'審査コメント（任意）',ok:'承認する',done:run});
@@ -637,13 +644,13 @@ function onSwitch(key,val){
   }
   if(key==='fee'){
     if(s.kind==='toggle') return dialog({title: s.on?'入金を確認して復帰する':'入金未確認で停止する',body: s.on?'認証を有効に戻し、バッジの配布を再開します。':'認証を停止します。停止中はバッジを配布しません。',input:'メモ（任意）',ok:s.on?'復帰する':'停止する',danger:!s.on,done:run});
-    return dialog({title: s.on?'復帰を申請する':'停止を申請する',body:'2名体制：別の担当者が承認した時点で切り替わります。',input:'申請の内容',required:true,ok:'申請する',done:f=>{ c.req={kind:s.on?'fee_off':'fee_on',reason:'FEE_PAYMENT_UNCONFIRMED',text:f.text,by:S.actor,at:now()}; log(c,'申請：'+(s.on?'入金確認で復帰':'入金未確認で停止')); render(); toast('申請しました。承認待ちです'); }});
+    return dialog({title: s.on?'復帰を申請する':'停止を申請する',body:'2人体制：別の担当者が承認した時点で切り替わります。',input:'申請の内容',required:true,ok:'申請する',done:f=>submitReq(c,{kind:s.on?'fee_off':'fee_on',reason:'FEE_PAYMENT_UNCONFIRMED',text:f.text},s.on?'入金確認で復帰':'入金未確認で停止')});
   }
   if(['suspend','revoke','terminate','endmaster'].includes(key)){
     const kind = key==='suspend' ? s.mode : key;
     const titles = {suspend:'一時停止を申請する',restore:'再有効化を申請する',revoke:'失効を申請する',terminate:'別紙の取消しを申請する',endmaster:'利用許諾契約の終了を申請する'};
-    return dialog({title:titles[kind],body:'別の担当者（法務）が承認した時点で切り替わります。',reasons: kind==='restore'?null:['GUIDELINE_REVIEW','RIGHTS_CLAIM','OTHER'],input:'申請の内容',required:true,ok:'申請する',danger:kind!=='restore',
-      done:f=>{ c.req={kind,reason:f.reason||'OTHER',text:f.text,by:S.actor,at:now()}; log(c,'申請：'+titles[kind].replace('を申請する','')); render(); toast('申請しました。承認待ちです'); }});
+    return dialog({title: S.twoPerson?titles[kind]:titles[kind].replace('を申請する','する'),body: S.twoPerson?'別の担当者（法務）が承認した時点で切り替わります。':'ワンオペ：申請と承認を同じ担当者が記録し、すぐに切り替わります。',reasons: kind==='restore'?null:['GUIDELINE_REVIEW','RIGHTS_CLAIM','OTHER'],input:'申請の内容',required:true,ok:S.twoPerson?'申請する':'実行する',danger:kind!=='restore',
+      done:f=>submitReq(c,{kind,reason:f.reason||'OTHER',text:f.text},titles[kind].replace('を申請する',''))});
   }
   if(key==='cancel') return dialog({title:'申込を取り消す',body:`${c.id} を取消にします。元には戻せません。`,input:'取消の理由',required:true,ok:'取り消す',danger:true,done:run});
 }
@@ -689,7 +696,7 @@ function openPreview(c,opt){
   const canSend = P.send && ['APPROVAL_PENDING','MANUAL_REVIEW'].includes(c.cs) && !c.req && can('OPERATIONS');
   L.innerHTML = `<div class="pv" role="dialog" aria-modal="true" aria-labelledby="pvT">
     <div class="ptop"><h2 id="pvT">別紙（許諾作品通知書）プレビュー</h2><span class="mono muted">${c.id}</span><span id="pvStat" class="muted"></span>
-      <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">${canSend?'<button class="btn primary" type="button" id="pvSend">この内容で承認を申請する</button>':''}<button class="btn" type="button" id="pvClose">閉じる</button></span></div>
+      <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">${canSend?`<button class="btn primary" type="button" id="pvSend">${S.twoPerson?'この内容で承認を申請する':'この内容で承認して CloudSign へ送信'}</button>`:''}<button class="btn" type="button" id="pvClose">閉じる</button></span></div>
     <div class="pbody"><div class="pages"></div>
       <div class="side">
         <div><b>作品数を変えて試す</b><div class="seg" style="margin-top:6px"><button type="button" data-n="0">実データ</button><button type="button" data-n="12">12</button><button type="button" data-n="40">40</button><button type="button" data-n="100">100</button></div>
@@ -697,7 +704,7 @@ function openPreview(c,opt){
         <div><b>許諾が有効になるまで</b><div class="flow" style="margin-top:6px">
           <div><b>0</b>利用許諾契約は formrun → CloudSign で締結済み</div>
           <div><b>1</b>専用ページ（トークン式）で作品を選んで申込 → 承認待ち</div>
-          <div><b>1'</b>担当者Aが確認して申請 → 別の担当者Bが承認</div>
+          <div><b>1'</b>${S.twoPerson?'担当者Aが確認して申請 → 別の担当者Bが承認':'事務局がこの画面で確認して承認（ワンオペ）'}</div>
           <div><b>2</b>台帳の条件 → 別紙PDF（契約番号入り）</div>
           <div><b>3</b>CloudSign API で送信 → 同意で本契約に追加</div>
           <div><b>4</b>前払い：入金CSVで確認 → 有効／後払い：すぐ有効</div>
@@ -706,7 +713,7 @@ function openPreview(c,opt){
       </div></div></div>`;
   L.querySelectorAll('[data-n]').forEach(b=>b.onclick=()=>{ P.n=+b.dataset.n; draw(); });
   $('#pvClose').onclick = () => L.innerHTML='';
-  if($('#pvSend')) $('#pvSend').onclick = () => { L.innerHTML=''; c.req={kind:'besshi_approve',reason:'',text:'別紙・請求書のプレビューで内容を確認',by:S.actor,at:now()}; log(c,'申請：申込を承認して別紙を送る'); render(); toast('申請しました。別の担当者が承認すると別紙を送ります'); };
+  if($('#pvSend')) $('#pvSend').onclick = () => { L.innerHTML=''; submitReq(c,{kind:'besshi_approve',reason:'',text:'別紙・請求書のプレビューで内容を確認'},'申込を承認して別紙を送る'); if(!S.twoPerson) toast('承認しました。別紙を CloudSign で送信し、同意待ちです'); };
   draw(); $('#pvClose').focus();
 }
 
@@ -769,9 +776,9 @@ function openSettings(){
   const tab = S.settingsTab;
   const settings = `
     <div class="card"><h4>運用ルール</h4>
-      <div class="setrow"><span>入金未確認による停止・復帰に、別の担当者の承認を要する（2名体制）</span>
-        <button class="toggle" role="switch" id="twoPerson" aria-checked="${S.feeHoldTwoPerson}" aria-label="2名体制"></button>
-        <small>オフ：担当者1名のスイッチ（現行）。オン：申請 → 別の担当者が承認（移行予定）。試すとスイッチの形が変わります。</small></div></div>
+      <div class="setrow"><span>承認の体制：承認にあたる操作に、申請者とは別の担当者の承認を要する（2人体制）</span>
+        <button class="toggle" role="switch" id="twoPerson" aria-checked="${S.twoPerson}" aria-label="2人体制"></button>
+        <small>オフ（既定・ワンオペ）：1人で申請から承認まで通せる。申請と承認の記録は残る。オン：申請 → 別の担当者が承認。対象は別紙の承認・承認しない、入金未確認での停止・復帰、一時停止・失効・再有効化、別紙の取消し、契約の終了。Config <code>APPROVAL_MODE</code>（SINGLE／TWO_PERSON）</small></div></div>
     <div class="card"><h4>利用許諾料の分配</h4>
       <div class="setrow"><span>事務局手数料（分配の前に差し引く）</span>
         <span style="display:flex;gap:6px;align-items:center"><input id="feePct" type="number" min="0" max="100" step="1" value="${S.feePct}" style="width:72px;border:1px solid var(--line);border-radius:8px;padding:4px 8px;background:var(--sunk)" aria-label="事務局手数料（%）">%
@@ -812,7 +819,7 @@ function openSettings(){
     if(!(v>=0 && v<=100)){ toast('0〜100 の数で指定してください'); return; }
     S.feePct = v; openSettings(); toast('事務局手数料を '+v+'% にしました（以後の入金から適用）');
   };
-  const tp = $('#twoPerson'); if(tp) tp.onclick = () => { S.feeHoldTwoPerson=!S.feeHoldTwoPerson; tp.setAttribute('aria-checked',S.feeHoldTwoPerson); render(); toast(S.feeHoldTwoPerson?'2名体制に切り替えました':'担当者1名のスイッチに戻しました'); };
+  const tp = $('#twoPerson'); if(tp) tp.onclick = () => { S.twoPerson=!S.twoPerson; tp.setAttribute('aria-checked',S.twoPerson); render(); toast(S.twoPerson?'2人体制に切り替えました':'ワンオペに戻しました'); };
 }
 
 /* ===== イベント ===== */

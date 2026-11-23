@@ -293,6 +293,7 @@ const reqA=G.admin_reactivateCert(contract.contract_id);
 ok(reqA && reqA.request_id,'再有効化は申請を作成（即時変更しない）');
 ok(rows(OPS,'Certificates')[0].status==='SUSPENDED','承認前は状態が変わらない');
 ok(G.admin_listCertChangeRequests().some(r=>r.request_id===reqA.request_id),'承認待ち一覧に出る');
+G.setConfig_('APPROVAL_MODE','TWO_PERSON');  // 以下は2人体制での職務分離を確かめる
 let selfErr=false; try{ G.admin_approveCertChange(reqA.request_id,true,''); }catch(e){ selfErr=/本人は承認できません/.test(String(e.message)); }
 ok(selfErr,'申請者本人の承認は拒否（職務分離）');
 const SessA=G.Session;
@@ -2490,6 +2491,7 @@ ok(rjNoReason&&rows(OPS,'License_Cases').find(k=>k.license_id===rjApp.license_id
 ok(/承認した場合に限り/.test(licMd)&&/申込みを承認せず/.test(licMd),'契約書：承認した場合に限り別紙を送る・承認しない場合は通知');
 
 // 445. 承認の操作は2人：担当者Aが申請 → 別の担当者Bが承認。本人は承認も却下もできない
+G.setConfig_('APPROVAL_MODE','TWO_PERSON');
 const twApp=mkAppV4(['WRK-ARK00012'],'書籍');
 const twCase=()=>rows(OPS,'License_Cases').find(k=>k.license_id===twApp.license_id);
 G.updateLicenseCaseInfo_(twApp.license_id,{ agreement_no:ag1.agreement_no });
@@ -2519,6 +2521,25 @@ ok(tw2Wd&&rows(OPS,'Approval_Requests').find(r=>r.request_id===tw2Req2.request_i
 const tw2Req3=G.requestApproval_('BESSHI_REJECT',tw2.license_id,'原作の権利者が未確定','a@example.com');
 G.decideApproval_(tw2Req3.request_id,true,'了解','b@example.com');
 ok(rows(OPS,'License_Cases').find(k=>k.license_id===tw2.license_id).case_status==='CANCELLED','承認しない申請が承認されると申込は取消');
+
+// 446. ワンオペ（既定）：1人で申請から承認まで通せる。2人体制に切り替えると本人は承認できない
+G.setConfig_('APPROVAL_MODE','');
+ok(G.approvalMode_()==='SINGLE','承認の体制の既定はワンオペ（SINGLE）');
+const soApp=mkAppV4(['WRK-ARK00012'],'書籍');
+G.updateLicenseCaseInfo_(soApp.license_id,{ agreement_no:ag1.agreement_no });
+G.transitionLicenseCase_(soApp.license_id,'APPROVAL_REQUESTED',{actor:'queue'});
+const soRes=G.submitApproval_('BESSHI_APPROVE',soApp.license_id,'内容を確認','a@example.com');
+const soRow=rows(OPS,'Approval_Requests').find(r=>r.request_id===soRes.request_id);
+ok(soRes.status==='APPROVED'&&soRow.requested_by==='a@example.com'&&soRow.decided_by==='a@example.com'&&rows(OPS,'License_Cases').find(k=>k.license_id===soApp.license_id).case_status==='APPROVED','ワンオペ：申請と承認を1人で通し、記録は残る');
+G.setConfig_('APPROVAL_MODE','TWO_PERSON');
+const so2=mkAppV4(['WRK-ARK00012'],'書籍');
+G.updateLicenseCaseInfo_(so2.license_id,{ agreement_no:ag1.agreement_no });
+G.transitionLicenseCase_(so2.license_id,'APPROVAL_REQUESTED',{actor:'queue'});
+const so2Res=G.submitApproval_('BESSHI_APPROVE',so2.license_id,'内容を確認','a@example.com');
+ok(so2Res.status==='REQUESTED'&&rows(OPS,'License_Cases').find(k=>k.license_id===so2.license_id).case_status==='APPROVAL_PENDING','2人体制：申請だけ作り、承認待ちのまま');
+let soBad=false; try{ G.admin_setApprovalMode('THREE'); }catch(e){ soBad=/SINGLE か TWO_PERSON/.test(String(e.message)); }
+ok(soBad,'承認の体制は SINGLE か TWO_PERSON だけ');
+G.setConfig_('APPROVAL_MODE','');
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

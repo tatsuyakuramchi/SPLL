@@ -973,7 +973,7 @@ function admin_requestCertChange(contractId, requestedStatus, reasonCode, reason
   return { request_id:reqId };
 }
 /**
- * 承認・却下（LEGAL_ADMIN）。申請者本人による承認は原則拒否
+ * 承認・却下（LEGAL_ADMIN）。2人体制（APPROVAL_MODE=TWO_PERSON）では申請者本人による承認は原則拒否。ワンオペでは本人が承認できる
  * （緊急時のみ emergencyReason を指定して EMERGENCY_OVERRIDE として記録・V2-018）。
  */
 function admin_approveCertChange(requestId, approve, emergencyReason){
@@ -990,9 +990,11 @@ function admin_approveCertChange(requestId, approve, emergencyReason){
   }
   let override = '';
   if(String(req.requested_by).toLowerCase() === String(actor.email).toLowerCase()){
-    if(!String(emergencyReason||'').trim())
+    // ワンオペ（APPROVAL_MODE=SINGLE）では申請者本人が承認できる。記録には SINGLE_OPERATOR と残す
+    if(!isTwoPerson_()) override = 'SINGLE_OPERATOR';
+    else if(!String(emergencyReason||'').trim())
       throw new Error('AUTHORIZATION_ERROR: 申請者本人は承認できません（緊急時は emergencyReason を指定＝EMERGENCY_OVERRIDE として記録されます）');
-    override = 'EMERGENCY_OVERRIDE: ' + String(emergencyReason);
+    else override = 'EMERGENCY_OVERRIDE: ' + String(emergencyReason);
   }
   applyCertStatus_(req.contract_id, req.requested_status, req.reason_code, req.reason_text, req.legal_case_id, actor.email);
   updateRow_(ssOps_(),'Certificate_Change_Requests','request_id',requestId,
@@ -1003,7 +1005,7 @@ function admin_approveCertChange(requestId, approve, emergencyReason){
     catch(e){ logError_('PROCESSING_ERROR','certReactivateBadge', e, { contract_id:req.contract_id }); }
   }
   logEvent_('cert_change_request', requestId, actor.email, {status:'REQUESTED'},
-    { status:'APPLIED', applied_status:req.requested_status, emergency:!!override });
+    { status:'APPLIED', applied_status:req.requested_status, emergency:/^EMERGENCY/.test(override), mode:approvalMode_() });
   return true;
 }
 /** 未処理の状態変更申請一覧 */
