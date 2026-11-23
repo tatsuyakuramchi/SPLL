@@ -2198,7 +2198,8 @@ const gv=n=>vm.runInContext(n,sandbox);   // GAS の const はサンドボック
 ['Agreements','Apply_Queue','Payment_Imports','Payments','Partner_List_Versions'].forEach(function(n){ ok(!!G.sheet_(OPS,n),'v13 の表がある: '+n); });
 const lcHead=G.sheet_(OPS,'License_Cases').getRange(1,1,1,G.sheet_(OPS,'License_Cases').getLastColumn()).getValues()[0];
 ['agreement_no','besshi_document_id','besshi_hash','payment_timing','payment_status','payment_due','paid_at','creation_title'].forEach(function(c){ ok(lcHead.indexOf(c)>=0,'License_Cases に列がある: '+c); });
-ok(gv('SCHEMA_VERSION')===14,'SCHEMA_VERSION は 14');
+ok(gv('SCHEMA_VERSION')===15,'SCHEMA_VERSION は 15');
+ok(!!G.sheet_(OPS,'Distributions'),'v15 の表がある: Distributions');
 ok(!!G.sheet_(OPS,'Link_Requests'),'v14 の表がある: Link_Requests');
 G.migrateSchema_();
 ok(G.sheet_(OPS,'Agreements').getLastRow()===1,'移行は冪等（行は増えない）');
@@ -2332,6 +2333,40 @@ ok(preHtml.indexOf('二次創作物の名称（予定）')>=0&&preHtml.indexOf(p
 ok(/契約番号及び登録した電子メールアドレスを入力して、リンクの再送/.test(licMd),'契約書に専用ページのリンクの再送（契約番号＋登録メール）の定めがある');
 ok(besshiMd.indexOf('# 請求書（前払いの別紙に付ける')>=0&&/INVOICE_BANK_ACCOUNT/.test(besshiMd)&&licMd.indexOf('各ライセンサーを代理して、自己の名義で一括して利用者に請求し、収受します')>=0&&licMd.indexOf('利用許諾料の分配としてライセンサーに配分')>=0&&preHtml.indexOf('SPLLパートナー各社を代理して一括して発行')>=0,
   '正本に請求書の定めがある（別紙・利用許諾契約書 第6条第3項）');
+
+// ============ 利用許諾料の分配（二次創作物1つにつき1回請求・対象原作の数で等分） ============
+// 420. 例：原作A・Bを使った二次創作物C → 請求は 16,500円（33,000円ではない）、分配は 1/2 ずつ
+const dist_dCfg={ base:'EXCL_TAX', remainder:'FIRST_WORK', feePercent:0 };
+const dist_AB=[{work_id:'A',partner_id:'P-A',partner_name:'権利者A'},{work_id:'B',partner_id:'P-B',partner_name:'権利者B'}];
+const dist_d2=G.computeDistribution_(16500,dist_AB,dist_dCfg);
+ok(dist_d2.base_amount===15000&&dist_d2.per_work[0].amount===7500&&dist_d2.per_work[1].amount===7500&&dist_d2.per_work.every(w=>w.share_total===2),'A・B の2原作：税抜15,000円を 1/2 ずつ（7,500円ずつ）');
+const dist_d2i=G.computeDistribution_(16500,dist_AB,{base:'INCL_TAX',remainder:'FIRST_WORK',feePercent:0});
+ok(dist_d2i.base_amount===16500&&dist_d2i.per_work[0].amount===8250,'税込で分ける設定なら 8,250円ずつ');
+ok(G.computeFeeTerms_(flatRow.usage_category,2).amount===G.computeFeeTerms_(flatRow.usage_category,1).amount,'定額の請求額は対象原作の数で変わらない（二次創作物1つにつき1回）');
+// 421. 割り切れない端数は先頭の原作へ（または事務局に残す）。合計は必ず一致
+const dist_W7=[1,2,3,4,5,6,7].map(i=>({work_id:'W'+i,partner_id:'P'+i}));
+const dist_d7=G.computeDistribution_(16500,dist_W7,dist_dCfg);
+ok(dist_d7.unit===2142&&dist_d7.remainder===6&&dist_d7.per_work[0].amount===2148&&dist_d7.per_work.reduce((a,w)=>a+w.amount,0)===15000,'7原作：2,142円ずつ、端数6円は先頭の原作へ（合計15,000円）');
+const dist_d7s=G.computeDistribution_(16500,dist_W7,{base:'EXCL_TAX',remainder:'SECRETARIAT',feePercent:0});
+ok(dist_d7s.per_work.every(w=>w.amount===2142)&&dist_d7s.secretariat_amount===6,'端数を事務局に残す設定');
+const dist_dFee=G.computeDistribution_(16500,dist_AB,{base:'EXCL_TAX',remainder:'FIRST_WORK',feePercent:10});
+ok(dist_dFee.fee_amount===1500&&dist_dFee.per_work[0].amount===6750&&dist_dFee.secretariat_amount===1500,'事務局手数料（%）を差し引いてから分ける設定');
+// 422. 同じパートナーの原作が2つなら、そのパートナーには 2/n
+const dist_dSame=G.computeDistribution_(16500,[{work_id:'A',partner_id:'P-X'},{work_id:'B',partner_id:'P-X'},{work_id:'C',partner_id:'P-Y'}],dist_dCfg);
+const dist_px=dist_dSame.per_partner.find(p=>p.partner_id==='P-X');
+ok(dist_px.shares===2&&dist_px.amount===10000&&dist_dSame.per_partner.find(p=>p.partner_id==='P-Y').amount===5000,'同じパートナーの原作2つ → 2/3（10,000円）');
+let dist_dEmpty=false; try{ G.computeDistribution_(16500,[],dist_dCfg); }catch(e){ dist_dEmpty=/対象原作/.test(String(e.message)); }
+ok(dist_dEmpty,'対象原作が無いと分配しない');
+// 423. 申込時に原作ごとの権利者を固定し、入金ごとに1回だけ分配を記録する
+const dist_dApp=mkAppV4(['WRK-ARK00012','WRK-BKK00019'],'書籍');
+const dist_lw=rows(OPS,'License_Works').filter(w=>w.license_id===dist_dApp.license_id);
+ok(dist_lw.length===2&&dist_lw.every(w=>w.partner_id_snapshot),'申込時に原作ごとの権利者を License_Works に固定: '+dist_lw.map(w=>w.partner_id_snapshot).join(','));
+const dist_rec1=G.recordDistribution_(dist_dApp.license_id,'PAY-TEST-1',16500,'PREPAID','2026-Q4');
+const dist_rec2=G.recordDistribution_(dist_dApp.license_id,'PAY-TEST-1',16500,'PREPAID','2026-Q4');
+const dist_drows=rows(OPS,'Distributions').filter(d=>d.payment_id==='PAY-TEST-1');
+ok(dist_rec1.created&&!dist_rec2.created&&dist_drows.length===2&&dist_drows.reduce((a,d)=>a+Number(d.amount),0)===15000,'入金1件につき分配は1回だけ（同じ入金で二重に作らない）');
+const dist_sumQ=G.distributionSummary_('2026-Q4');
+ok(dist_sumQ.reduce((a,p)=>a+p.amount,0)===15000&&dist_sumQ.every(p=>p.partner_id),'期間ごとにパートナー別の合計を出せる（四半期の精算に使う）');
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

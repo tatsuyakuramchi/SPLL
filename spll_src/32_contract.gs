@@ -28,19 +28,6 @@ function extractDocTitle_(body){
   return m ? m[1].trim() : String((body && body.text) || '');
 }
 
-/** 原作→権利者の解決（partner_id優先→出版社名の部分一致→未割当）。契約時スナップショットで使用。 */
-function resolveWorkPartner_(work, partners){
-  if(work.partner_id){
-    const p = partners.find(x => x.partner_id===work.partner_id);
-    if(p) return p;
-  }
-  const pub = String(work.publisher||'');
-  if(pub){
-    const p = partners.find(x => x.name && (pub.indexOf(x.name)>=0 || String(x.name).indexOf(pub)>=0));
-    if(p) return p;
-  }
-  return { partner_id: pub ? ('PUB:'+pub) : 'UNKNOWN', name: pub || '(未割当)', invoice_reg_number:'' };
-}
 
 /**
  * Application_Works → Contract_Works へスナップショット（既にあれば追加しない）。

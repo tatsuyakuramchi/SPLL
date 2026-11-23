@@ -508,9 +508,11 @@ function createLicenseCase_(appId, applicationRef, usageCategory, workIds, party
       review_status:'NOT_STARTED', certification_status:'NOT_ISSUED', application_ref: applicationRef });
   // 対象原作＋契約条件スナップショット（費用＝契約形態（利用目的）×原作構造で自動確定・原則5）
   const master = readRows_(ssMaster_(), 'Works_Master');
+  const partners = readRows_(ssOps_(), 'Partners');   // 分配先（権利者）も申込時点で固定する（49_distribution）
   const rule = (typeof feeRuleFor_ === 'function') ? feeRuleFor_(usageCategory) : null;
   (workIds || []).forEach(function(wid){
     const w = master.find(function(x){ return x.work_id === wid; }) || {};
+    const partner = resolveWorkPartner_(w, partners);
     appendRow_(ssOps_(), 'License_Works', {
       license_work_id: Utilities.getUuid(), license_id: licenseId, work_id: wid,
       work_name_snapshot: sanitizeCell_(String(w.work_name || wid)),
@@ -519,10 +521,27 @@ function createLicenseCase_(appId, applicationRef, usageCategory, workIds, party
       fee_value_snapshot: rule ? String(rule.fee_value || '') : '',
       reporting_requirement_snapshot: rule ? String(rule.requires_usage_report || '') : '',
       active: 'true',
+      partner_id_snapshot: String(partner.partner_id || ''),
+      partner_name_snapshot: sanitizeCell_(String(partner.name || '')),
     });
   });
   return licenseId;
 }
+/** 原作→権利者の解決（partner_id優先→出版社名の部分一致→未割当）。契約時スナップショットで使用。 */
+function resolveWorkPartner_(work, partners){
+  partners = partners || [];
+  if(work.partner_id){
+    const p = partners.find(x => x.partner_id===work.partner_id);
+    if(p) return p;
+  }
+  const pub = String(work.publisher||'');
+  if(pub){
+    const p = partners.find(x => x.name && (pub.indexOf(x.name)>=0 || String(x.name).indexOf(pub)>=0));
+    if(p) return p;
+  }
+  return { partner_id: pub ? ('PUB:'+pub) : 'UNKNOWN', name: pub || '(未割当)', invoice_reg_number:'' };
+}
+
 /**
  * ライセンス案件の生更新（updated_at自動）。
  * 状態列（case_status 等）の変更は transitionLicenseCase_、それ以外は updateLicenseCaseInfo_ を使う。
