@@ -2330,7 +2330,7 @@ ok(licMd.indexOf('対象作品')<0&&besshiMd.indexOf('対象作品')<0,'契約�
 ok(/「二次創作物」とは/.test(licMd)&&/二次創作物ごとに付与する識別番号/.test(licMd),'契約書で二次創作物と SPLL番号（二次創作物ごと）を定義');
 ok(preHtml.indexOf('二次創作物の名称（予定）')>=0&&preHtml.indexOf(preT.creation_title)>=0&&preHtml.indexOf('二次創作物「')>=0,'別紙と請求書の件名に二次創作物の名称が載る');
 ok(/契約番号及び登録した電子メールアドレスを入力して、リンクの再送/.test(licMd),'契約書に専用ページのリンクの再送（契約番号＋登録メール）の定めがある');
-ok(besshiMd.indexOf('# 請求書（前払いの別紙に付ける')>=0&&/INVOICE_BANK_ACCOUNT/.test(besshiMd)&&licMd.indexOf('株式会社アークライトが利用者に請求し、収受します')>=0,
+ok(besshiMd.indexOf('# 請求書（前払いの別紙に付ける')>=0&&/INVOICE_BANK_ACCOUNT/.test(besshiMd)&&licMd.indexOf('各ライセンサーを代理して、自己の名義で一括して利用者に請求し、収受します')>=0&&licMd.indexOf('利用許諾料の分配としてライセンサーに配分')>=0&&preHtml.indexOf('SPLLパートナー各社を代理して一括して発行')>=0,
   '正本に請求書の定めがある（別紙・利用許諾契約書 第6条第3項）');
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');

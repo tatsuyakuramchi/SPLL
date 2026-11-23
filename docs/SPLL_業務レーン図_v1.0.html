@@ -93,12 +93,12 @@ td.k{font-weight:500;white-space:nowrap}
     <tbody>
       <tr><td class="k">① 利用許諾契約書</td><td>formrun の送信直後（クリエーター1人につき1回）</td><td>CloudSign のテンプレート（formrun が当事者欄を差し込む）</td><td>CloudSign</td><td>締結済み PDF を Drive に保存（GAS の定期実行）</td></tr>
       <tr><td class="k">② 別紙（許諾作品通知書）</td><td>専用ページの申込の後、1分ごとの定期実行で</td><td>GAS（申込時に確定した条件から）</td><td>CloudSign API。同意で本契約に追加</td><td>送信版と締結済み PDF、照合コード</td></tr>
-      <tr><td class="k">③ 請求書<span class="badge">発行者は検討中</span></td><td>②と同時（前払いの別紙だけ。同じ PDF の後ろのページ）</td><td>GAS（請求書番号を採番）</td><td>②と同じ</td><td>②と同じ PDF、請求書番号を台帳へ</td></tr>
+      <tr><td class="k">③ 請求書</td><td>②と同時（前払いの別紙だけ。同じ PDF の後ろのページ）</td><td>GAS（請求書番号を採番）</td><td>②と同じ</td><td>②と同じ PDF、請求書番号を台帳へ</td></tr>
       <tr><td class="k">④ 認証バッジ・検証ページ</td><td>審査の承認後（支払方法にかかわらず）</td><td>GAS（バッジ生成ジョブ）</td><td>専用ページから取得、メールでお知らせ</td><td>Drive</td></tr>
       <tr><td class="k">⑤ 精算書（電子書籍・後払い）<span class="badge">設計中</span></td><td>配信会社からの入金の後（周期は未定）</td><td>未定</td><td>未定</td><td>未定</td></tr>
       <tr><td class="k">メール</td><td>契約番号の発行後：専用ページのリンク／リンクの再送の依頼後（一致したとき）：新しいリンク／審査の承認後：審査完了・バッジ</td><td>GAS</td><td>メール（口座情報は書かない）</td><td>通知の記録</td></tr>
     </tbody></table></div>
-  <p class="note">③の発行者は「アークライトが各パートナーの代理として一括で発行（媒介者交付特例）」と「パートナーごとに発行」のどちらにするか検討中。</p>
+  <p class="note">③の発行者は株式会社アークライト（事務局運営会社）。各ライセンサーを代理して、アークライト名義で一括発行する。収受した利用許諾料はパートナーシップ契約に従い利用許諾料の分配としてパートナーへ配分する。</p>
 </section>
 <section>
   <h2>システムの使い分け</h2>

@@ -9,7 +9,8 @@
  * 見た目の確認は setup_testBesshiPdf()（GASエディタから実行）で、作品数 3・25・100 の PDF を Drive に出して行う。
  *
  * 前払いの別紙には、同じPDFの後ろに請求書を付ける（利用許諾契約書 第6条第3項）。発行者は株式会社アークライト
- * （自社の売上として発行する適格請求書）。振込先・登録番号・発行者住所は ScriptProperties から読む
+ * （事務局運営会社として、各ライセンサーを代理してアークライト名義で一括発行する適格請求書。収受した利用許諾料は
+ * パートナーシップ契約に従い利用許諾料の分配としてパートナーへ配分する）。振込先・登録番号・発行者住所は ScriptProperties から読む
  * （INVOICE_BANK_ACCOUNT / INVOICE_REG_NUMBER / INVOICE_ISSUER_ADDRESS）。Config シートには置かない。
  */
 const BESSHI_VERSION = 'v1.0';
@@ -26,7 +27,7 @@ const BESSHI_CHECKS = [
 ];
 const BESSHI_CLOSING = '本別紙への同意を証するため、本別紙の電磁的記録を作成し、利用者及び事務局が電子契約システム上で合意の措置を講じ、各自その電磁的記録を保管します。';
 const PAYMENT_TIMING_LABEL = { PREPAID: '前払い', POSTPAID: '後払い' };
-/** 請求書の発行者（自社の売上として発行） */
+/** 請求書の発行者（事務局運営会社。各ライセンサーを代理してアークライト名義で一括発行） */
 const INVOICE_ISSUER = '株式会社アークライト';
 const INVOICE_TAX_RATE_PERCENT = 10;
 
@@ -63,7 +64,7 @@ function invoiceHtml_(t, cfg){
     '<div class="meta">請求書番号 ' + e(t.invoice_no) + '　SPLL番号 ' + e(t.license_id) + '　契約番号 ' + e(t.agreement_no) + '</div>' +
     '<h1>請求書</h1>' +
     '<table class="inv-head"><tr><td class="to">' + e(t.party_name) + (t.circle_name ? '（' + e(t.circle_name) + '）' : '') + '　様</td>' +
-    '<td class="from">' + e(INVOICE_ISSUER) + '<br>（SPLL事業TRPG事務局 代表法人）<br>' +
+    '<td class="from">' + e(INVOICE_ISSUER) + '<br>（SPLL事業TRPG事務局 運営会社）<br>' +
     e(cfg.address || missing) + '<br>登録番号：' + e(cfg.reg || missing) + '</td></tr></table>' +
     '<p>下記のとおりご請求申し上げます。</p>' +
     '<table class="terms">' + row('請求書番号', e(t.invoice_no)) + row('発行日', e(t.issued_at)) +
@@ -80,7 +81,7 @@ function invoiceHtml_(t, cfg){
     '<h2>お振込先</h2><table class="terms">' + row('振込先', e(cfg.bank || missing)) +
     row('振込名義', 'SPLL番号の数字10桁＋お名前（例：' + e(payerCode) + ' ヤマダタロウ）。入金の照合に使います') +
     row('振込手数料', 'ご負担ください') + '</table>' +
-    '<p class="note">本請求は、本請求書を付した別紙への同意により、当該別紙が本契約に追加されたことをもって効力を生じます。同意がない場合、本請求書は効力を生じません。' +
+    '<p class="note">本請求書は、株式会社アークライトがSPLLパートナー各社を代理して一括して発行するものです。本請求は、本請求書を付した別紙への同意により、当該別紙が本契約に追加されたことをもって効力を生じます。同意がない場合、本請求書は効力を生じません。' +
     '振込先は本請求書及び利用許諾契約書にのみ記載し、電子メールでお知らせすることはありません。</p>' +
     '</div>';
 }
