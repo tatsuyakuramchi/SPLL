@@ -92,8 +92,9 @@
 
 | # | 作業 | 主なファイル | 規模 |
 |---|---|---|---|
-| P4-1 | 受付表の処理（定期実行。`runQueueWorker_` で空ならすぐ終了・1回45秒・1日の上限つき）：有効な契約か・権利者が決まっていない原作が無いか（`unresolvedWorksOf_`）を確かめ、あれば個別確認へ。SPLL番号の採番 → 条件の確定（`License_Works` のスナップショット、料金表の版、支払方法）→ 照合コード | 新規 `48_besshi.gs`・`00_core.gs`（`createLicenseCase_`） | M |
+| P4-1 | 受付表の処理（定期実行。採番と条件の確定までで止め、承認待ち `APPROVAL_PENDING` にする。別紙は自動では作らない。`runQueueWorker_` で空ならすぐ終了・1回45秒・1日の上限つき）：有効な契約か・権利者が決まっていない原作が無いか（`unresolvedWorksOf_`）を確かめ、あれば個別確認へ。SPLL番号の採番 → 条件の確定（`License_Works` のスナップショット、料金表の版、支払方法）→ 照合コード | 新規 `48_besshi.gs`・`00_core.gs`（`createLicenseCase_`） | M |
 | P4-2 | 別紙PDFの作成（P0-5 で決めた方式）。前払いは同じPDFの後ろに請求書（請求書番号 INV-YYYYMM-#### を採番、PDF と番号を台帳に記録）。請求書の設定がそろわないときは送信しない（`invoiceConfigReady_`） | `48_besshi.gs` | M |
+| P4-2b | 承認：案件ボードの S1「申込を承認して別紙を送る」（別紙＋請求書のプレビューを見て承認 → `APPLICATION_APPROVED` → 別紙の作成と送信）、S1b「承認しない」（理由必須 → `APPLICATION_REJECTED` → クリエーターへメール） | `53_admin_board.gs`・`48_besshi.gs`・`46_mailer.gs` | M |
 | P4-3 | CloudSign API で送信（`cs_createDocument_` → `cs_attachFile_` → `cs_addParticipant_` → `cs_sendDocument_`）→ `CLOUDSIGN_SENT` | `48_besshi.gs`・`30_cloudsign.gs` | S |
 | P4-4 | 別紙の同意 Webhook：照合コードの確認 → `CLOUDSIGN_SIGNED`（不一致は `HOLD`）→ 前払いは入金待ち、後払いは提出待ち＋支払期限 | `35_webhooks.gs` | M |
 | P4-5 | 期限の日次バッチ：同意待ち（送信から3か月）・入金待ち（追加から3か月）を `APPLICATION_EXPIRED` で取消。同意待ちは CloudSign の書類も取り消す | `47_batches.gs` | S |
@@ -212,3 +213,4 @@ P0（確認）──┬─ P1（データ・状態遷移）── P2（入口・
 | 2026-11-23 | 分配 | 後払いも同じ分配ルール。売上連動の料率も二次創作物ごとに1つで、得た利用許諾料を原作の数で均等に分配（利用許諾契約書 第6条第1項に料率も含むと明記）。料金表の原作数比例（PER_WORK）を廃止（保存時に拒否、旧データは定額として扱う） |
 | 2026-11-23 | 分配 | 事務局手数料の既定を50%（分配前に差し引く）。管理画面から変更できる入口（`admin_getDistributionConfig`／`admin_saveDistributionConfig`、法務・システム管理のみ、0〜100%、変更は Events に記録、以後の入金から適用）。事務局の取り分も分配の記録に1行残し、行の合計が分ける前の金額と一致するようにした。テスト7件追加 |
 | 2026-11-23 | 見直し | ロジックの見直し11点を反映：許諾期間は効力発生日起算（前払いは入金確認日）・定額は期間の定めなし（期間満了でも存続）・相殺という支払方法（利用許諾契約書 第6条第11項・第12条）。定期実行の共通部品 `runQueueWorker_`（空ならすぐ終了・1日の上限）とロック待ちの BUSY 応答。原作の共同権利（`rights_shares`）と未解決の原作の検出。分配の取消。利用許諾契約の重複・受付番号の使い回しは確認待ち（REVIEW）。契約終了でリンク失効・受付取消。料金表の版。スキーマ v16。テスト23件追加 |
+| 2026-11-23 | 承認 | 個別契約（別紙）は自動では作らず、事務局の承認を経て送る形に変更。状態に承認待ち `APPROVAL_PENDING`・承認済み `APPROVED`、出来事に `APPROVAL_REQUESTED`・`APPLICATION_APPROVED`・`APPLICATION_REJECTED`（理由必須）。v5 の案件は承認済みからしか送信できない。利用許諾契約書 第3条第2項・第5項を改定 |

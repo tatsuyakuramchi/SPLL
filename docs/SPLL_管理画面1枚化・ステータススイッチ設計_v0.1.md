@@ -67,6 +67,8 @@
 |---|---|---|---|---|:-:|
 | 申込〜別紙 | `APPLICATION_RECEIVED` | 申込受付 | 専用ページで作品を選び、SPLL番号を発行した（別紙の作成・送信待ち） | システム | |
 | | `MANUAL_REVIEW` | 個別確認 | 申込の条件が自動送信に載らない／審査の上申 | **事務局** | ⚠ |
+| | `APPROVAL_PENDING`（新設） | 承認待ち | 専用ページの申込を受け付け、SPLL番号と条件を確定した。事務局の承認待ち | **事務局** | ⚠ |
+| | `APPROVED`（新設） | 承認済み・送信待ち | 承認した。別紙＋請求書を作って CloudSign へ送る（送信に失敗したらここで止まり、再送できる） | システム／事務局 | |
 | | `SIGNING` | 別紙の同意待ち | 別紙を CloudSign で送信済み。送信から3か月で失効 | クリエーター | |
 | | `PAYMENT_PENDING`（新設） | 入金待ち | 前払いの別紙に同意済み。入金CSVの取込で次へ。追加から3か月で失効 | クリエーター／経理 | |
 | | `HOLD` | 条件不一致 | 同意された別紙の照合コードが台帳と合わない | **事務局（法務）** | ⚠ |
@@ -111,7 +113,8 @@
 
 | # | スイッチ | 形 | 遷移イベント | 押せる現在地 | 呼ぶ既存関数 | 承認 | ロール |
 |---:|---|---|---|---|---|:-:|---|
-| S1 | 別紙を作成して CloudSign で送る | ボタン（送信前にプレビュー） | `CLOUDSIGN_SENT` | 申込受付・個別確認 | 新設：別紙PDFの生成 → `cs_createDocument_` / `cs_attachFile_` / `cs_addParticipant_` / `cs_sendDocument_`（§8）。通常は申込の直後にシステムが自動で行い、S1 は個別確認の後と再送に使う | — | OPERATIONS |
+| S1 | 申込を承認して別紙を送る | ボタン（別紙＋請求書のプレビューを見てから承認） | `APPLICATION_APPROVED` → `CLOUDSIGN_SENT` | 承認待ち・個別確認（送信に失敗した承認済みは再送） | 新設：承認 → 別紙PDFの生成 → `cs_createDocument_` / `cs_attachFile_` / `cs_addParticipant_` / `cs_sendDocument_`（§8）。**別紙は自動では作らない** | — | OPERATIONS |
+| S1b | 承認しない（差し戻し） | ボタン（理由の入力必須） | `APPLICATION_REJECTED` | 承認待ち・個別確認・承認済み | 新設：取消し、理由を添えてクリエーターへメール | — | OPERATIONS |
 | S11 | 入金CSVを取り込む（画面上部の操作。案件ごとではない） | ファイル選択 → 照合結果の確認 → 反映 | 前払い：新設 `PAYMENT_CONFIRMED`（入金待ち → 提出待ち）／後払い：入金の記録だけ | 入金待ち・後払いの未入金 | 新設（§8.4） | — | OPERATIONS |
 | S2 | 条件を確認して有効化 | ボタン | `CLOUDSIGN_SIGNED` | 条件不一致 | `admin_confirmContractTerms(contractId, note)` | — | LEGAL_ADMIN |
 | S3 | 審査判定 | 3択（承認／是正／上申） | `HUMAN_REVIEW_CLEARED` / `CORRECTION_REQUIRED` / `REVIEW_ESCALATED` | 審査中・是正中・個別確認・認証済・停止中 | `admin_setHumanReview(submissionId, result, comment, reviewer, versionId)` | — | REVIEWER |
@@ -182,6 +185,7 @@ admin_applySwitch(licenseId, switchKey, params)   // params: { value, reason, no
 |---|---|
 | 事務局運営（会議・議決・報告・精算） | 1枚には入れない。設定と同じ**別パネル**（歯車から開く。タブ「設定」「事務局運営」） |
 | S4 入金未確認で停止 | 当面は**担当者1名のスイッチ**。のちに**申請→別担当者の承認（2名体制）**へ移す。切り替えは設定パネルの運用ルール `FEE_HOLD_TWO_PERSON`（Config）で行い、コードの書き換えなしで移行できるようにする |
+| 個別契約の承認 | 専用ページの申込は台帳に入れて**承認待ち**にする。**事務局が案件ボードで確認・承認したときだけ**別紙＋請求書を作って CloudSign で送る（自動では作らない）。承認しないときは理由を添えて知らせる（利用許諾契約書 第3条第2項・第5項） |
 | 契約の構成 | **利用許諾契約＋別紙**（§8）。**契約番号はクリエーターごと、SPLL番号は二次創作物ごと（別紙1通＝二次創作物1つ）**。用語は原作＝「対象原作」、利用者の作品＝「二次創作物」。①利用許諾契約（全利用区分の利用条件・料金の決め方・振込先）を初回に formrun（CloudSign FORM）→ CloudSign で締結。作品はまだ選ばない。②登録メールへ専用ページのリンクを送り、そこで作品を選ぶと、SPLL が別紙（契約番号入り）を作って **CloudSign API で送信し、同意で本契約に追加**する。名称は「基本契約／個別契約」から「利用許諾契約／別紙」に改めた |
 | 専用ページ | **トークン式**（ログインなし）。利用許諾契約で登録したメール宛てに長期の入口リンクを送る。今の案内ページを広げて作る。入口に「すでに契約している方」の分岐を置き、**契約番号と登録メールアドレス**でリンクを再送する（§10.4b） |
 | 支払方法 | **利用区分で決める**（料金表に前払い／後払いの列を足す）。前払い：入金確認で許諾が有効、そのあと提出。後払い：同意の時点で許諾が有効、すぐ提出できる |
@@ -219,8 +223,9 @@ admin_applySwitch(licenseId, switchKey, params)   // params: { value, reason, no
 ① サイト（AWS）で受付番号を発行 → formrun で契約情報を入力 → CloudSign で利用許諾契約に同意
    → 締結 Webhook（AWS で中継）→ GAS が受信表に記録 → 定期実行で書類を確認し契約番号を発行（§10）
 ② 登録メールへ専用ページ（トークン式）のリンクを送る
-③ 専用ページで作品を選んで申込 → SPLL番号を発行・条件を確定（APPLICATION_RECEIVED）
-④ 別紙PDFを作成（契約番号入り）→ CloudSign API で送信（CLOUDSIGN_SENT → SIGNING）
+③ 専用ページで作品を選んで申込 → SPLL番号を発行・条件を確定 → 承認待ち（APPROVAL_PENDING）
+③' 事務局が案件ボードで確認して承認（APPLICATION_APPROVED）／承認しない（APPLICATION_REJECTED・理由を通知）
+④ 承認したものだけ別紙PDF（前払いは請求書つき）を作成 → CloudSign API で送信（CLOUDSIGN_SENT → SIGNING）
    └ 3か月同意がなければ取消（APPLICATION_EXPIRED → CANCELLED）
 ⑤ 別紙に同意 → 締結 Webhook → 照合コードを確認 → 本契約に追加（CLOUDSIGN_SIGNED）
      後払い：許諾が有効 → AWAITING_SUBMISSION

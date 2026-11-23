@@ -270,6 +270,7 @@ details.more summary::before{content:"▸ ";} details.more[open] summary::before
 /* ===== 定義（spll_src/12_license_state.gs の状態とイベントに合わせる） ===== */
 const CS = {
   APPLICATION_RECEIVED:{l:'申込受付',g:'申込〜別紙',c:'info'},
+  APPROVAL_PENDING:{l:'承認待ち',g:'申込〜別紙',c:'warn',need:true},
   MANUAL_REVIEW:{l:'個別確認',g:'申込〜別紙',c:'warn',need:true},
   SIGNING:{l:'別紙の同意待ち',g:'申込〜別紙',c:'info'},
   PAYMENT_PENDING:{l:'入金待ち（前払い）',g:'申込〜別紙',c:'info'},
@@ -321,7 +322,7 @@ const PARTS = {
   'C-00048':{st:'ACTIVE',at:'2026-09-02'}, 'C-00049':{st:'ACTIVE',at:'2026-09-10'}, 'C-00050':{st:'ACTIVE',at:'2026-09-30'},
   'C-00051':{st:'ACTIVE',at:'2026-08-01'}, 'C-00052':{st:'ACTIVE',at:'2026-10-11'}, 'C-00053':{st:'TERMINATED',at:'2026-05-01'}, 'C-00054':{st:'ACTIVE',at:'2026-06-30'}
 };
-const PID = {131:'C-00042',121:'C-00042',130:'C-00043',129:'C-00044',128:'C-00045',127:'C-00046',126:'C-00047',125:'C-00048',124:'C-00049',123:'C-00050',122:'C-00051',120:'C-00052',118:'C-00053',117:'C-00054'};
+const PID = {132:'C-00051',131:'C-00042',121:'C-00042',130:'C-00043',129:'C-00044',128:'C-00045',127:'C-00046',126:'C-00047',125:'C-00048',124:'C-00049',123:'C-00050',122:'C-00051',120:'C-00052',118:'C-00053',117:'C-00054'};
 const TODAY = '2026-11-17';
 const addDays = (d,n) => { const x=new Date(d+'T00:00:00Z'); x.setUTCDate(x.getUTCDate()+n); return x.toISOString().slice(0,10); };
 const addMonths = (d,n) => { const x=new Date(d+'T00:00:00Z'); x.setUTCMonth(x.getUTCMonth()+n); return x.toISOString().slice(0,10); };
@@ -332,6 +333,7 @@ const mk = (n,party,circle,cs,ct,rv,ce,works,extra) => { const usage=(extra&&ext
   ps:['SIGNED','TERMINATED'].includes(ct)?'PAID':'NOT_REQUIRED', due:'', paidAt:['SIGNED','TERMINATED'].includes(ct)?'2026-10-24':'',
   tl:[{t:'10/02 10:12',w:'専用ページ',e:'申込受付（SPLL番号発行）'}]},extra||{}); };
 const CASES = [
+  mk(132,'森下 遥','ねこ舎','APPROVAL_PENDING','NOT_STARTED','NOT_STARTED','NOT_ISSUED',['W02','W05'],{updated:'11/23 10:05',sub:null,note:'二次創作物「TRPGリプレイ『黄昏の宴』（予定）」。原作2件・商品販売（前払い）。内容を確認して承認する'}),
   mk(131,'山田 太郎','星屑工房','REVIEWING','SIGNED','IN_REVIEW','NOT_ISSUED',['W01','W03'],{sub:{title:'シナリオ集『迷宮の夜明け』',ver:2,ai:'指摘2件（クレジット表記の位置、軽微な表現）'},updated:'11/17 09:41'}),
   mk(130,'佐藤 花子','くじら亭','HOLD','SIGNED','NOT_STARTED','NOT_ISSUED',['W02'],{ps:'UNPAID',paidAt:'',updated:'11/17 08:05',note:'同意された別紙の照合コードが台帳と一致しない（別紙の再送後に旧い書類へ同意された可能性）'}),
   mk(129,'鈴木 一郎','','MANUAL_REVIEW','NOT_STARTED','NOT_STARTED','NOT_ISSUED',['W01','W02','W03','W04','W05','W06','W07'],{updated:'11/16 21:10',note:'特約の希望あり（イベント限定の頒布部数）。条件を確認してから別紙を送信する。対象原作 7 件でも別紙に全件載る'}),
@@ -368,16 +370,18 @@ const ax = (map,v,name) => { const m=map[v]||['—','idle','·']; return `<span 
 /* ===== ステータススイッチ：押せるか（事前検証）を状態から計算する ===== */
 function switches(c){
   const L = [];
-  const pre = ['APPLICATION_RECEIVED','MANUAL_REVIEW','SIGNING','PAYMENT_PENDING','HOLD'];
+  const pre = ['APPLICATION_RECEIVED','APPROVAL_PENDING','MANUAL_REVIEW','SIGNING','PAYMENT_PENDING','HOLD'];
   // S1 別紙の作成と送信（CloudSign API）
   const ag = PARTS[c.pid].st;
   let sendWhy = '';
   if(c.cs==='SIGNING') sendWhy = `送信済みです（同意待ち・期限 ${expiryOf(c)}）`;
   else if(c.ct==='SIGNED') sendWhy = '別紙は本契約に追加済みです';
-  else if(!['APPLICATION_RECEIVED','MANUAL_REVIEW'].includes(c.cs)) sendWhy = `現在地「${CS[c.cs].l}」からは送信できません`;
+  else if(!['APPROVAL_PENDING','MANUAL_REVIEW'].includes(c.cs)) sendWhy = `現在地「${CS[c.cs].l}」では承認できません`;
   else if(ag!=='ACTIVE') sendWhy = '利用許諾契約が有効ではありません';
-  L.push({key:'send',grp:'contract',t:'別紙を作成して CloudSign で送る',d:'台帳の条件から別紙（契約番号入り・対象原作を全件）を作り、CloudSign API で送信する。通常は申込の直後に自動で送る。同意で本契約に追加される',kind:'button',role:'OPERATIONS',
+  L.push({key:'send',grp:'contract',t:'申込を承認して別紙を送る',d:'申込の内容（二次創作物・原作・利用区分・金額）を別紙＋請求書のプレビューで確かめて承認する。承認したときだけ別紙を作って CloudSign で送る（自動では作らない）',kind:'button',role:'OPERATIONS',
     why: sendWhy, extra:'preview'});
+  L.push({key:'reject',grp:'contract',t:'承認しない（差し戻し）',d:'理由を添えてクリエーターへ知らせ、申込を取り消す',kind:'button',role:'OPERATIONS',danger:true,
+    why: ['APPROVAL_PENDING','MANUAL_REVIEW','APPROVED'].includes(c.cs) ? '' : '承認待ちの申込だけが対象です'});
   // S2 条件確認
   L.push({key:'confirm',grp:'contract',t:'条件を確認して別紙を有効にする',d:'同意された別紙と台帳の食い違いを法務が確認した後に使う。支払方法に応じて入金待ち／提出待ちへ進む',kind:'button',role:'LEGAL_ADMIN',
     why: c.cs==='HOLD' ? '' : '条件不一致（HOLD）の案件だけが対象です'});
@@ -480,7 +484,7 @@ function swRow(s,c){
     const label = s.key==='fee' ? (s.on?'復帰を申請':'停止を申請') : '申請する';
     ctl = `<button type="button" class="btn" data-sw="${s.key}" ${off||c.req?'disabled':''}>${label}</button>`;
   }
-  else ctl = `<button type="button" class="btn${s.danger?' danger':(s.key==='send'?' primary':'')}" data-sw="${s.key}" ${off?'disabled':''}>${s.key==='send'?'送信':'実行'}</button>`;
+  else ctl = `<button type="button" class="btn${s.danger?' danger':(s.key==='send'?' primary':'')}" data-sw="${s.key}" ${off?'disabled':''}>${s.key==='send'?'承認して送信':(s.key==='reject'?'承認しない':'実行')}</button>`;
   const why = locked ? `<div class="why">${ROLE_LABEL[s.role]}の権限が必要です</div>` : (s.why ? `<div class="why">${esc(s.why)}</div>` : '');
   const pv = s.extra==='preview' ? `<div class="d"><button type="button" class="btn" data-preview="${c.id}" style="padding:3px 10px;font-size:12px">別紙プレビュー</button></div>` : '';
   return `<div class="sw${off?' off':''}${locked?' locked':''}"><div class="t">${esc(s.t)}${tags}</div>${ctl}<div class="d">${esc(s.d)}</div>${why}${pv}</div>`;
@@ -555,7 +559,7 @@ function returnFromCert(c){ // 認証の状態に応じて現在地を戻す（C
 }
 const APPLY = {
   send(c,w){ c.ct='SIGNING'; c.cs='SIGNING'; c.sent=TODAY; c.note='';
-    log(c,`別紙を作成し CloudSign API で送信（${c.works.length}作品・${pageCount(c.works.length)}ページ・同意期限 ${addMonths(TODAY,3)}）`, w==='system'?'system':undefined); return '別紙を CloudSign で送信しました。同意待ちです'; },
+    log(c,`申込を承認 → 別紙を作成し CloudSign API で送信（${c.works.length}作品・${pageCount(c.works.length)}ページ・同意期限 ${addMonths(TODAY,3)}）`, w==='system'?'system':undefined); return '承認しました。別紙を CloudSign で送信し、同意待ちです'; },
   confirm(c,f){ c.note=''; afterAgree(c); log(c,'条件確認済み：'+f.text); return c.pay==='PREPAID' ? '別紙を有効にしました。入金待ちです' : '別紙を有効にしました。提出待ちです'; },
   review(c,f){
     if(f.v==='CLEARED'){
@@ -570,7 +574,8 @@ const APPLY = {
     if(c.ce==='ACTIVE'){ c.ce='SUSPENDED'; c.reason='FEE_PAYMENT_UNCONFIRMED'; if(c.cs==='CERTIFIED') c.cs='SUSPENDED'; log(c,'入金未確認で停止 — '+(f.text||'')); return '認証を停止しました（入金未確認）'; }
     c.ce='ACTIVE'; c.reason=''; returnFromCert(c); log(c,'入金を確認し復帰 — '+(f.text||'')); return '認証を復帰しました';
   },
-  cancel(c,f){ c.cs='CANCELLED'; log(c,'申込取消 — '+f.text); return '申込を取り消しました'; }
+  cancel(c,f){ c.cs='CANCELLED'; log(c,'申込取消 — '+f.text); return '申込を取り消しました'; },
+  reject(c,f){ c.cs='CANCELLED'; c.note=''; log(c,'承認しない（差し戻し）— '+f.text+'（理由をクリエーターへメール）'); return '承認しませんでした。理由をクリエーターへ知らせます'; }
 };
 /** 別紙が本契約に追加された後の行き先：前払いは入金待ち、後払いはすぐ提出待ち */
 function afterAgree(c){
@@ -621,6 +626,7 @@ function onSwitch(key,val){
   if(!s || s.why || !can(s.role)) return;
   const run = f => { const m = APPLY[key](c,Object.assign({v:val},f)); render(); toast(m); };
   if(key==='send') return openPreview(c,{send:true});
+  if(key==='reject') return dialog({title:'承認しない（差し戻し）',body:`${c.id} の申込を承認せず、取り消します。理由はクリエーターへメールで知らせます。`,input:'承認しない理由',required:true,ok:'承認しない',danger:true,done:run});
   if(key==='confirm') return dialog({title:'条件を確認して別紙を有効にする',body:`${c.id} を${c.pay==='PREPAID'?'入金待ち':'提出待ち'}へ進めます。確認した内容を残してください。`,input:'確認メモ',required:true,ok:'有効にする',done:run});
   if(key==='review'){
     if(val==='CLEARED') return dialog({title:'審査を承認する',body:'承認すると認証を発行し、バッジ生成ジョブを登録します。審査完了のメールが送られます。',input:'審査コメント（任意）',ok:'承認する',done:run});
@@ -677,17 +683,18 @@ function openPreview(c,opt){
     L.querySelectorAll('[data-n]').forEach(b=>b.setAttribute('aria-pressed', String(+b.dataset.n===P.n)));
   };
   const L = $('#layer');
-  const canSend = P.send && ['APPLICATION_RECEIVED','MANUAL_REVIEW'].includes(c.cs) && can('OPERATIONS');
+  const canSend = P.send && ['APPROVAL_PENDING','MANUAL_REVIEW'].includes(c.cs) && can('OPERATIONS');
   L.innerHTML = `<div class="pv" role="dialog" aria-modal="true" aria-labelledby="pvT">
     <div class="ptop"><h2 id="pvT">別紙（許諾作品通知書）プレビュー</h2><span class="mono muted">${c.id}</span><span id="pvStat" class="muted"></span>
-      <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">${canSend?'<button class="btn primary" type="button" id="pvSend">この内容で CloudSign へ送信</button>':''}<button class="btn" type="button" id="pvClose">閉じる</button></span></div>
+      <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">${canSend?'<button class="btn primary" type="button" id="pvSend">この内容で承認して CloudSign へ送信</button>':''}<button class="btn" type="button" id="pvClose">閉じる</button></span></div>
     <div class="pbody"><div class="pages"></div>
       <div class="side">
         <div><b>作品数を変えて試す</b><div class="seg" style="margin-top:6px"><button type="button" data-n="0">実データ</button><button type="button" data-n="12">12</button><button type="button" data-n="40">40</button><button type="button" data-n="100">100</button></div>
           <div class="muted" style="font-size:12px;margin-top:6px">別表はページをまたいで伸びます。別紙は SPLL が台帳から作って CloudSign API で送るので、FORM の URL 長やテンプレートの欄の大きさに縛られません。</div></div>
         <div><b>許諾が有効になるまで</b><div class="flow" style="margin-top:6px">
           <div><b>0</b>利用許諾契約は formrun → CloudSign で締結済み</div>
-          <div><b>1</b>専用ページ（トークン式）で作品を選んで申込</div>
+          <div><b>1</b>専用ページ（トークン式）で作品を選んで申込 → 承認待ち</div>
+          <div><b>1'</b>事務局がこの画面で確認して承認</div>
           <div><b>2</b>台帳の条件 → 別紙PDF（契約番号入り）</div>
           <div><b>3</b>CloudSign API で送信 → 同意で本契約に追加</div>
           <div><b>4</b>前払い：入金CSVで確認 → 有効／後払い：すぐ有効</div>

@@ -2469,5 +2469,25 @@ const offT=G.besshiSampleTerms_(1,'OFFSET'); const offCase=mkAppV4(['WRK-ARK0001
 G.updateLicenseCaseInfo_(offCase.license_id,{ payment_timing:'OFFSET' }); G.transitionLicenseCase_(offCase.license_id,'CLOUDSIGN_SIGNED',{actor:'test'});
 ok(rows(OPS,'License_Cases').find(k=>k.license_id===offCase.license_id).case_status==='AWAITING_SUBMISSION','相殺は同意の時点で許諾が有効（提出待ち）');
 
+// 440. 個別契約は承認形式：申込 → 承認待ち → 事務局が承認 → 別紙を送る。承認前は送れない。承認しないときは理由が要る
+const apApp=mkAppV4(['WRK-ARK00012'],'書籍');
+const apCase=()=>rows(OPS,'License_Cases').find(k=>k.license_id===apApp.license_id);
+G.updateLicenseCaseInfo_(apApp.license_id,{ agreement_no:ag1.agreement_no, payment_timing:'PREPAID' });
+G.transitionLicenseCase_(apApp.license_id,'APPROVAL_REQUESTED',{actor:'queue'});
+ok(apCase().case_status==='APPROVAL_PENDING','専用ページの申込は承認待ち');
+let apEarly=false; try{ G.transitionLicenseCase_(apApp.license_id,'CLOUDSIGN_SENT',{actor:'test'}); }catch(e){ apEarly=/STATE_ERROR/.test(String(e.message)); }
+ok(apEarly&&apCase().case_status==='APPROVAL_PENDING','承認前は別紙を送れない');
+G.transitionLicenseCase_(apApp.license_id,'APPLICATION_APPROVED',{actor:'ops@example.com'});
+ok(apCase().case_status==='APPROVED','事務局が承認すると承認済み・送信待ち');
+G.transitionLicenseCase_(apApp.license_id,'CLOUDSIGN_SENT',{actor:'system'});
+ok(apCase().case_status==='SIGNING','承認済みから別紙を送れる（同意待ち）');
+const rjApp=mkAppV4(['WRK-ARK00012'],'書籍');
+G.updateLicenseCaseInfo_(rjApp.license_id,{ agreement_no:ag1.agreement_no });
+G.transitionLicenseCase_(rjApp.license_id,'APPROVAL_REQUESTED',{actor:'queue'});
+let rjNoReason=false; try{ G.transitionLicenseCase_(rjApp.license_id,'APPLICATION_REJECTED',{actor:'ops'}); }catch(e){ rjNoReason=/理由/.test(String(e.message)); }
+G.transitionLicenseCase_(rjApp.license_id,'APPLICATION_REJECTED',{actor:'ops',reason:'利用区分が合わないため'});
+ok(rjNoReason&&rows(OPS,'License_Cases').find(k=>k.license_id===rjApp.license_id).case_status==='CANCELLED','承認しないときは理由が必須で、取消になる');
+ok(/承認した場合に限り/.test(licMd)&&/申込みを承認せず/.test(licMd),'契約書：承認した場合に限り別紙を送る・承認しない場合は通知');
+
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

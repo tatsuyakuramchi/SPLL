@@ -18,6 +18,8 @@ const LICENSE_CASE_STATUSES = [
   'APPLICATION_RECEIVED',   // 申込受付（SPLL番号発行）
   'CONTRACT_PENDING',       // フォーム送信済・契約書送付待ち
   'MANUAL_REVIEW',          // 事務局の個別確認（申込段階／審査上申）
+  'APPROVAL_PENDING',       // v5：専用ページの申込を受け付け、事務局の承認待ち（承認したら別紙を作って送る）
+  'APPROVED',               // v5：承認済み・別紙の送信待ち（送信に失敗したらここで止まり、再送できる）
   'SIGNING',                // CloudSign 送付済・同意待ち（v5：別紙の同意待ち）
   'PAYMENT_PENDING',        // v5：前払いの別紙に同意済み・入金待ち（入金CSVの取込で提出待ちへ）
   'HOLD',                   // 締結したが条件不一致。法務確認まで自動処理を止める
@@ -70,8 +72,29 @@ const LICENSE_TRANSITIONS = {
     from: ['APPLICATION_RECEIVED','CONTRACT_PENDING','MANUAL_REVIEW'],
     to: { case_status:'MANUAL_REVIEW' }
   },
+  // v5：専用ページの申込を台帳に入れたら承認待ちへ（別紙は自動では作らない）
+  APPROVAL_REQUESTED: {
+    from: ['APPLICATION_RECEIVED'],
+    to: { case_status:'APPROVAL_PENDING' }
+  },
+  // v5：事務局が申込を承認（別紙＋請求書の作成と CloudSign 送信に進める）
+  APPLICATION_APPROVED: {
+    from: ['APPROVAL_PENDING','MANUAL_REVIEW'],
+    to: { case_status:'APPROVED' }
+  },
+  // v5：事務局が承認しない（理由を添えてクリエーターへ知らせる）
+  APPLICATION_REJECTED: {
+    from: ['APPROVAL_PENDING','MANUAL_REVIEW','APPROVED'],
+    guard: function(ctx, cur){ return String(ctx.reason || '').trim() ? '' : '承認しない理由を入力してください'; },
+    to: { case_status:'CANCELLED' }
+  },
+  // 別紙（v4 は契約書）の送信。v5 の案件（利用許諾契約に属するもの）は、事務局の承認後（APPROVED）からだけ送れる
   CLOUDSIGN_SENT: {
-    from: ['APPLICATION_RECEIVED','CONTRACT_PENDING','MANUAL_REVIEW','SIGNING'],
+    from: ['APPLICATION_RECEIVED','CONTRACT_PENDING','MANUAL_REVIEW','SIGNING','APPROVED'],
+    guard: function(ctx, cur){
+      return (cur.agreement_no && cur.case_status !== 'APPROVED' && cur.case_status !== 'SIGNING')
+        ? '事務局の承認が済んでいません（承認してから別紙を送ります）' : '';
+    },
     to: { case_status:'SIGNING', contract_status:'SIGNING' }
   },
   // 締結したが台帳スナップショットと条件が合わない。契約は成立しているので contract_status は SIGNED。
@@ -189,7 +212,7 @@ const LICENSE_TRANSITIONS = {
     }
   },
   APPLICATION_CANCELLED: {
-    from: ['APPLICATION_RECEIVED','CONTRACT_PENDING','MANUAL_REVIEW','SIGNING','HOLD','PAYMENT_PENDING'],
+    from: ['APPLICATION_RECEIVED','CONTRACT_PENDING','MANUAL_REVIEW','SIGNING','HOLD','PAYMENT_PENDING','APPROVAL_PENDING','APPROVED'],
     to: { case_status:'CANCELLED' }
   }
 };
@@ -233,7 +256,8 @@ function validateLicenseTransition_(licenseId, event, ctx){
     certification_status: String(row.certification_status || 'NOT_ISSUED'),
     // 遷移の判断にだけ使う参照値（状態列ではない。書き換えは updateLicenseCaseInfo_）
     payment_timing: String(row.payment_timing || ''),
-    payment_status: String(row.payment_status || '')
+    payment_status: String(row.payment_status || ''),
+    agreement_no: String(row.agreement_no || '')
   };
   if(def.from !== '*' && !ctx.force){
     if(def.from.indexOf(cur.case_status) < 0)
