@@ -2368,5 +2368,18 @@ ok(dist_rec1.created&&!dist_rec2.created&&dist_drows.length===2&&dist_drows.redu
 const dist_sumQ=G.distributionSummary_('2026-Q4');
 ok(dist_sumQ.reduce((a,p)=>a+p.amount,0)===15000&&dist_sumQ.every(p=>p.partner_id),'期間ごとにパートナー別の合計を出せる（四半期の精算に使う）');
 
+// 424. 後払い（電子書籍の精算）も同じ分配。売上連動の料率は原作の数で増えない
+const rateUsage=rows(MAS,'Fee_Schedule').find(r=>String(r.fee_model).toUpperCase()==='RATE').usage_category;
+ok(G.computeFeeTerms_(rateUsage,3).rate===G.computeFeeTerms_(rateUsage,1).rate&&/3原作でも同率/.test(G.computeFeeTerms_(rateUsage,3).fee_amount_or_rate),'売上連動の料率は原作が3つでも同じ（同率と明記）');
+const ebookApp=mkAppV4(['WRK-ARK00012','WRK-BKK00019'],rateUsage);
+G.recordDistribution_(ebookApp.license_id,'EBOOK-2026Q4-1',11000,'EBOOK_SETTLEMENT','2026-Q4');
+const ebRows=rows(OPS,'Distributions').filter(d=>d.payment_id==='EBOOK-2026Q4-1');
+ok(ebRows.length===2&&ebRows.every(d=>Number(d.amount)===5000&&d.source==='EBOOK_SETTLEMENT'),'電子書籍の精算（利用許諾料11,000円・税込）も原作の数で等分（税抜10,000円を5,000円ずつ）');
+// 425. 原作数比例（PER_WORK）は廃止：保存は拒否、旧データは定額として扱う
+let perWorkErr=false; try{ G.admin_saveFeeRow({ usage_category:'テスト区分', fee_model:'PER_WORK', fee_value:'16500' }); }catch(e){ perWorkErr=/PER_WORK/.test(String(e.message)); }
+ok(perWorkErr,'料金表に原作数比例（PER_WORK）は保存できない');
+G.appendRow_(MAS,'Fee_Schedule',{ usage_category:'旧データ区分', fee_model:'PER_WORK', fee_value:'16500', active:'true' });
+ok(G.computeFeeTerms_('旧データ区分',3).amount===16500,'旧データに PER_WORK が残っていても、原作の数を掛けずに定額として扱う');
+
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

@@ -23,8 +23,8 @@ const SCHEMA_MASTER = {
   Review_Rules:    ['rule_id','work_id','category','rule_text','severity','effective_from','effective_to'],
   Reference_Assets:['asset_id','work_id','asset_type','drive_file_id','allowed_flag'],
   // 利用料条件（別紙2）の一律ルール。利用目的(usage_category)ごとに計算方式を持つ（事務局が編集）。
-  //   fee_model: RATE=売上連動 / FLAT=定額(契約単位) / PER_WORK=原作数比例
-  //   fee_value: RATEは率(0.10=10%)、FLAT/PER_WORKは金額(円)
+  //   fee_model: RATE=売上連動 / FLAT=定額（二次創作物1つにつき）。PER_WORK（原作数比例）は廃止
+  //   fee_value: RATEは率(0.10=10%)、FLATは金額(円)。どちらも原作の数では増えず、受け取った額を原作の数で均等に分配する
   // report_* 構造化列（V2-017）：報告要否・期限を文言でなく構造化値で保持
   Fee_Schedule:    ['usage_category','fee_model','fee_value','fee_label','licensed_uses','payment_due','reporting_requirement','report_due','threshold_or_cap','reprint_rule','special_terms','active','requires_usage_report','report_frequency','report_due_days','report_due_base','payment_timing']
 };

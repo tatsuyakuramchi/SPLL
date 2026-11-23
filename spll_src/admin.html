@@ -379,8 +379,8 @@
         <div class="pbody">
           <div class="grid2">
             <div class="fld"><label>利用目的 <span class="h">usage_category（キー）</span></label><input id="fe-usage_category" placeholder="書籍／電子出版物／商品販売…"></div>
-            <div class="fld"><label>計算方式 <span class="h">fee_model</span></label><select id="fe-fee_model"><option value="RATE">RATE（売上連動＝率）</option><option value="FLAT">FLAT（定額・契約単位）</option><option value="PER_WORK">PER_WORK（原作数比例）</option></select></div>
-            <div class="fld"><label>値 <span class="h">RATEは率(0.10=10%)／FLAT・PER_WORKは金額(円)</span></label><input id="fe-fee_value" placeholder="0.10 または 16500"></div>
+            <div class="fld"><label>計算方式 <span class="h">fee_model</span></label><select id="fe-fee_model"><option value="RATE">RATE（売上連動＝率）</option><option value="FLAT">FLAT（定額・二次創作物1つにつき）</option></select></div>
+            <div class="fld"><label>値 <span class="h">RATEは率(0.10=10%)／FLATは金額(円)。原作が複数でも1つの二次創作物につき1回・原作の数で均等に分配</span></label><input id="fe-fee_value" placeholder="0.10 または 16500"></div>
             <div class="fld"><label>利用許諾料（表示） <span class="h">空欄なら自動生成</span></label><input id="fe-fee_label" placeholder="売上の10％／16,500円／原作"></div>
             <div class="fld"><label>許諾対象利用</label><input id="fe-licensed_uses" placeholder="複製・頒布・公衆送信 等"></div>
             <div class="fld"><label>支払時期</label><input id="fe-payment_due"></div>
@@ -712,7 +712,7 @@ var _mWorks = [
   {work_id:"WRK-BKK00019",work_name:"インセイン",publisher:"冒険企画局",category:"TRPG / ルールブック",review_policy:"PATROL_ONLY",fee_label:"電子書籍：売上の10％",publish_status:"DRAFT",media:"電子書籍",ok_elements:"世界観設定,ハンドアウト形式",no_elements:"シナリオデータ転載",credit_text:"指定の権利表記を記載"}
 ];
 var _mFee = [
-  {usage_category:"書籍",fee_model:"PER_WORK",fee_value:"16500",fee_label:"16,500円／原作",licensed_uses:"複製・頒布",payment_due:"契約締結後の請求書発行日から30日以内",reporting_requirement:"定額のため利用報告は原則不要",report_due:"－",threshold_or_cap:"－",reprint_rule:"増刷時も追加料金なし",special_terms:"",active:"true"},
+  {usage_category:"書籍",fee_model:"FLAT",fee_value:"16500",fee_label:"16,500円／二次創作物（複数原作は権利者へ均等分配）",licensed_uses:"複製・頒布",payment_due:"契約締結後の請求書発行日から30日以内",reporting_requirement:"定額のため利用報告は原則不要",report_due:"－",threshold_or_cap:"－",reprint_rule:"増刷時も追加料金なし",special_terms:"",active:"true"},
   {usage_category:"電子出版物",fee_model:"RATE",fee_value:"0.10",fee_label:"売上の10％",licensed_uses:"複製・公衆送信",payment_due:"半期ごとの計算書発効後",reporting_requirement:"半期ごとに販売実績を報告",report_due:"各半期終了後1ヶ月以内",threshold_or_cap:"－",reprint_rule:"－",special_terms:"",active:"true"},
   {usage_category:"イベント",fee_model:"FLAT",fee_value:"0",fee_label:"無償（イベント頒布・要事前申告）",licensed_uses:"頒布・上演",payment_due:"－",reporting_requirement:"頒布実績を事後報告",report_due:"イベント終了後1ヶ月以内",threshold_or_cap:"－",reprint_rule:"－",special_terms:"",active:"true"}
 ];

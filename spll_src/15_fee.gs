@@ -32,7 +32,9 @@ function api_getUsageOptions(){
 }
 /**
  * 利用目的（と原作数）から別紙2の各条件を計算して返す。反映はこの結果を用いる。
- *  RATE=売上連動（率のみ・金額は後日利用報告で確定）／FLAT=定額（契約単位）／PER_WORK=原作数比例。
+ *  RATE=売上連動（率のみ・金額は後日利用報告で確定）／FLAT=定額（二次創作物1つにつき）。
+ *  請求も料率も、二次創作物1つにつき1つ。対象原作の数では増えない（利用許諾契約書 第6条第1項）。受け取った額は原作の数で均等に分配する。
+ *  PER_WORK（原作数比例）は廃止。旧データに残っていても定額として扱う。
  */
 function computeFeeTerms_(usageCategory, workCount){
   const n = Math.max(1, parseInt(workCount || 1, 10) || 1);
@@ -48,10 +50,8 @@ function computeFeeTerms_(usageCategory, workCount){
   if(model === 'RATE'){
     rate = val;
     if(!feeText) feeText = '売上の' + Math.round(val * 1000) / 10 + '％';
-  }else if(model === 'PER_WORK'){
-    amount = Math.round(val) * n;
-    feeText = (r.fee_label || (yen_(val) + '／原作')) + ' × ' + n + '件 ＝ ' + yen_(amount);
-  }else{ // FLAT：契約単位の定額。複数原作でも金額は変わらず、権利者間で分配する
+    if(n > 1) feeText += '（' + n + '原作でも同率・権利者間で均等に分配）';
+  }else{ // FLAT（PER_WORK は廃止し定額として扱う）：二次創作物1つにつき定額。複数原作でも金額は変わらず、権利者間で均等に分配する
     amount = Math.round(val);
     if(!feeText) feeText = yen_(amount) + '／契約';
     if(n > 1) feeText += '（' + n + '原作合計・許諾料は権利者間で分配）';

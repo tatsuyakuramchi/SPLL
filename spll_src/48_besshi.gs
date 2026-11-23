@@ -190,7 +190,7 @@ function besshiSampleTerms_(n, timing){
     creation_title: pre ? 'シナリオ集『迷宮の夜明け』（サンプル）' : 'リプレイ本『月下の宴』電子版（サンプル）',
     usage_category: pre ? '商品販売（同人誌・物販）' : '電子書籍',
     license_term: '本別紙が本契約に追加された日から1年間（本契約の有効期間内に限る）', territory: '日本国内',
-    fee_amount_or_rate: pre ? '16,500円（税込）。対象原作が複数の場合も同額' : '電子書籍の販売額（税抜）の10%', fee_schedule_version: '2026-10版',
+    fee_amount_or_rate: pre ? '16,500円（税込）。対象原作が複数の場合も同額' : '電子書籍の販売額（税抜）の10%。対象原作が複数の場合も同率', fee_schedule_version: '2026-10版',
     fee_amount_incl_tax: pre ? 16500 : null, invoice_no: pre ? 'INV-TEST-' + n : '',
     payment_timing: pre ? 'PREPAID' : 'POSTPAID',
     payment_due: pre ? '本別紙が本契約に追加された日から3か月以内（入金確認で許諾が有効）' : '電子書籍配信会社からの入金と相殺し、残額をお支払いします（四半期ごとに精算書でお知らせ）',

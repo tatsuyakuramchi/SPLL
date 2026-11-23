@@ -357,6 +357,8 @@ function admin_getFeeSchedule(){ requireRole_([]); return readRows_(ssMaster_(),
 function admin_saveFeeRow(row){ requireRole_(['LEGAL_ADMIN']);
   const r = {}; FEE_FIELDS.forEach(function(k){ if(row[k] !== undefined) r[k] = row[k]; });
   if(!r.usage_category) throw new Error('利用目的（usage_category）は必須です');
+  if(String(r.fee_model || '').toUpperCase() === 'PER_WORK')
+    throw new Error('VALIDATION_ERROR: 原作数比例（PER_WORK）は使えません。請求は二次創作物1つにつき1回で、原作の数では増えません（FLAT か RATE を選んでください）');
   if(r.active === undefined) r.active = 'true';
   if(!updateRow_(ssMaster_(),'Fee_Schedule','usage_category', r.usage_category, r)){
     appendRow_(ssMaster_(),'Fee_Schedule', r);
