@@ -245,7 +245,7 @@ admin_applySwitch(licenseId, switchKey, params)   // params: { value, reason, no
 - 料金表（`Fee_Schedule`）：利用区分ごとに `payment_timing`（PREPAID / POSTPAID）を足す。
 - 状態遷移：契約側に `AGREEMENT_SIGNED` / `AGREEMENT_TERMINATED`。案件側に `PAYMENT_PENDING` 状態と `PAYMENT_CONFIRMED` / `APPLICATION_EXPIRED` イベントを新設。`CLOUDSIGN_SIGNED` は、前払いなら `PAYMENT_PENDING`、後払いなら `AWAITING_SUBMISSION` へ進める。`SUBMISSION_CREATED` は許諾が有効な案件（`AWAITING_SUBMISSION` 以降）でだけ受け付ける。契約の終了で、その契約の全案件に `CONTRACT_TERMINATED`。
 - 締結 Webhook：書類IDで「利用許諾契約」か「別紙」かを振り分ける。
-- 入金CSVの取込（S11）：取込 → 照合結果の確認 → 反映 の3段。照合キーは振込名義に入れてもらう **SPLL番号の数字10桁**（例：SPLL-202611-0131 → 2026110131。末尾4桁は毎月振り直すので4桁では月をまたいで重なる。請求書で案内）と金額。照合できない行・金額が合わない行は反映せず、要対応に「未照合の入金」として残す。同じCSVを2回取り込んでも二重に反映しない（行のハッシュで判定）。取込の記録は `Payment_Imports` / `Payments` に残す。
+- 入金CSVの取込（S11）：取込 → 照合結果の確認 → 反映 の3段。照合キーは振込名義に入れてもらう **SPLL番号の数字10桁**（SPLL番号の発番ルールは現行ルールに合わせて後で修正する前提。桁数はそのとき合わせる）（例：SPLL-202611-0131 → 2026110131。末尾4桁は毎月振り直すので4桁では月をまたいで重なる。請求書で案内）と金額。照合できない行・金額が合わない行は反映せず、要対応に「未照合の入金」として残す。同じCSVを2回取り込んでも二重に反映しない（行のハッシュで判定）。取込の記録は `Payment_Imports` / `Payments` に残す。
 - 日次バッチ：同意待ち・入金待ちが3か月を過ぎた案件を取消（CloudSign の書類も取り消す）。後払いの支払期限超過を `OVERDUE` にして要対応に出す。
 - 専用ページ：`Access_Tokens` に用途 `MY_PAGE`（長期・本人の登録メールにだけ送る）を足す。今の案内ページ（`44_guide.gs` / `guide.html`）に「新しく申し込む（作品を選ぶ）」「別紙と状態の一覧」「作品の提出」を集める。
 - 管理画面：案件の詳細に「利用許諾契約」「別紙（同意・入金）」欄を足す。S1 は別紙の送信、S10（契約の終了・承認制）、S11（入金CSVの取込）を追加。
