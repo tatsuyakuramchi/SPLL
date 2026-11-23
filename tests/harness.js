@@ -2198,7 +2198,7 @@ const gv=n=>vm.runInContext(n,sandbox);   // GAS の const はサンドボック
 ['Agreements','Apply_Queue','Payment_Imports','Payments','Partner_List_Versions'].forEach(function(n){ ok(!!G.sheet_(OPS,n),'v13 の表がある: '+n); });
 const lcHead=G.sheet_(OPS,'License_Cases').getRange(1,1,1,G.sheet_(OPS,'License_Cases').getLastColumn()).getValues()[0];
 ['agreement_no','besshi_document_id','besshi_hash','payment_timing','payment_status','payment_due','paid_at','creation_title'].forEach(function(c){ ok(lcHead.indexOf(c)>=0,'License_Cases に列がある: '+c); });
-ok(gv('SCHEMA_VERSION')===16,'SCHEMA_VERSION は 16');
+ok(gv('SCHEMA_VERSION')===17,'SCHEMA_VERSION は 17');
 ok(!!G.sheet_(OPS,'Distributions'),'v15 の表がある: Distributions');
 ok(!!G.sheet_(OPS,'Link_Requests'),'v14 の表がある: Link_Requests');
 G.migrateSchema_();
@@ -2488,6 +2488,37 @@ let rjNoReason=false; try{ G.transitionLicenseCase_(rjApp.license_id,'APPLICATIO
 G.transitionLicenseCase_(rjApp.license_id,'APPLICATION_REJECTED',{actor:'ops',reason:'利用区分が合わないため'});
 ok(rjNoReason&&rows(OPS,'License_Cases').find(k=>k.license_id===rjApp.license_id).case_status==='CANCELLED','承認しないときは理由が必須で、取消になる');
 ok(/承認した場合に限り/.test(licMd)&&/申込みを承認せず/.test(licMd),'契約書：承認した場合に限り別紙を送る・承認しない場合は通知');
+
+// 445. 承認の操作は2人：担当者Aが申請 → 別の担当者Bが承認。本人は承認も却下もできない
+const twApp=mkAppV4(['WRK-ARK00012'],'書籍');
+const twCase=()=>rows(OPS,'License_Cases').find(k=>k.license_id===twApp.license_id);
+G.updateLicenseCaseInfo_(twApp.license_id,{ agreement_no:ag1.agreement_no });
+G.transitionLicenseCase_(twApp.license_id,'APPROVAL_REQUESTED',{actor:'queue'});
+const twReq=G.requestApproval_('BESSHI_APPROVE',twApp.license_id,'原作・利用区分・金額を確認','a@example.com');
+let twDup=false; try{ G.requestApproval_('BESSHI_REJECT',twApp.license_id,'理由','a@example.com'); }catch(e){ twDup=/未決の申請/.test(String(e.message)); }
+ok(twDup,'1件につき未決の申請は1つだけ');
+let twSelf=false; try{ G.decideApproval_(twReq.request_id,true,'','A@example.com'); }catch(e){ twSelf=/申請した本人/.test(String(e.message)); }
+ok(twSelf&&twCase().case_status==='APPROVAL_PENDING','申請した本人は承認できない（大文字小文字の違いでもすり抜けない）');
+G.decideApproval_(twReq.request_id,true,'確認しました','b@example.com');
+ok(twCase().case_status==='APPROVED'&&rows(OPS,'Approval_Requests').find(r=>r.request_id===twReq.request_id).decided_by==='b@example.com','別の担当者が承認すると承認済み（別紙の作成・送信へ）');
+let twTwice=false; try{ G.decideApproval_(twReq.request_id,true,'','c@example.com'); }catch(e){ twTwice=/処理済み/.test(String(e.message)); }
+ok(twTwice,'処理済みの申請は二度承認できない');
+// 却下・取り下げ・承認しない申請
+const tw2=mkAppV4(['WRK-ARK00012'],'書籍');
+G.updateLicenseCaseInfo_(tw2.license_id,{ agreement_no:ag1.agreement_no });
+G.transitionLicenseCase_(tw2.license_id,'APPROVAL_REQUESTED',{actor:'queue'});
+let tw2NoReason=false; try{ G.requestApproval_('BESSHI_REJECT',tw2.license_id,'','a@example.com'); }catch(e){ tw2NoReason=/理由/.test(String(e.message)); }
+ok(tw2NoReason,'承認しない申請は理由が必須');
+const tw2Req=G.requestApproval_('BESSHI_REJECT',tw2.license_id,'利用区分が合わない','a@example.com');
+G.decideApproval_(tw2Req.request_id,false,'区分は合っている','b@example.com');
+ok(rows(OPS,'License_Cases').find(k=>k.license_id===tw2.license_id).case_status==='APPROVAL_PENDING','却下すると申請だけ閉じ、案件は承認待ちのまま');
+const tw2Req2=G.requestApproval_('BESSHI_APPROVE',tw2.license_id,'再確認','a@example.com');
+let tw2Wd=false; try{ G.withdrawApproval_(tw2Req2.request_id,'b@example.com'); }catch(e){ tw2Wd=/本人だけ/.test(String(e.message)); }
+G.withdrawApproval_(tw2Req2.request_id,'a@example.com');
+ok(tw2Wd&&rows(OPS,'Approval_Requests').find(r=>r.request_id===tw2Req2.request_id).status==='WITHDRAWN','取り下げは申請した本人だけ');
+const tw2Req3=G.requestApproval_('BESSHI_REJECT',tw2.license_id,'原作の権利者が未確定','a@example.com');
+G.decideApproval_(tw2Req3.request_id,true,'了解','b@example.com');
+ok(rows(OPS,'License_Cases').find(k=>k.license_id===tw2.license_id).case_status==='CANCELLED','承認しない申請が承認されると申込は取消');
 
 console.log('\nSTAGE2 RESULT: '+pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);

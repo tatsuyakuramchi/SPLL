@@ -104,6 +104,8 @@ const SCHEMA_OPS = {
   Distributions:        ['distribution_id','license_id','payment_id','source','work_id','partner_id','partner_name','share_count','share_total','base_kind','base_amount','amount','rounding_adjust','period_label','status','created_at'],
   // 料金表の版（料金表を保存するたびに版を作り、その時点の全行を固定する。案件は申込時の版を持つ）
   Fee_Schedule_Versions:['version','rows_json','rows_hash','published_at','published_by'],
+  // 承認の操作（申請 → 別の担当者が承認）。個別契約（別紙）の承認・承認しない（53_admin_approvals）
+  Approval_Requests:    ['request_id','license_id','kind','note','requested_by','requested_at','status','decided_by','decided_at','decision_note'],
   // パートナー一覧の版（利用許諾契約書 第2条第8項：版と掲載期間を記録）
   Partner_List_Versions:['version','partners_json','published_at','published_by','effective_from','effective_to'],
   Schema_Versions:      ['schema_name','version','applied_at','applied_by','checksum'],
@@ -261,7 +263,7 @@ function setup_seedSamples_(){
 }
 
 // ---- スキーマ移行（修正設計書v2 V2-003）----
-const SCHEMA_VERSION = 16;  // v16: 原作の共同権利（Works_Master.rights_shares）と分配の取消、利用許諾契約の確認待ち（Agreements.duplicate_of・review_reason）、料金表の版（Fee_Schedule_Versions）、許諾の効力発生日（License_Cases.license_effective_at）。v15: v15: 利用許諾料の分配（Distributions、License_Works の権利者スナップショット）。v14: v14: 二次創作物の名称（License_Cases・Apply_Queue の creation_title）、専用ページのリンクの再送（Link_Requests）。v13: v13: 利用許諾契約 v5.0（Agreements・Apply_Queue・Payments・Payment_Imports・Partner_List_Versions、License_Cases の別紙・支払い列、Fee_Schedule.payment_timing、Access_Tokens.agreement_no）。v12: v12: Badge_Jobs.cert_id（バッジは認証からだけ作る）。v11: 業務テーブルへ license_id（RP-002：SPLL番号を主キーへ）。v10: 申込の契約書経路（template_route）。v9: 案内メールの自動送信（通知の送信状態）。v8: 連絡先メール。v7: 大容量提出
+const SCHEMA_VERSION = 17;  // v17: 承認の申請（Approval_Requests）。v16: v16: 原作の共同権利（Works_Master.rights_shares）と分配の取消、利用許諾契約の確認待ち（Agreements.duplicate_of・review_reason）、料金表の版（Fee_Schedule_Versions）、許諾の効力発生日（License_Cases.license_effective_at）。v15: v15: 利用許諾料の分配（Distributions、License_Works の権利者スナップショット）。v14: v14: 二次創作物の名称（License_Cases・Apply_Queue の creation_title）、専用ページのリンクの再送（Link_Requests）。v13: v13: 利用許諾契約 v5.0（Agreements・Apply_Queue・Payments・Payment_Imports・Partner_List_Versions、License_Cases の別紙・支払い列、Fee_Schedule.payment_timing、Access_Tokens.agreement_no）。v12: v12: Badge_Jobs.cert_id（バッジは認証からだけ作る）。v11: 業務テーブルへ license_id（RP-002：SPLL番号を主キーへ）。v10: 申込の契約書経路（template_route）。v9: 案内メールの自動送信（通知の送信状態）。v8: 連絡先メール。v7: 大容量提出
 
 /**
  * 既存スプレッドシートへ不足シート・不足列を追加する（既存列の削除・並び替えはしない）。

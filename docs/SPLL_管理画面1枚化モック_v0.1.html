@@ -378,10 +378,11 @@ function switches(c){
   else if(c.ct==='SIGNED') sendWhy = '別紙は本契約に追加済みです';
   else if(!['APPROVAL_PENDING','MANUAL_REVIEW'].includes(c.cs)) sendWhy = `現在地「${CS[c.cs].l}」では承認できません`;
   else if(ag!=='ACTIVE') sendWhy = '利用許諾契約が有効ではありません';
-  L.push({key:'send',grp:'contract',t:'申込を承認して別紙を送る',d:'申込の内容（二次創作物・原作・利用区分・金額）を別紙＋請求書のプレビューで確かめて承認する。承認したときだけ別紙を作って CloudSign で送る（自動では作らない）',kind:'button',role:'OPERATIONS',
+  else if(c.req) sendWhy = '申請中です（下の「承認待ちの申請」を別の担当者が承認・却下します）';
+  L.push({key:'send',grp:'contract',t:'申込を承認して別紙を送る',d:'担当者Aが別紙＋請求書のプレビューで申込の内容（二次創作物・原作・利用区分・金額）を確かめて申請し、A以外の担当者Bが承認したときだけ別紙を作って CloudSign で送る（自動では作らない）',kind:'button',role:'OPERATIONS',appr:true,
     why: sendWhy, extra:'preview'});
-  L.push({key:'reject',grp:'contract',t:'承認しない（差し戻し）',d:'理由を添えてクリエーターへ知らせ、申込を取り消す',kind:'button',role:'OPERATIONS',danger:true,
-    why: ['APPROVAL_PENDING','MANUAL_REVIEW','APPROVED'].includes(c.cs) ? '' : '承認待ちの申込だけが対象です'});
+  L.push({key:'reject',grp:'contract',t:'承認しない（差し戻し）',d:'担当者Aが理由をつけて申請し、別の担当者Bが承認すると、理由を添えてクリエーターへ知らせ、申込を取り消す',kind:'button',role:'OPERATIONS',danger:true,appr:true,
+    why: !['APPROVAL_PENDING','MANUAL_REVIEW','APPROVED'].includes(c.cs) ? '承認待ちの申込だけが対象です' : (c.req ? '申請中です' : '')});
   // S2 条件確認
   L.push({key:'confirm',grp:'contract',t:'条件を確認して別紙を有効にする',d:'同意された別紙と台帳の食い違いを法務が確認した後に使う。支払方法に応じて入金待ち／提出待ちへ進む',kind:'button',role:'LEGAL_ADMIN',
     why: c.cs==='HOLD' ? '' : '条件不一致（HOLD）の案件だけが対象です'});
@@ -484,7 +485,7 @@ function swRow(s,c){
     const label = s.key==='fee' ? (s.on?'復帰を申請':'停止を申請') : '申請する';
     ctl = `<button type="button" class="btn" data-sw="${s.key}" ${off||c.req?'disabled':''}>${label}</button>`;
   }
-  else ctl = `<button type="button" class="btn${s.danger?' danger':(s.key==='send'?' primary':'')}" data-sw="${s.key}" ${off?'disabled':''}>${s.key==='send'?'承認して送信':(s.key==='reject'?'承認しない':'実行')}</button>`;
+  else ctl = `<button type="button" class="btn${s.danger?' danger':(s.key==='send'?' primary':'')}" data-sw="${s.key}" ${off?'disabled':''}>${s.key==='send'?'承認を申請':(s.key==='reject'?'承認しないを申請':'実行')}</button>`;
   const why = locked ? `<div class="why">${ROLE_LABEL[s.role]}の権限が必要です</div>` : (s.why ? `<div class="why">${esc(s.why)}</div>` : '');
   const pv = s.extra==='preview' ? `<div class="d"><button type="button" class="btn" data-preview="${c.id}" style="padding:3px 10px;font-size:12px">別紙プレビュー</button></div>` : '';
   return `<div class="sw${off?' off':''}${locked?' locked':''}"><div class="t">${esc(s.t)}${tags}</div>${ctl}<div class="d">${esc(s.d)}</div>${why}${pv}</div>`;
@@ -492,13 +493,13 @@ function swRow(s,c){
 function pendingBlock(c){
   if(!c.req) return '';
   const r = c.req, by = USERS.find(u=>u.id===r.by);
-  const kinds = {revoke:'認証の失効',suspend:'一時停止',restore:'再有効化',terminate:'別紙の取消し',endmaster:'利用許諾契約の終了（全別紙）',fee_on:'入金未確認で停止',fee_off:'入金確認による復帰'};
-  const self = r.by===S.actor, canAppr = can('LEGAL_ADMIN') || (r.kind.startsWith('fee') && can('OPERATIONS'));
+  const kinds = {revoke:'認証の失効',suspend:'一時停止',restore:'再有効化',terminate:'別紙の取消し',endmaster:'利用許諾契約の終了（全別紙）',fee_on:'入金未確認で停止',fee_off:'入金確認による復帰',besshi_approve:'申込を承認して別紙を送る',besshi_reject:'申込を承認しない'};
+  const self = r.by===S.actor, canAppr = can('LEGAL_ADMIN') || ((r.kind.startsWith('fee')||r.kind.startsWith('besshi')) && can('OPERATIONS'));
   let acts = '';
   if(self) acts = `<span class="muted">申請者本人は承認できません。別の担当者に切り替えて確認してください（右上「操作者」）</span><button class="btn" type="button" data-req="withdraw">取り下げ</button>`;
   else if(canAppr) acts = `<button class="btn primary" type="button" data-req="approve">承認</button><button class="btn" type="button" data-req="reject">却下</button>`;
   else acts = `<span class="muted">承認には法務の権限が必要です</span>`;
-  return `<div class="sec"><h3>承認待ちの申請</h3><div class="pend"><div class="grow"><b>${kinds[r.kind]}</b>（理由：${esc(REASONS[r.reason]||r.reason)}）<br><span class="muted">${esc(r.text)}／申請：${esc(by.name)}・${r.at}</span></div>${acts}</div></div>`;
+  return `<div class="sec"><h3>承認待ちの申請</h3><div class="pend"><div class="grow"><b>${kinds[r.kind]}</b>${r.reason?'（理由：'+esc(REASONS[r.reason]||r.reason)+'）':''}<br><span class="muted">${esc(r.text)}／申請：${esc(by.name)}・${r.at}</span></div>${acts}</div></div>`;
 }
 function renderDetail(){
   const el = $('#detail');
@@ -599,6 +600,8 @@ function applyRequest(c){
     });
   }
   else if(r.kind==='fee_on'){ c.ce='SUSPENDED'; c.reason='FEE_PAYMENT_UNCONFIRMED'; if(c.cs==='CERTIFIED') c.cs='SUSPENDED'; log(c,`入金未確認で停止（承認：${ap}）`); }
+  else if(r.kind==='besshi_approve'){ APPLY.send(c); log(c,`（申請：${USERS.find(u=>u.id===r.by).name}／承認：${ap}）`); }
+  else if(r.kind==='besshi_reject'){ APPLY.reject(c,{text:r.text}); log(c,`（申請：${USERS.find(u=>u.id===r.by).name}／承認：${ap}）`); }
   else if(r.kind==='fee_off'){ c.ce='ACTIVE'; c.reason=''; returnFromCert(c); log(c,`入金確認で復帰（承認：${ap}）`); }
   c.req = null;
 }
@@ -626,7 +629,7 @@ function onSwitch(key,val){
   if(!s || s.why || !can(s.role)) return;
   const run = f => { const m = APPLY[key](c,Object.assign({v:val},f)); render(); toast(m); };
   if(key==='send') return openPreview(c,{send:true});
-  if(key==='reject') return dialog({title:'承認しない（差し戻し）',body:`${c.id} の申込を承認せず、取り消します。理由はクリエーターへメールで知らせます。`,input:'承認しない理由',required:true,ok:'承認しない',danger:true,done:run});
+  if(key==='reject') return dialog({title:'「承認しない」を申請する',body:`${c.id} の申込を承認せず取り消すことを申請します。別の担当者が承認した時点で取り消し、理由をクリエーターへメールで知らせます。`,input:'承認しない理由',required:true,ok:'申請する',danger:true,done:f=>{ c.req={kind:'besshi_reject',reason:'',text:f.text,by:S.actor,at:now()}; log(c,'申請：承認しない — '+f.text); render(); toast('申請しました。別の担当者の承認待ちです'); }});
   if(key==='confirm') return dialog({title:'条件を確認して別紙を有効にする',body:`${c.id} を${c.pay==='PREPAID'?'入金待ち':'提出待ち'}へ進めます。確認した内容を残してください。`,input:'確認メモ',required:true,ok:'有効にする',done:run});
   if(key==='review'){
     if(val==='CLEARED') return dialog({title:'審査を承認する',body:'承認すると認証を発行し、バッジ生成ジョブを登録します。審査完了のメールが送られます。',input:'審査コメント（任意）',ok:'承認する',done:run});
@@ -683,10 +686,10 @@ function openPreview(c,opt){
     L.querySelectorAll('[data-n]').forEach(b=>b.setAttribute('aria-pressed', String(+b.dataset.n===P.n)));
   };
   const L = $('#layer');
-  const canSend = P.send && ['APPROVAL_PENDING','MANUAL_REVIEW'].includes(c.cs) && can('OPERATIONS');
+  const canSend = P.send && ['APPROVAL_PENDING','MANUAL_REVIEW'].includes(c.cs) && !c.req && can('OPERATIONS');
   L.innerHTML = `<div class="pv" role="dialog" aria-modal="true" aria-labelledby="pvT">
     <div class="ptop"><h2 id="pvT">別紙（許諾作品通知書）プレビュー</h2><span class="mono muted">${c.id}</span><span id="pvStat" class="muted"></span>
-      <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">${canSend?'<button class="btn primary" type="button" id="pvSend">この内容で承認して CloudSign へ送信</button>':''}<button class="btn" type="button" id="pvClose">閉じる</button></span></div>
+      <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">${canSend?'<button class="btn primary" type="button" id="pvSend">この内容で承認を申請する</button>':''}<button class="btn" type="button" id="pvClose">閉じる</button></span></div>
     <div class="pbody"><div class="pages"></div>
       <div class="side">
         <div><b>作品数を変えて試す</b><div class="seg" style="margin-top:6px"><button type="button" data-n="0">実データ</button><button type="button" data-n="12">12</button><button type="button" data-n="40">40</button><button type="button" data-n="100">100</button></div>
@@ -694,7 +697,7 @@ function openPreview(c,opt){
         <div><b>許諾が有効になるまで</b><div class="flow" style="margin-top:6px">
           <div><b>0</b>利用許諾契約は formrun → CloudSign で締結済み</div>
           <div><b>1</b>専用ページ（トークン式）で作品を選んで申込 → 承認待ち</div>
-          <div><b>1'</b>事務局がこの画面で確認して承認</div>
+          <div><b>1'</b>担当者Aが確認して申請 → 別の担当者Bが承認</div>
           <div><b>2</b>台帳の条件 → 別紙PDF（契約番号入り）</div>
           <div><b>3</b>CloudSign API で送信 → 同意で本契約に追加</div>
           <div><b>4</b>前払い：入金CSVで確認 → 有効／後払い：すぐ有効</div>
@@ -703,7 +706,7 @@ function openPreview(c,opt){
       </div></div></div>`;
   L.querySelectorAll('[data-n]').forEach(b=>b.onclick=()=>{ P.n=+b.dataset.n; draw(); });
   $('#pvClose').onclick = () => L.innerHTML='';
-  if($('#pvSend')) $('#pvSend').onclick = () => { L.innerHTML=''; const m=APPLY.send(c); render(); toast(m); };
+  if($('#pvSend')) $('#pvSend').onclick = () => { L.innerHTML=''; c.req={kind:'besshi_approve',reason:'',text:'別紙・請求書のプレビューで内容を確認',by:S.actor,at:now()}; log(c,'申請：申込を承認して別紙を送る'); render(); toast('申請しました。別の担当者が承認すると別紙を送ります'); };
   draw(); $('#pvClose').focus();
 }
 
@@ -829,7 +832,7 @@ document.addEventListener('click', e => {
   if(t.dataset.preview){ openPreview(CASES.find(c=>c.id===t.dataset.preview)); return; }
   if(t.dataset.req){
     const c = CASES.find(x=>x.id===S.sel);
-    if(t.dataset.req==='approve'){ applyRequest(c); render(); toast('承認しました。状態を切り替えました'); }
+    if(t.dataset.req==='approve'){ applyRequest(c); render(); toast(c.cs==='SIGNING'?'承認しました。別紙を CloudSign で送信し、同意待ちです':'承認しました。状態を切り替えました'); }
     else if(t.dataset.req==='reject'){ log(c,'申請を却下'); c.req=null; render(); toast('却下しました'); }
     else { log(c,'申請を取り下げ'); c.req=null; render(); toast('取り下げました'); }
     return;
